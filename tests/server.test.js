@@ -133,7 +133,8 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
 test('GET /api/instance?stage=<id> includes each field\'s example text from the stage\'s declared example instance', async () => {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    createInstance('design', 'my-initiative', { instancesDir })
+    // Pinned to design v2, whose stages declare `example: examples` (v3's name the bundled kiwi-cover-mutual instead, #193).
+    createInstance('design', 'my-initiative', { instancesDir, definitionVersion: 2 })
     // stage.example resolves within the same instancesDir as the instance being browsed — mirroring how every instance lives side by side under the repo's real instances/ root.
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
 

@@ -150,7 +150,8 @@ test('render-wasm-prepare then render-wasm-finish on a server-hosted instance ne
       const prep = await prepRes.json()
       assert.equal(prep.artefact, 'soap')
       // design v3 (#196): the document opens with its cover page, titled with the display name.
-      assert.match(prep.markdown, /^::: \{custom-style="Cover Classification"\}\nIN-CONFIDENCE\n:::\n\n::: \{custom-style="Title"\}\nKiwi Cover Mutual\n:::/)
+      // #301: the Word text opens with the gantry-* properties, which carry no commit for a server workspace.
+      assert.match(prep.markdown, /^---\ngantry-instance: "examples"\n(?:gantry-(?!commit)[a-z-]+: .*\n)+---\n\n::: \{custom-style="Cover Classification"\}\nIN-CONFIDENCE\n:::\n\n::: \{custom-style="Title"\}\nKiwi Cover Mutual\n:::/)
       assert.match(prep.markdown, /^## Document Control|>Document Control</m)
       assert.ok(prep.referenceDocBase64, 'the v2 reference doc is handed to the browser for styling')
       assert.match(prep.docxPath, /\.docx$/)

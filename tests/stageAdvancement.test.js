@@ -87,6 +87,7 @@ test('throws, and writes nothing, once the instance is already at its definition
 
     fillStageModules(instancesDir, 'my-initiative', [
       'architecture',
+      'key-decisions', // #308: design v3's Key decisions replace architecture.design-decisions
       'integration',
       'data',
       'nfrs',
@@ -108,6 +109,7 @@ test('throws, and writes nothing, once the instance is already at its definition
     // recovery-plan / data-security-controls plus as-built-notes.
     fillStageModules(instancesDir, 'my-initiative', [
       'glossary',
+      'key-decisions',
       'introduction',
       'as-built-notes',
       'recovery-plan',

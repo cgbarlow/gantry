@@ -21,9 +21,16 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { useLocation } from 'preact-iso'
 import { reorder } from '../lib/reorder.js'
+import { pruneStageReadOnlyModules, withModuleReadOnly } from '../lib/readOnlyModules.js'
 import { TARGET_SIZES, targetSizeLabel, withFieldTargetWords } from '../lib/targetSize.js'
 import { definitionInstanceSettings } from '../lib/instanceSettings.js'
 import { InstanceSettingsSummary, InstanceSettingsEditor } from '../lib/instanceSettingsView.js'
+import { listStandardModules, newMountSettings } from '../lib/standardModules.js'
+import { KeyDecisionsMountSettings } from '../lib/keyDecisionsMountView.js'
+import { KEY_DECISIONS_ID } from '../lib/keyDecisions.js'
+import { InterviewInstructions } from '../lib/interviewInstructionsView.js'
+import { InterviewRules } from '../lib/interviewRulesView.js'
+import { interviewText } from '../lib/interviewInstructions.js'
 import {
   getWorkspaceHandle,
   ensurePermission,
@@ -96,6 +103,13 @@ function splitIds(text) {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
+}
+
+// #171: every Stage's read-only-modules brought back in line with its modules; the same object back
+// when nothing needed dropping.
+function pruneStructureReadOnly(structure) {
+  const stages = structure.stages.map(pruneStageReadOnlyModules)
+  return stages.some((s, i) => s !== structure.stages[i]) ? { ...structure, stages } : structure
 }
 
 async function knownLibraryIds() {
@@ -304,10 +318,17 @@ function ModuleEditor({ mod, readOnly, onChange, onRemove }) {
         ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${onRemove}>Remove module</button>`}
       </div>
       <input class="wizard-input" type="text" value=${mod.purpose ?? ''} placeholder="Purpose" readOnly=${readOnly} onInput=${(e) => onChange({ ...mod, purpose: e.currentTarget.value })} />
+      <${InterviewInstructions} level="Module" editable=${!readOnly} value=${mod.interview} onChange=${(text) => onChange(withInterview(mod, text))} />
       ${mod.fields.map((field, i) => html`<${FieldRow} key=${i} field=${field} readOnly=${readOnly} onChange=${(f) => updateField(i, f)} onRemove=${() => removeField(i)} />`)}
       ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${addField}>+ Add field</button>`}
     </div>
   `
+}
+
+// #282 (ADR-0062): `element` with its Interview instructions set to `text` — cleared text drops the key.
+function withInterview(element, text) {
+  const { interview: _dropped, ...rest } = element
+  return text === '' ? rest : { ...rest, interview: text }
 }
 
 function StageEditor({ stage, readOnly, onChange, onRemove }) {
@@ -323,6 +344,7 @@ function StageEditor({ stage, readOnly, onChange, onRemove }) {
         ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${onRemove}>Remove stage</button>`}
       </div>
       <input class="wizard-input" type="text" value=${stage.purpose ?? ''} placeholder="Purpose" readOnly=${readOnly} onInput=${(e) => onChange({ ...stage, purpose: e.currentTarget.value })} />
+      <${InterviewInstructions} level="Stage" editable=${!readOnly} value=${stage.interview} onChange=${(text) => onChange(withInterview(stage, text))} />
       <label class="field-label">Modules (comma-separated ids)</label>
       <input
         class="wizard-input"
@@ -330,7 +352,33 @@ function StageEditor({ stage, readOnly, onChange, onRemove }) {
         value=${(stage.modules ?? []).join(', ')}
         readOnly=${readOnly}
         onInput=${(e) => onChange({ ...stage, modules: splitIds(e.currentTarget.value) })}
+        onBlur=${() => {
+          // #171: drop read-only entries for Modules taken off the Stage — on blur, not per keystroke,
+          // so a half-typed id doesn't lose its entry.
+          const pruned = pruneStageReadOnlyModules(stage)
+          if (pruned !== stage) onChange(pruned)
+        }}
       />
+      ${(stage.modules ?? []).length
+        ? html`
+            <div class="local-def-read-only-modules">
+              ${stage.modules.map(
+                (moduleId) => html`
+                  <label key=${moduleId} class="defn-read-only-toggle" title="Mounted so this stage's documents and gate can use it, but edited at an earlier stage">
+                    <input
+                      type="checkbox"
+                      aria-label=${`Read-only at this stage: ${moduleId}`}
+                      checked=${(stage.readOnlyModules ?? []).includes(moduleId)}
+                      disabled=${readOnly}
+                      onChange=${(e) => onChange(withModuleReadOnly(stage, moduleId, e.currentTarget.checked))}
+                    />
+                    ${moduleId} read-only
+                  </label>
+                `
+              )}
+            </div>
+          `
+        : null}
     </div>
   `
 }
@@ -545,6 +593,16 @@ function ArtefactEditor({ handle, definitionId, version, artefact, modules, gate
         }} />
         Number and caption diagrams ("Diagram N. …") in the Word document
       </label>
+      <label class="field-label defn-source-appendix">
+        <input type="checkbox" checked=${artefact.sourceAppendix === true} disabled=${readOnly} onChange=${(e) => {
+          // #281: absent means no Sources list.
+          const next = { ...artefact }
+          if (e.currentTarget.checked) next.sourceAppendix = true
+          else delete next.sourceAppendix
+          onChange(next)
+        }} />
+        End the document with a list of the Source documents it cites
+      </label>
       <button type="button" class="btn small ghost" onClick=${() => setExpanded(!expanded)}>${expanded ? 'Hide template' : 'Edit template'}</button>
       ${expanded ? html`<${ArtefactTemplateEditor} handle=${handle} definitionId=${definitionId} version=${version} artefact=${artefact} readOnly=${readOnly} onReferenceDocxSaved=${onReferenceDocxSaved} />` : null}
     </div>
@@ -599,7 +657,9 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
     setSaveStatus('saving')
     setSaveError(null)
     try {
-      await writeLocalDefinitionStructure(handle, definitionId, version, structure)
+      const tidy = pruneStructureReadOnly(structure)
+      if (tidy !== structure) setStructure(tidy)
+      await writeLocalDefinitionStructure(handle, definitionId, version, tidy)
       setSaveStatus('saved')
     } catch (err) {
       setSaveStatus('error')
@@ -611,13 +671,15 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
     setPublishBusy(true)
     setPublishError(null)
     try {
-      const result = await validateStructure(structure)
+      // #171: a read-only entry left behind by a Module taken off a Stage would block Publish.
+      const tidy = pruneStructureReadOnly(structure)
+      const result = await validateStructure(tidy)
       if ((result.problems ?? []).length > 0) {
         setProblems(result.problems)
         setPublishError('This definition still has unresolved problems — fix them before publishing.')
         return
       }
-      const published = { ...structure, status: 'published' }
+      const published = { ...tidy, status: 'published' }
       await writeLocalDefinitionStructure(handle, definitionId, version, published)
       setStructure(published)
     } catch (err) {
@@ -694,6 +756,97 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
         ${readOnly ? null : html`<button type="button" class="btn small ghost" onClick=${addStage}>+ Add stage</button>`}
       </section>
 
+      <section class="local-def-standard-modules" data-testid="local-standard-modules">
+        <h2>Standard modules</h2>
+        <p class="guidance">
+          Modules Gantry provides, with a fixed shape and a version. Mount one here, then list its id in a Stage's
+          modules. You can add guidance and interview instructions; you cannot change its Fields.
+        </p>
+        ${(structure.standardModules ?? []).map((mount, i) => {
+          const entry = listStandardModules().find((m) => m.id === mount.id)
+          return html`
+            <div key=${mount.id} class="local-def-standard-module">
+              <strong>${entry?.title ?? mount.id}</strong> <span class="stamp small review">Gantry-provided</span>
+              <label class="field-label">Version</label>
+              <select
+                class="wizard-input"
+                disabled=${readOnly}
+                aria-label=${`Version of ${mount.id}`}
+                onChange=${(e) => {
+                  const standardModules = structure.standardModules.slice()
+                  standardModules[i] = { ...mount, version: Number(e.currentTarget.value) }
+                  update({ standardModules })
+                }}
+              >
+                ${(entry?.versions ?? []).map((v) => html`<option value=${String(v.version)} selected=${v.version === mount.version}>Version ${v.version}</option>`)}
+              </select>
+              ${mount.id === KEY_DECISIONS_ID
+                ? html`<${KeyDecisionsMountSettings}
+                    mount=${mount}
+                    editable=${!readOnly}
+                    onChange=${(change) => {
+                      const standardModules = structure.standardModules.slice()
+                      standardModules[i] = { ...mount, ...change }
+                      update({ standardModules })
+                    }}
+                  />`
+                : null}
+              <label class="field-label">Added guidance</label>
+              <textarea
+                class="wizard-input"
+                rows="2"
+                disabled=${readOnly}
+                value=${mount.guidance ?? ''}
+                onInput=${(e) => {
+                  const { guidance, ...rest } = mount
+                  const standardModules = structure.standardModules.slice()
+                  standardModules[i] = e.currentTarget.value === '' ? rest : { ...rest, guidance: e.currentTarget.value }
+                  update({ standardModules })
+                }}
+              ></textarea>
+              <label class="field-label">Interview instructions</label>
+              <textarea
+                class="wizard-input"
+                rows="2"
+                disabled=${readOnly}
+                value=${mount.interview ?? ''}
+                onInput=${(e) => {
+                  const { interview, ...rest } = mount
+                  const standardModules = structure.standardModules.slice()
+                  standardModules[i] = e.currentTarget.value === '' ? rest : { ...rest, interview: e.currentTarget.value }
+                  update({ standardModules })
+                }}
+              ></textarea>
+              ${readOnly
+                ? null
+                : html`<button
+                    type="button"
+                    class="btn small ghost"
+                    onClick=${() => update({ standardModules: structure.standardModules.filter((m) => m.id !== mount.id), stages: structure.stages.map((st) => ({ ...st, modules: st.modules.filter((id) => id !== mount.id) })) })}
+                  >Unmount ✕</button>`}
+            </div>
+          `
+        })}
+        ${readOnly
+          ? null
+          : html`<select
+              class="wizard-input"
+              aria-label="Mount a standard module"
+              onChange=${(e) => {
+                const id = e.currentTarget.value
+                if (!id) return
+                const entry = listStandardModules().find((m) => m.id === id)
+                update({ standardModules: [...(structure.standardModules ?? []), { id, version: entry.versions[entry.versions.length - 1].version, ...newMountSettings(id) }] })
+                e.currentTarget.value = ''
+              }}
+            >
+              <option value="">+ Mount a standard module…</option>
+              ${listStandardModules()
+                .filter((m) => !(structure.standardModules ?? []).some((x) => x.id === m.id) && !structure.modules.some((x) => x.id === m.id))
+                .map((m) => html`<option value=${m.id}>${m.title}</option>`)}
+            </select>`}
+      </section>
+
       <section>
         <h2>Modules</h2>
         ${structure.modules.map(
@@ -764,6 +917,25 @@ function EditDefinition({ handle, workspaceId, definitionId, version, initial })
               ${readOnly
                 ? html`<${InstanceSettingsSummary} settings=${instanceSettings} />`
                 : html`<${InstanceSettingsEditor} definition=${structure} onChange=${(next) => update({ instanceSettings: next })} />`}
+            </section>
+          `
+        : null}
+
+      ${interviewText(structure.interview) || !readOnly || problems.some((p) => p.type === 'invalid-interview' && /^Interview instructions on the Definition/.test(p.message))
+        ? html`
+            <section class="local-def-interview">
+              <h2>Interview instructions</h2>
+              <p class="guidance">
+                How the AI should run the interview for every Instance of this Definition. Stages and Modules can add their own.
+              </p>
+              <${InterviewInstructions}
+                level="Definition"
+                editable=${!readOnly}
+                value=${structure.interview}
+                problems=${problems.filter((p) => p.type === 'invalid-interview' && /^Interview instructions on the Definition/.test(p.message))}
+                onChange=${(text) => update(text === '' ? { interview: undefined } : { interview: text })}
+              />
+              <${InterviewRules} />
             </section>
           `
         : null}

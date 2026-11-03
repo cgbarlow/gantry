@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, utimesSync } from 'node:fs'
+import { mkdirSync, statSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerWorkspace } from '../lib/workspaceRegistry.js'
 import { registerInstance } from '../lib/instanceRegistry.js'
@@ -22,6 +22,9 @@ import {
   stageIdForNumber,
   backfillNumberRegistry,
   backfillWorkspaceNumbers,
+  resolveScopeAndSlugForRef,
+  mirrorScopeNumbers,
+  highestWorkspaceNumber,
 } from '../lib/numberRegistry.js'
 import { withScratchInstances } from './helpers/lifecycle.js'
 
@@ -277,4 +280,41 @@ test('backfillWorkspaceNumbers numbers every registered workspace in registry or
       return [getOrAssignWorkspaceNumber(b.id, { instancesDir }), getOrAssignWorkspaceNumber(a.id, { instancesDir })]
     })
   assert.deepEqual(await numbersAfterBoot(), [2, 1])
+})
+
+// #269 (docs/adr/0070): a workspace kept in a Blob container holds its own numbers; this server's registry is only a copy.
+test("mirrorScopeNumbers claims the container's workspace number when it is free and replaces the Instance numbers", async () => {
+  await withScratchInstances((instancesDir) => {
+    const first = mirrorScopeNumbers('blob-a', { workspaceNumber: 4, instanceNumbers: { one: 1, two: 2 } }, { instancesDir })
+    assert.deepEqual(first, { workspaceNumber: 4, claimed: true })
+    assert.equal(resolveWorkspaceNumber('blob-a', { instancesDir }), 4)
+    assert.equal(resolveSlugByNumber('blob-a', 2, { instancesDir }), 'two')
+    assert.equal(highestWorkspaceNumber({ instancesDir }), 4)
+
+    // An Instance that is gone from the container stops resolving; the others keep their numbers.
+    mirrorScopeNumbers('blob-a', { workspaceNumber: 4, instanceNumbers: { two: 2 } }, { instancesDir })
+    assert.equal(resolveSlugByNumber('blob-a', 1, { instancesDir }), undefined)
+    assert.equal(resolveSlugByNumber('blob-a', 2, { instancesDir }), 'two')
+  })
+})
+
+test("mirrorScopeNumbers gives a workspace the next free number when another workspace here already holds the container's", async () => {
+  await withScratchInstances((instancesDir) => {
+    assert.equal(getOrAssignWorkspaceNumber('disk-ws', { instancesDir }), 1)
+    const mirrored = mirrorScopeNumbers('blob-b', { workspaceNumber: 1, instanceNumbers: { a: 1 } }, { instancesDir })
+    assert.deepEqual(mirrored, { workspaceNumber: 2, claimed: false })
+    // Stable on the next read, and the disk workspace keeps its number.
+    assert.deepEqual(mirrorScopeNumbers('blob-b', { workspaceNumber: 1, instanceNumbers: { a: 1 } }, { instancesDir }), { workspaceNumber: 2, claimed: false })
+    assert.equal(resolveWorkspaceNumber('disk-ws', { instancesDir }), 1)
+    assert.deepEqual(resolveScopeAndSlugForRef('w2i1', { instancesDir }), { scopeKey: 'blob-b', slug: 'a' })
+  })
+})
+
+test('mirrorScopeNumbers writes nothing when nothing changed', async () => {
+  await withScratchInstances((instancesDir) => {
+    mirrorScopeNumbers('blob-c', { workspaceNumber: 3, instanceNumbers: { a: 1 } }, { instancesDir })
+    const before = statSync(join(instancesDir, 'number-registry.json')).mtimeMs
+    mirrorScopeNumbers('blob-c', { workspaceNumber: 3, instanceNumbers: { a: 1 } }, { instancesDir })
+    assert.equal(statSync(join(instancesDir, 'number-registry.json')).mtimeMs, before)
+  })
 })

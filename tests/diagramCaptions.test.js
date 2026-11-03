@@ -9,6 +9,8 @@ import { runLocalWorkspaceCompute } from '../lib/localWorkspace.js'
 import { findDefinitionProblemsInStructure, loadDefinition } from '../lib/definition.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { numberDiagrams } from '../web/lib/diagramCaptions.js'
+import { stripFieldTags } from '../lib/wordFieldTags.js'
+import { removeCitations, withoutCitations } from './helpers/uncite.js'
 
 // #195 (spec #192, ADR-0053): a Diagram caption. An author captions a Mermaid block on its fence
 // (```mermaid {caption="…"}) or an image with its alt text (![…](asset:id)), and the Word document
@@ -54,6 +56,7 @@ async function withExample(edit, fn, { version = OPTED_IN } = {}) {
     )
     cpSync(EXAMPLE, join(instancesDir, SLUG), { recursive: true })
     rmSync(join(instancesDir, SLUG, 'out'), { recursive: true, force: true })
+    removeCitations(join(instancesDir, SLUG))
     writeFileSync(join(instancesDir, SLUG, 'instance.yaml'), instanceYamlOn(version))
     for (const [moduleId, change] of Object.entries(edit)) {
       const path = join(instancesDir, SLUG, 'modules', `${moduleId}.md`)
@@ -180,8 +183,8 @@ test('an Artefact that does not opt in converts exactly as before: alt-texted im
   await withExample(
     { 'solution-definition': withUncaptionedDiagramAfterImages },
     ({ instancesDir, definitionsDir }) => {
-      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
-      assert.equal(result.docxMarkdown, result.markdown, 'the Word document is converted from the markdown as compiled')
+      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir, wordTags: false })
+      assert.equal(stripFieldTags(result.docxMarkdown), result.markdown, 'the Word document is converted from the markdown as compiled')
       const documentXml = unzip(result.docxPath, 'word/document.xml')
       assert.equal(documentXml, convertDirectly(result))
       assert.deepEqual(
@@ -198,8 +201,8 @@ test('the unmodified example SAD, with eight alt-texted images, converts exactly
   await withExample(
     {},
     ({ instancesDir, definitionsDir }) => {
-      const result = renderArtefact(SLUG, 'sad', { instancesDir, definitionsDir })
-      assert.equal(result.docxMarkdown, result.markdown)
+      const result = renderArtefact(SLUG, 'sad', { instancesDir, definitionsDir, wordTags: false })
+      assert.equal(stripFieldTags(result.docxMarkdown), result.markdown)
       const documentXml = unzip(result.docxPath, 'word/document.xml')
       assert.equal(documentXml, convertDirectly(result))
       assert.doesNotMatch(documentXml, /Diagram \d/)
@@ -216,7 +219,7 @@ test('an opted-in document with no captioned diagram renders exactly as before: 
         text.replace('![Take out insurance process](', '![](').replace('![Claims handling introductory view](', '!['),
     },
     ({ instancesDir, definitionsDir }) => {
-      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
+      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir, wordTags: false })
       const documentXml = unzip(result.docxPath, 'word/document.xml')
       assert.equal(documentXml, convertDirectly(result))
       assert.deepEqual(captionedFigures(documentXml), [])
@@ -227,7 +230,7 @@ test('an opted-in document with no captioned diagram renders exactly as before: 
 function exampleModuleFiles() {
   const moduleFiles = {}
   for (const name of readdirSync(join(EXAMPLE, 'modules'))) {
-    moduleFiles[name.replace(/\.md$/, '')] = readFileSync(join(EXAMPLE, 'modules', name), 'utf8')
+    moduleFiles[name.replace(/\.md$/, '')] = withoutCitations(readFileSync(join(EXAMPLE, 'modules', name), 'utf8'))
   }
   moduleFiles.background = withSecurityDiagram(moduleFiles.background)
   // A local workspace ships its own image bytes; this compile only needs the references.
@@ -260,7 +263,7 @@ test('a local workspace compile hands the browser the numbered markdown for the 
 
 test('a local workspace compile of an Artefact that does not opt in hands the browser the markdown as compiled', async () => {
   const compiled = await compileLocally(NOT_OPTED_IN)
-  assert.equal(compiled.docxMarkdown, compiled.markdown)
+  assert.equal(stripFieldTags(compiled.docxMarkdown), compiled.markdown)
 })
 
 test('a diagram-captions value that is not true or false is reported, by the server and in a Local Workspace', () => {

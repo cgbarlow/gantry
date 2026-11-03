@@ -1,0 +1,50 @@
+# <%~ it.instance.name || it.instance.slug %>: Offer Pack
+<%
+  /* v3 (#184): the offer as the candidate receives it, sent when the offer is extended and before
+     any contract. Kept from v2 but trimmed to what the candidate needs to decide; the Appointment
+     Confirmation follows once the contract is signed and payroll validates.
+     `document-control: false` (no Document Control or Review and sign-off tables) and
+     `satisfies-gate: false` (rendered at onboarding-approved but never counts toward it), so
+     `requires` is exactly what this prints plus the filename token.
+
+     Never add the offer status or negotiation (the organisation's record of the offer), contract,
+     payroll, selection or vetting content, or open questions here. `offer.terms` states the band
+     and position in band, never the figure: HR adds the figure to the copy they send, outside the
+     repository. The term shows only when filled: an internal "— not stated —" marker never goes
+     to a candidate. */
+%>
+For <%~ na(it.modules.selection['candidate-name']) %>
+
+# Your role
+
+## Role summary
+
+<%~ na(it.modules.role.summary) %>
+
+## Team and reporting line
+
+<%~ na(it.modules.role.team) %>
+
+## Key responsibilities
+
+<% (it.modules.role.responsibilities || []).forEach(function(item) { %>- <%~ item %>
+<% }) %>
+## Engagement type
+
+<%~ na(it.modules.engagement.type) %>
+<% if (it.modules.engagement.term) { %>
+## Term or expected duration
+
+<%~ it.modules.engagement.term %>
+<% } %>
+# Your offer
+
+## Offer terms
+
+<%~ na(it.modules.offer.terms) %>
+
+# What happens next
+
+Please let us know whether you accept this offer. Once you accept, we will send you an
+employment agreement to sign. That agreement sets out your terms in full, and nothing is final
+until it is signed.

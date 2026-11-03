@@ -67,13 +67,31 @@ export function createFakeAzureDevOpsServer({
   // `hasWriteAccess` calls. Defaults to `true`; pass `false` to simulate a PAT that reads fine but
   // cannot write.
   canWrite = true,
+  // #263: when an array, every request that actually serves a file's content (the JSON `content` of
+  // `includeContent=true`, or an octet-stream download) appends `{ path, via }` to it — how a test
+  // proves a "does it exist" check never downloaded the file.
+  contentLog,
 } = {}) {
+  // #263: contents pushed with `contentType: 'base64encoded'` — what real Azure DevOps stores as the
+  // decoded bytes. The octet-stream download below decodes exactly these (matched by content, so the
+  // marker survives branch clones and merges, which copy the store). Every other string is text.
+  const base64Contents = new Set()
+
   // One independent { store, objectId } per branch — a branch with no
   // entry here has never had a commit (mirrors the pre-#118 "commitCount
   // === 0" case for `main`): its ref doesn't exist yet and every path
   // under it 404s/lists empty, exactly like an unset repo did before any
   // branch other than `main` existed at all.
   const branches = new Map()
+  // objectId -> the file set a branch held when its tip was that commit (#273: reading a file "at a
+  // commit" via `versionDescriptor.versionType=commit`). Recorded on every `branches.set`, since a branch
+  // only ever moves forward by replacing its entry; a snapshot is a copy, so later pushes can't alter it.
+  const commitSnapshots = new Map()
+  const setBranch = branches.set.bind(branches)
+  branches.set = (name, branch) => {
+    if (branch?.objectId && branch.store) commitSnapshots.set(branch.objectId, new Map(branch.store))
+    return setBranch(name, branch)
+  }
   // A single counter shared across every branch, not one per branch —
   // real Azure DevOps commit ids are globally unique regardless of which
   // ref they're reachable from, and `failAfterPushes`'s "N real pushes"
@@ -152,6 +170,8 @@ export function createFakeAzureDevOpsServer({
       mergeStatus: pr.mergeStatus,
       lastMergeSourceCommit: pr.lastMergeSourceCommit,
       lastMergeTargetCommit: pr.lastMergeTargetCommit,
+      // Present once completed, as on the real API: the commit the merge landed on the target branch as.
+      ...(pr.lastMergeCommit ? { lastMergeCommit: pr.lastMergeCommit } : {}),
       completionOptions: pr.completionOptions,
       url: `${basePath}/pullRequests/${pr.pullRequestId}`,
     }
@@ -272,8 +292,9 @@ export function createFakeAzureDevOpsServer({
       // branch-aware — each branch has its own independent store below,
       // never one shared flat one.
       const branchName = url.searchParams.get('versionDescriptor.version') ?? 'main'
-      const branch = branches.get(branchName)
-      const store = branch?.store ?? new Map()
+      const versionType = url.searchParams.get('versionDescriptor.versionType') ?? 'branch'
+      const branch = versionType === 'commit' ? undefined : branches.get(branchName)
+      const store = versionType === 'commit' ? commitSnapshots.get(branchName) ?? new Map() : branch?.store ?? new Map()
 
       const scopePath = url.searchParams.get('scopePath')
       // A `scopePath` (+`recursionLevel`, always `OneLevel` for this fake's one real caller, lib/azureDevOpsClient.js's `listFolder`) requests a folder listing instead of a single file's content — the fake repo's flat `store` has no real notion of folders, so a folder's existence/children are derived from whatever file paths happen to start with `${scopePath}/`: the first remaining path segment is an immediate child, a folder itself if more segments follow it, a file otherwise. 404s (matching a real not-found path) if nothing in the store starts with that prefix, mirroring how a single-file `path` lookup 404s below.
@@ -343,7 +364,29 @@ export function createFakeAzureDevOpsServer({
       if (!store.has(path)) {
         return json(404, { message: `TF401174: Item ${path} not found (fake server).` })
       }
-      return json(200, { path, content: store.get(path), objectId: branch.objectId })
+      const stored = store.get(path)
+      // #263: a download (`$format=octetStream`) streams the stored blob's real bytes. A string pushed
+      // with `contentType: 'base64encoded'` is decoded; a Buffer seeded straight into `files` is served
+      // as is. Legacy fixtures seed an image's base64 text as a plain string under a png/jpg name (this
+      // fake's pre-#263 convention, which the old asset reads decoded by guessing) — decoded the same
+      // way here so those fixtures keep meaning "an image".
+      if (url.searchParams.get('$format')?.toLowerCase() === 'octetstream') {
+        let bytes
+        if (Buffer.isBuffer(stored)) bytes = stored
+        else if (base64Contents.has(stored)) bytes = Buffer.from(stored, 'base64')
+        else if (/\.(png|jpe?g)$/i.test(path) && /^[A-Za-z0-9+/=\s]+$/.test(stored) && stored.replace(/\s/g, '').length % 4 === 0) bytes = Buffer.from(stored, 'base64')
+        else bytes = Buffer.from(stored, 'utf8')
+        contentLog?.push({ path, via: 'download' })
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' })
+        res.end(bytes)
+        return
+      }
+      // Without `includeContent=true` the real Items API answers with the item's metadata alone.
+      if (url.searchParams.get('includeContent') !== 'true') {
+        return json(200, { path, isFolder: false, objectId: branch?.objectId ?? branchName })
+      }
+      contentLog?.push({ path, via: 'content' })
+      return json(200, { path, content: Buffer.isBuffer(stored) ? stored.toString('utf8') : stored, objectId: branch?.objectId ?? branchName })
     }
 
     if (req.method === 'GET' && pathname === `${basePath}/refs`) {
@@ -459,6 +502,7 @@ export function createFakeAzureDevOpsServer({
             store.delete(change.item.path)
           } else {
             store.set(change.item.path, change.newContent.content)
+            if (change.newContent.contentType === 'base64encoded') base64Contents.add(change.newContent.content)
           }
         }
       }
@@ -641,7 +685,10 @@ export function createFakeAzureDevOpsServer({
               const wsMatch = targetBranchName.match(/^gantry-workspace\/([^/]+)\//)
               if (wsMatch) scopePrefix = `/gantry-workspace/${wsMatch[1]}/`
               else if (sourceBranchName.match(/^gantry-workspace\/([^/]+)\//)) scopePrefix = `/gantry-workspace/${sourceBranchName.match(/^gantry-workspace\/([^/]+)\//)[1]}/`
-              const baseStore = targetBranch.baseStore ?? new Map()
+              // The merge base is where the branch that forked off was forked: the source for a stage branch merging into
+              // `main`, the target for `main` syncing into a stage branch. (#275: a later stage's Pull Request merges after
+              // `main` has moved on, with `instance.yaml` changed on both sides, which a real merge combines.)
+              const baseStore = (targetBranchName === 'main' ? sourceBranch.baseStore : targetBranch.baseStore) ?? new Map()
               const conflicts = []
               const allPaths = new Set()
               for (const k of sourceBranch.store.keys()) if (k.startsWith(scopePrefix)) allPaths.add(k)
@@ -685,7 +732,11 @@ export function createFakeAzureDevOpsServer({
         if (patch.completionOptions !== undefined) pr.completionOptions = patch.completionOptions
         if (patch.title !== undefined) pr.title = patch.title
         if (patch.description !== undefined) pr.description = patch.description
-        if (patch.status === 'completed' && pr.mergeStatus !== 'conflicts') pr.closedDate = new Date().toISOString()
+        if (patch.status === 'completed' && pr.mergeStatus !== 'conflicts') {
+          pr.closedDate = new Date().toISOString()
+          const mergedTarget = branches.get(pr.targetRefName.replace(/^refs\/heads\//, ''))
+          if (mergedTarget) pr.lastMergeCommit = { commitId: mergedTarget.objectId }
+        }
         if (pr.mergeStatus === 'conflicts') {
           return json(409, { message: 'TF401034: Merge conflicts', mergeStatus: 'conflicts' })
         }
@@ -740,12 +791,28 @@ export function createFakeAzureDevOpsServer({
         return json(200, {})
       }
 
+      // #299: threads are stored whole so a test can read back what the Owner wrote (and prove gantry wrote none). `author` on a comment names the
+      // Owner (the real API takes it from the credential); `threadContext` makes it an inline comment on a file.
+      if (subResource === 'threads' && req.method === 'GET') {
+        return json(200, { value: pr.threads ?? [], count: (pr.threads ?? []).length })
+      }
       if (subResource === 'threads' && req.method === 'POST') {
         let raw = ''
         for await (const chunk of req) raw += chunk
         const body = JSON.parse(raw)
         pr.comments ??= []
         pr.comments.push(...(body.comments ?? []))
+        pr.threads ??= []
+        const threadId = pr.threads.length + 1
+        const published = new Date(Date.now() + threadId).toISOString()
+        const thread = {
+          id: threadId,
+          status: body.status ?? 'active',
+          publishedDate: published,
+          ...(body.threadContext ? { threadContext: body.threadContext } : {}),
+          comments: (body.comments ?? []).map((c, i) => ({ id: i + 1, parentCommentId: c.parentCommentId ?? 0, content: c.content, commentType: c.commentType ?? 'text', publishedDate: published, author: c.author ?? { displayName: 'Fake Pusher' } })),
+        }
+        pr.threads.push(thread)
         return json(201, { id: pr.comments.length, comments: body.comments ?? [], status: body.status ?? 'active' })
       }
     }
@@ -911,7 +978,7 @@ export function createFakeAzureDevOpsServer({
  * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's testing decisions). Shared by `tests/azureDevOpsClient.test.js` and `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser, simulateMissingReviewStatusField, canWrite },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser, simulateMissingReviewStatusField, canWrite, contentLog },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -931,7 +998,13 @@ export function withFakeAzureDevOpsServer(
       connectionDataUser,
       simulateMissingReviewStatusField,
       canWrite,
+      contentLog,
     })
+    // #72: never close an idle keep-alive connection from this side. The gantry server under test
+    // calls this fake from the same process through fetch(), which pools sockets; on a starved CPU
+    // the default 5s idle timer fires before the client notices, and the next request reuses a
+    // socket that has just been closed (ECONNRESET / "other side closed" -> a spurious 500).
+    server.keepAliveTimeout = 0
     server.listen(0, async () => {
       const { port } = server.address()
       try {

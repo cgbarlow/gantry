@@ -199,6 +199,8 @@ gantry/
 │           │   ├── context.md
 │           │   └── solution-definition.md
 │           ├── assets/           # (WI260) local asset store — for a Workspace-backed instance the same dir lives as gantry-workspace/<slug>/assets/ in the repo on its Provider, sibling of modules/ and out/
+│           ├── reviews/          # (#302) Reviewed copies — Word documents that came back with comments, one <id>.docx each,
+│           │                     # listed in reviews/manifest.yaml; never cited, never edited by Gantry (docs/adr/0066)
 │           └── out/              # rendered artefacts (gitignored by default)
 ├── lib/                          # the engine: definition/instance loading, render, status, the web server
 │   ├── server.js                 # HTTP routes, incl. the work-item, workspace, stage-advancement/approval,
@@ -754,7 +756,18 @@ Gate access at the network layer (VPN, private network, reverse proxy with SSO, 
 
 ### Persistence
 
-The container's filesystem is ephemeral — use a persistent volume for instance data:
+A container host's disk is wiped on every redeploy, so something outside it has to hold your workspaces. There are three ways, and you can combine them:
+
+| | Persistent volume | Blob container | Bootstrap remote workspaces |
+| --- | --- | --- | --- |
+| **What survives a redeploy** | Everything in the data folder: every server workspace stored on disk, the registries, library repo settings and their cache | The server workspaces stored in the container: their Instances, assets, Definitions and short numbers. Not the server's own folder (library repo settings and cache, the registries), which a volume or a restart rebuilds | Only the *registration* of each remote workspace you declare. The content lives in the Provider's repo anyway |
+| **Can several servers run at once** | No. A volume attaches to one server. On Render that rules out zero-downtime deploys | Yes. Servers pointed at the same container share its workspaces and their short numbers, so a zero-downtime deploy is fine | Yes. Each server registers the same workspaces from the same variable |
+| **What each needs** | A volume and `GANTRY_WORKSPACES_DIR` pointing at it | An Azure storage account, a container, and `GANTRY_BLOB_CONTAINERS` (see [Blob containers](#blob-containers)) | A Provider repo per workspace, and `GANTRY_BOOTSTRAP_WORKSPACES`; each person brings their own token (or the operator shares one) |
+| **Use it for** | Workspaces on the server's disk, and a server that runs one copy | Workspaces made in the wizard's "New server workspace" with **Store in** set to a Blob container | Workspaces whose Instances you want in Git with branches and Pull Requests |
+
+A container keeps only the workspaces in it, so library repo settings (`docs/adr/0036-*`) still need a volume to survive a redeploy; without one you re-add them in Global Settings, or declare them in the environment.
+
+**A persistent volume.** The container's filesystem is ephemeral — use a persistent volume for instance data:
 
 ```bash
 docker run -d \
@@ -835,6 +848,92 @@ A malformed `GANTRY_SHARED_WORKSPACE_PATS` — invalid JSON, not a JSON object, 
 
 **Upgrading an existing deployment:** this env var name changed (see `CHANGELOG.md`) — rename it in your deployment config, or it will simply be ignored and that workspace stays unshared (an unset value is a no-op, not an error, so a stale old name fails silently rather than loudly).
 
+### Blob containers
+
+**Optionally, let server workspaces be stored in Azure Blob Storage instead of on the server's disk.** Set `GANTRY_BLOB_CONTAINERS` (`docs/adr/0070-a-server-workspace-can-be-stored-in-an-operator-declared-blob-container.md`) to a JSON array with one entry per container. Each entry gives the container's `name`, its `url` (the container itself, with no query string), and the `credentialType` Gantry uses to reach it. Any secret goes in a *separate* environment variable, and the entry names that variable in `secretEnv`:
+
+| `credentialType` | Other fields | What `secretEnv` holds | What Gantry builds |
+| --- | --- | --- | --- |
+| `connection-string` | `secretEnv` | the storage account's connection string | the account's shared key |
+| `sas` | `secretEnv` | a SAS token for the container (needs read, add, create, write, delete and list) | that token, nothing else |
+| `managed-identity` | optional `clientId` for a user-assigned identity | (no secret) | `ManagedIdentityCredential` |
+| `service-principal` | `tenantId`, `clientId`, `secretEnv` | the service principal's client secret | `ClientSecretCredential` |
+
+Gantry builds exactly the declared credential type and never `DefaultAzureCredential`, so what authenticates a request never depends on whatever else is present in the process. Render has no managed identity, so there use a service principal, a connection string or a SAS; Azure App Service and Container Apps can use managed identity (grant it **Storage Blob Data Contributor** on the container).
+
+```bash
+docker run -d \
+  --name gantry \
+  -p 3000:3000 \
+  -e GANTRY_BLOB_CONTAINERS='[{"name":"main","url":"https://myaccount.blob.core.windows.net/gantry","credentialType":"service-principal","tenantId":"<tenant-id>","clientId":"<client-id>","secretEnv":"GANTRY_BLOB_MAIN_SECRET"}]' \
+  -e GANTRY_BLOB_MAIN_SECRET='<client-secret>' \
+  --restart unless-stopped \
+  gantry
+```
+
+Unset, nothing changes. A malformed declaration, or a `secretEnv` variable that isn't set, fails startup with a single line naming the problem (the variable's name, never its value). Global Settings then lists each declared container read-only, with whether the server can reach it right now and why not if it can't; no credential is ever returned by an API response or shown on the page. This is a third server-held credential, after library repos (`GANTRY_LIBRARY_PAT_*`) and shared workspaces (`GANTRY_SHARED_WORKSPACE_PATS`): no architect holds it. The tests run against the Azurite emulator, and `@azure/storage-blob` stays at 12.32.x until Azurite accepts the newer service API versions.
+
+**Which credential suits which host**
+
+| Where Gantry runs | Use | Why |
+| --- | --- | --- |
+| Azure Container Apps | `managed-identity` | The app has an identity of its own and nothing to store or rotate. [Set one up](https://learn.microsoft.com/azure/container-apps/managed-identity) |
+| Azure App Service | `managed-identity` | The same. [Managed identities in App Service](https://learn.microsoft.com/azure/app-service/overview-managed-identity) |
+| Render | `service-principal` | Render has no managed identity. The client secret expires, so note its expiry date and rotate it |
+| Anywhere else: another cloud, your own server, a laptop | `service-principal`, or `sas` for a short trial | A `connection-string` gives the whole storage account to whoever holds it; prefer a narrower credential |
+| Azurite or a throwaway test | `connection-string` | Azurite's published key is not a secret |
+
+In every case the identity needs **Storage Blob Data Contributor** on the container, and nothing broader.
+
+**Azure Container Apps with a managed identity** (no secret anywhere):
+
+```bash
+# Give the app an identity, and let that identity use the container.
+az containerapp identity assign --name gantry --resource-group my-rg --system-assigned
+PRINCIPAL=$(az containerapp show --name gantry --resource-group my-rg --query identity.principalId -o tsv)
+az role assignment create --assignee "$PRINCIPAL" --role "Storage Blob Data Contributor" \
+  --scope "/subscriptions/<subscription-id>/resourceGroups/my-rg/providers/Microsoft.Storage/storageAccounts/myaccount/blobServices/default/containers/gantry"
+
+# Declare the container. A user-assigned identity adds "clientId":"<its client id>".
+az containerapp update --name gantry --resource-group my-rg \
+  --set-env-vars 'GANTRY_BLOB_CONTAINERS=[{"name":"main","url":"https://myaccount.blob.core.windows.net/gantry","credentialType":"managed-identity"}]'
+```
+
+**Render with a service principal.** Create the principal once, scoped to the container, then put its three values in the service's environment (Render's dashboard, or `render.yaml` with the secret marked `sync: false`):
+
+```bash
+az ad sp create-for-rbac --name gantry-blob --role "Storage Blob Data Contributor" \
+  --scopes "/subscriptions/<subscription-id>/resourceGroups/my-rg/providers/Microsoft.Storage/storageAccounts/myaccount/blobServices/default/containers/gantry"
+# prints appId (the clientId), password (the secret) and tenant
+```
+
+```
+GANTRY_BLOB_CONTAINERS=[{"name":"main","url":"https://myaccount.blob.core.windows.net/gantry","credentialType":"service-principal","tenantId":"<tenant>","clientId":"<appId>","secretEnv":"GANTRY_BLOB_MAIN_SECRET"}]
+GANTRY_BLOB_MAIN_SECRET=<password>
+```
+
+With the workspaces in the container, the Render service needs no persistent disk, so it can run more than one instance and deploy without downtime.
+
+**What is stored.** A workspace in a container is a folder with the layout a workspace has on disk: `workspace.json`, then one folder per Instance (`instance.yaml`, `modules/`, `assets/`, and `sources/`, `reviews/` and `interview/` when used) and the workspace's own `definitions/`. The container also holds two things of Gantry's own at its root: `.gantry/registry.json`, which keeps each workspace's and Instance's short number (`w2i3`), `.gantry/locks/`, the short locks a Save takes, and `.gantry/journal/`, the note a Save leaves of what it is changing while it runs. Gantry reads and writes the container directly and keeps no local copy, so a workspace made on one server shows on every server sharing the container, and a redeploy loses nothing. A Save is all-or-nothing: it holds a short lock on the Instance, keeps a note of what it is changing, and a file changed behind its back is refused rather than overwritten. If a server dies part-way through a Save, its lock runs out on its own (within 30 seconds) and the next read or Save of that Instance puts the stage back exactly as it was before that Save; nothing needs clearing by hand. Two servers saving at once are served one after the other, and the second is given the usual Field-by-Field check. A blob-stored workspace has no commits, branches or Pull Requests, and a render is handed to the browser rather than kept. The `gantry` command line works with workspaces on disk only; use the web UI or MCP for these.
+
+**When a container can't be reached**, its workspaces show on the dashboard as unavailable with the reason (the credential was rejected, the container doesn't exist, no answer within five seconds). Nothing in them is lost and the rest of Gantry carries on; they come back when the container does.
+
+**Back up with versioning and soft delete.** Turn on blob versioning and soft delete for blobs and containers on the storage account. Gantry doesn't use them and doesn't need them (it keeps no history, and Azurite has neither), but they are the way back from an accidental delete or an unwanted overwrite, made in Gantry or in Storage Explorer.
+
+**Copy a workspace in or out with azcopy.** The folder layout is the same on disk and in a container, so an operator moves a workspace by copying its folder. Gantry has no move button. A folder copied into a container is found as a **new workspace, with a new id and new short numbers**, whatever the folder held before; the original is untouched.
+
+```bash
+# In: a workspace folder from a server's disk (or your own copy of one) into the container.
+# The folder keeps its name, so ./risk-review becomes risk-review/ in the container.
+azcopy login
+azcopy copy './workspaces/risk-review' 'https://myaccount.blob.core.windows.net/gantry' --recursive
+
+# Out: the same folder back to a local directory.
+azcopy copy 'https://myaccount.blob.core.windows.net/gantry/risk-review' './restored' --recursive
+```
+
+`azcopy login` signs in with your own Azure identity (needing the same Storage Blob Data Contributor role); without it, add a SAS token to each URL (`...gantry?<sas>`). Azure Storage Explorer does the same by dragging a folder into the container or out of it. **Stop editing that workspace while you copy**: a Save that lands mid-copy leaves a copy that is a mixture of before and after. After copying in, the new workspace appears on the dashboard within a few seconds, with no restart.
+
 ### Port
 
 Inside the container Gantry always listens on `3000` (`EXPOSE 3000`, `CMD ["serve", "--port", "3000"]`). Map it to any host port with `-p`:
@@ -866,6 +965,12 @@ If that egress goes through a TLS-intercepting proxy, mount the corporate CA and
 # volumes:
 #   - /etc/ssl/certs/ca-certificates.crt:/certs/corporate-ca.pem:ro
 ```
+
+### AI Providers and the AI relay
+
+An architect's **AI Providers** (Anthropic, OpenAI, OpenRouter, Ollama, LM Studio, or any OpenAI-compatible service) are set up in their own browser, under Global Settings, and their keys stay there: the browser sends the key with each request, and `gantry serve` never stores or logs it (`docs/adr/0061-ai-providers-belong-to-the-browser.md`). Every AI call except a local model running on the architect's own computer goes through the server's relay, `POST /api/ai/relay`, which forwards it to the AI Provider's address and streams the answer back. It follows no redirects, forwards only `GET` and `POST` and a short list of headers, and needs no configuration, but it does need outbound HTTPS to whichever AI Providers your architects use (see **Outbound network**).
+
+**`GANTRY_AI_ALLOW_PRIVATE_URLS`** (off by default; set it to `1`, `true`, `yes` or `on`): by default the relay **refuses private and loopback addresses**, both an address written that way (`localhost`, `127.0.0.1`, `10.x.x.x`, `172.16-31.x.x`, `192.168.x.x`, `169.254.x.x`, `::1` and the like, plus names ending `.local`, `.internal` or `.lan`) and a public name that *resolves* to one. Otherwise a hosted Gantry could be pointed at its own internal network or a cloud metadata service. Set it only when an AI Provider genuinely lives on the server's own network, such as an Ollama or LM Studio the architects have registered as running on **The Gantry server**, and only on a deployment you trust every visitor to. It has no effect on an Ollama or LM Studio registered as running on **This computer**: the browser calls those directly, and the architect allows the Gantry page in `OLLAMA_ORIGINS` (Ollama) or the CORS setting (LM Studio).
 
 ### Health and restart
 

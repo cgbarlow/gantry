@@ -25,18 +25,6 @@ The diagram shows how business users and the solution sit inside the boundary, w
 - Claims Support Administrator — maintains routing rules
 - Internal Auditor — reads claims and audit records
 
-## Design decisions
-
-| AD | Decision | ADR |
-|----------|----------------------------------------------------------------------|------------|
-| AD01 | **Shared services, not point-to-point.** CIS and Claims InfoServ serve customer and claim data; applications don't hold copies. An ADR because the services are built for enterprise reuse. | ADRYYY |
-| AD02 | **Policy Data Management stays the system of record, exposed as services.** Four CICS transactions over MQ. An ADR because it sets the precedent for exposing the mainframe as services. | ADRYYY |
-| AD03 | **The CRM System orchestrates Handle Claim; Claims InfoServ owns claim state**, valuation, routing rules and the audit trail. | |
-| AD04 | **Payments go through the Financial Application, then the BIBIT gateway.** The CRM System never calls the gateway. | |
-| AD05 | **Documents are claim-indexed in the document management system**, and the scanning archive is retired. | |
-| AD06 | **Each increment is switchable** back to the manual step (principle P5). | |
-| AD07 | **No new platform** beyond the BIBIT gateway. | |
-
 ## Architectural risks
 
 - The MQ integration layer is the single path to policies, tested at 20 transactions a second against a design peak of 4 a second (capacity test CT-03); CIS caches policy lookups for 15 minutes (target assumption).

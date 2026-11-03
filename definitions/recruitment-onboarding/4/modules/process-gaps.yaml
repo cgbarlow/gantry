@@ -1,0 +1,28 @@
+id: process-gaps
+title: Process gaps
+purpose: >
+  Where this process fell short on this particular hire.
+
+  Mounted at every stage and required at none. A hire where the process held is a real and
+  common outcome, and forcing an entry would only produce invented ones. `gaps` can be written
+  at the stage where the gap happens, whichever stage that is, but is printed only in the Hire
+  Record. v4 split this out of v3's `open-questions` Module (#309), because Open questions is now
+  a Gantry-provided standard module with a fixed shape.
+interview: >
+  Ask about the process, not the people: a step with no owner, a handoff that needed chasing, a
+  delay nobody had budgeted for. Do not record who was at fault.
+
+fields:
+  - id: gaps
+    title: Process gaps
+    type: markdown
+    required: false
+    guidance: >
+      Where the process itself did not hold up on this hire: a step with no owner, a decision
+      with no defined path, a handoff that needed chasing, a delay nobody had budgeted for.
+      Write it at the stage where it happens.
+
+      This is deliberately about the process rather than the hire. The known weak points are
+      already documented — the manual credential issue, the payroll rework loop, the
+      undocumented role evaluation and advertising steps, the unresolved non-standard hardware
+      decision. Anything you hit that is not on that list is worth writing down here.

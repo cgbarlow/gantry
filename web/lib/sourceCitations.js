@@ -1,0 +1,137 @@
+// #281 (map #238, decided in #245): citing a **Source document** from module content, and the optional Sources appendix.
+//
+// A citation is an ordinary Markdown link whose address is `source:<id>`, the id being the fixed id in `sources/manifest.yaml`:
+//
+//     [Client brief, p. 4](source:client-brief)
+//
+// In the editor the link is clickable and opens the document (web/app.js's renderPreview). Word readers usually have no repo access, so the Word render prints it as plain "(Client brief, p. 4)" with no hyperlink. The exported `.md` keeps the link as written, as it keeps a diagram caption's syntax. Only a link is a citation: an image (`![…](source:…)`) is not, and neither is anything inside a code span or a fenced code block.
+//
+// An Artefact whose Definition sets `source-appendix: true` ends with a Sources list of the documents it cites: each with its title, original filename and upload date. A removed document is still listed, marked removed. With the key off (its default) there is no list.
+//
+// Pure (no DOM, no Node built-ins), so the server's compile step (lib/render.js), the Definition checks (lib/definition.js, web/lib/localStatus.js) and the browser (web/app.js) share one copy of the syntax, as web/lib/diagramCaptions.js does.
+
+const FENCE = /^ {0,3}(`{3,}|~{3,})/
+
+// Either a code span (kept as it is) or a citation. A code span's backtick run is matched with its own length, so ``a `b` c`` is one span. The link text may hold backslash escapes (`\]`) and may not span a line.
+const CITATION_OR_CODE = /(`+)(?:(?!\1)[\s\S])*?\1(?!`)|(?<!!)\[((?:[^\]\\\n]|\\.)*)\]\(source:([A-Za-z0-9][A-Za-z0-9_-]*)\)/g
+
+/** Runs `change(segment)` over the parts of `markdown` that are not fenced code blocks, and leaves the fenced blocks alone. */
+function mapOutsideFences(markdown, change) {
+  const lines = String(markdown ?? '').split('\n')
+  const out = []
+  let prose = []
+  let fence = null
+  const flush = () => {
+    if (prose.length) out.push(change(prose.join('\n')))
+    prose = []
+  }
+  for (const line of lines) {
+    const m = FENCE.exec(line)
+    if (fence) {
+      out.push(line)
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length && line.trim() === m[1]) fence = null
+    } else if (m) {
+      flush()
+      out.push(line)
+      fence = m[1]
+    } else {
+      prose.push(line)
+    }
+  }
+  flush()
+  return out.join('\n')
+}
+
+const unescapeText = (text) => text.replace(/\\(.)/g, '$1')
+
+function replaceCitations(markdown, replace) {
+  return mapOutsideFences(markdown, (segment) =>
+    segment.replace(CITATION_OR_CODE, (match, tick, text, id) => (tick ? match : replace({ match, text, id })))
+  )
+}
+
+/** Every citation in `markdown`, in order: `[{ id, text }]` with the link text as the author wrote it (escapes removed). */
+export function findSourceCitations(markdown) {
+  const found = []
+  replaceCitations(markdown, ({ match, text, id }) => {
+    found.push({ id, text: unescapeText(text) })
+    return match
+  })
+  return found
+}
+
+/** The distinct ids `markdown` cites, in the order they are first cited. */
+export function citedSourceIds(markdown) {
+  return [...new Set(findSourceCitations(markdown).map((c) => c.id))]
+}
+
+/**
+ * The text the Word document prints for a citation: the link text in parentheses, with no link. An empty link text falls back on `titleFor(id)` (the document's title), then on the id.
+ * `markdown` is returned unchanged where it holds no citation.
+ */
+export function sourceCitationsForWord(markdown, titleFor) {
+  return replaceCitations(markdown, ({ text, id }) => {
+    const label = text.trim() ? text.trim() : (titleFor?.(id) ?? id)
+    return `(${label})`
+  })
+}
+
+/** The citation to paste into a field for a document: `[Client brief](source:client-brief)`. */
+export function sourceCitationFor(entry) {
+  const title = String(entry?.title ?? entry?.id ?? '').replace(/([\\[\]])/g, '\\$1')
+  return `[${title}](source:${entry.id})`
+}
+
+/**
+ * `markdown` with every citation of document `fromId` pointing at `to` instead (#298, "re-cite"): `[Old brief, p. 4](source:old)` becomes
+ * `[New brief](source:new)`. The page or slide is dropped, because it belonged to the old document; the title is the new document's.
+ * Citations of other documents, code spans and fenced code are left as they are. Returns the text unchanged where it cites nothing of `fromId`.
+ */
+export function recitedMarkdown(markdown, fromId, to) {
+  return replaceCitations(markdown, ({ match, id }) => (id === fromId ? sourceCitationFor(to) : match))
+}
+
+// --- The Definition's `source-appendix` switch ----------------------------------------------------------------------
+
+/**
+ * The problem with an Artefact's `source-appendix:` switch, or `null`. A plain boolean, like `diagram-captions` (ADR-0053): anything else ("yes", 1) is reported rather than guessed at. The render honours only a real `true`, so a near-miss leaves the list out, as it always was. `value` is the key read under either spelling (camelCase in memory, kebab-case on disk).
+ *
+ * @param {string} artefactId
+ * @param {unknown} value
+ * @returns {{ type: string, message: string }|null}
+ */
+export function sourceAppendixProblem(artefactId, value) {
+  if (value === undefined || typeof value === 'boolean') return null
+  return {
+    type: 'invalid-source-appendix',
+    message: `Artefact "${artefactId}" sets "source-appendix" to ${JSON.stringify(value)} — it must be true or false`,
+  }
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** "4 Mar 2026" from an ISO time, in UTC so the same date prints wherever the render runs; '' for anything unreadable. */
+function appendixDate(iso) {
+  const date = new Date(iso ?? '')
+  return Number.isNaN(date.getTime()) ? '' : `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`
+}
+
+const cell = (text) => String(text ?? '').replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').trim()
+
+export const SOURCE_APPENDIX_HEADING = 'Sources'
+
+/**
+ * The Sources list an Artefact ends with: a heading and a table of the documents `markdown` cites, in the order they are first cited, each with its title, original filename and upload date. A removed document is listed too, marked "(removed)". A cited id the manifest does not list is left out (there is nothing to say about it), and `''` is returned when nothing is left, so an Artefact that cites nothing ends exactly as it did.
+ *
+ * @param {string} markdown  the compiled text of the Artefact
+ * @param {{ id: string, title?: string, filename?: string, uploadedAt?: string, removedAt?: string }[]} entries  the Instance's manifest
+ */
+export function buildSourceAppendix(markdown, entries) {
+  const byId = new Map((entries ?? []).map((e) => [e.id, e]))
+  const rows = citedSourceIds(markdown)
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map((e) => `| ${cell(e.title || e.id)}${e.removedAt ? ' (removed)' : ''} | ${cell(e.filename)} | ${appendixDate(e.uploadedAt)} |`)
+  if (!rows.length) return ''
+  return `# ${SOURCE_APPENDIX_HEADING}\n\n| Document | File | Added |\n| --- | --- | --- |\n${rows.join('\n')}\n`
+}

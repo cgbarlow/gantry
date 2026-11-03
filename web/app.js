@@ -1,6 +1,6 @@
 // gantry's production UI entry point — Preact, delivered via HTM tagged templates with no build step, per docs/adr/0006-preact-frontend-framework.md. `preact-iso` provides the routing shell — the instance dashboard (#77) at `/`, the module editor at `/instance/:slug`, the "+ New Workspace" wizard at `/new-workspace` (see web/pages/new-workspace-wizard.js, #110/#126, which replaced the old URL-first instance-setup wizard entirely) — and `@preact/signals` holds the instance-scoped state (the viewed slug and stage, the fetched instance data) that's shared across the module editor screen's header, nav, and module list, exactly as today's DOM version threaded a `stageId` through a single re-render function.
 import { html, render } from 'htm/preact'
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { signal, effect, batch } from '@preact/signals'
 import { LocationProvider, Router, Route, useLocation } from 'preact-iso'
 import { EditorView, basicSetup } from 'codemirror'
@@ -35,13 +35,14 @@ import { LocalDefinitionEditorPage } from './pages/local-definition-editor.js'
 import { GlobalSettingsPage, WorkspaceSettingsPage, InstanceSettingsPage, workspaceRepoUrl } from './pages/settings.js'
 // Two distinct "view mode" concepts collide on the same export names — the dashboard's (#77) master-detail/swimlanes toggle and the module editor's (#79, #374) visual/split/markdown toggle are unrelated signals that happen to share a shape. The dashboard's is aliased here; the module editor's keeps the bare names since it's used throughout the rest of this file.
 import { VIEW_MODES as DASHBOARD_VIEW_MODES, viewMode as dashboardViewMode } from './lib/dashboardView.js'
-import { unrepresentedWorkspaceGroups, describeInstanceRowWorkspace, workspaceNewInstanceHref } from './lib/dashboardWorkspaces.js'
+import { unrepresentedWorkspaceGroups, unrepresentedServerWorkspaceGroups, describeInstanceRowWorkspace, workspaceNewInstanceHref } from './lib/dashboardWorkspaces.js'
 import { workItemParentRef, describeWorkItemLink } from './lib/provider.js'
 import { loadWorkspaceScopedInstances, setWorkspaceDiscoveryRetryHandler } from './lib/workspaceDiscovery.js'
 import { VIEW_MODES, viewMode, cycleViewMode } from './lib/viewMode.js'
 import { visualMode, refreshVisual, clearActiveCell, restoreActiveCell, activeCellSelection, focusTableCellAt } from './lib/visualMode.js'
 import { advancedMode } from './lib/advancedMode.js'
 import { modulePayload, payloadKey, savedFields, saveStatusLine } from './lib/stageSave.js'
+import { stagePayloads, stageVersionOfModules, mergeStage, conflictText, conflictValueFromText } from './lib/stageVersion.js'
 import { isMultiValuedField, emptyFieldValue } from './lib/fieldShape.js'
 import { countWords, targetSizeLabel, withTargetWords } from './lib/targetSize.js'
 import { withInstanceSettings, instanceTargetSize } from './lib/instanceSettings.js'
@@ -74,6 +75,18 @@ import {
   getFileLastModified,
 } from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
+import { SourceDocumentsPanel, openSourceDocument } from './lib/sourceDocumentsPanel.js'
+import { citedSourceIds } from './lib/sourceCitations.js'
+import { InterviewPage, clearInterviewSessions, unsavedDraftModules } from './lib/interviewView.js'
+import { createLocalSourceStore } from './lib/localSourceDocuments.js'
+import { createLocalDecisionsStore, createServerDecisionsStore, planLocalDecisions } from './lib/decisionsStore.js'
+import { approvalStatusLine } from './lib/interviewApproval.js'
+import { sentBackOf } from './lib/prRevision.js'
+import { DecisionsLogPanel } from './lib/decisionsLogPanel.js'
+import { flagsForField, outOfDateBannerLines, outOfDateCountByStage, outOfDateFieldNote } from './lib/outOfDate.js'
+import { loadOutOfDate, outOfDateState, sourceListTick } from './lib/outOfDateState.js'
+import { firstFlaggedStage } from './lib/bringUpToDate.js'
+import { createServerSourceClient } from './lib/serverSourceDocuments.js'
 import { assetReference, repoAssetReference, isLocalAssetSource, resolveAssetRefs, resolveRepoAssetRefs } from './lib/assetRefs.js'
 import { IdentityPicker } from './lib/identityPicker.js'
 import {
@@ -92,6 +105,54 @@ import {
   buildLocalModuleEntry,
 } from './lib/localInstanceFiles.js'
 import { getLocalStatus, checkLocalGate } from './lib/localStatus.js'
+import {
+  REVIEW_FILE_ACCEPT,
+  addReviewedCopiesLocally,
+  analyseReviewFiles,
+  expectedFromInstance,
+  loadReviewedCopies,
+  localReviewIo,
+  recordAnsweredReviews,
+  recordAnsweredReviewsLocally,
+  remoteReviewIo,
+  reviewDay,
+  threadByline,
+  uploadReviewedCopies,
+} from './lib/reviewedCopies.js'
+import { REVIEWED_COPY_MAX_BYTES } from './lib/reviewedCopy.js'
+import { describeReview } from './lib/reviewManifest.js'
+import { downloadReviewResponseList } from './lib/reviewResponse.js'
+import { modulesWithStandard } from './lib/standardModules.js'
+import {
+  parseKeyDecisions,
+  serialiseKeyDecisions,
+  addDecision,
+  removeDecision,
+  moveDecision,
+  hasStyleText,
+  decisionReference,
+  keyDecisionProblems,
+  STYLE_PARTS,
+  STYLE_TITLES,
+  LINK_TYPES,
+} from './lib/keyDecisions.js'
+import {
+  changedEntryFor,
+  changedEntryLabel,
+  alsoReapprovesLine,
+  dashboardBadgeText,
+  dashboardBadgeTitle,
+  wordingText,
+  canRestoreChange,
+  changeLabel,
+  restorePanelHeading,
+  reapprovingLine,
+  requestedStatusWithReapproval,
+  waitingForReapproversLine,
+  reapprovalHistoryLine,
+  reRenderRefusalLine,
+  reRenderItemLabel,
+} from './lib/changedSinceApproval.js'
 import {
   resolveDefinitionStructure,
   localDefinitionExists,
@@ -182,6 +243,29 @@ function assetFileUrl(assetId, slug, stageId) {
   return qs ? `${base}?${qs}` : base
 }
 
+// The Module entries of one stage, read through a local workspace's folder handle — what
+// `GET /api/instance` returns as `modules`. Used to open the stage and, again, to compare
+// the stage's version just before a Save (ADR-0068, #270).
+async function readLocalStageModules(handle, slug, stage, structure) {
+  // #283 (ADR-0065): a mounted standard module is looked up like any other Module.
+  const allModules = modulesWithStandard(structure.modules, structure.standardModules)
+  const modulesById = new Map(allModules.map((m) => [m.id, m]))
+  const modules = []
+  for (const moduleId of stage.modules) {
+    const moduleSpec = modulesById.get(moduleId)
+    if (!moduleSpec) continue
+    let data = { status: 'draft', owner: '', fields: {} }
+    try {
+      const text = await readLocalTextFile(handle, localModuleFilesPath(slug, moduleId))
+      data = parseLocalModuleFile(text, moduleSpec)
+    } catch {
+      // No saved data yet for this module — the blank draft above stands, matching GET /api/instance's own "no module file yet" default.
+    }
+    modules.push(buildLocalModuleEntry(moduleSpec, stage, data, null, structure.stages))
+  }
+  return modules
+}
+
 /**
  * Reads `gantry-workspace/<slug>/instance.yaml` and every
  * `gantry-workspace/<slug>/modules/*.md` through a local workspace's
@@ -219,21 +303,8 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
   const stageId = requestedStageId ?? record.stage
   const stage = structure.stages.find((s) => s.id === stageId)
   if (!stage) throw new Error(`Definition "${definitionId}" has no stage "${stageId}"`)
-  const modulesById = new Map(structure.modules.map((m) => [m.id, m]))
 
-  const modules = []
-  for (const moduleId of stage.modules) {
-    const moduleSpec = modulesById.get(moduleId)
-    if (!moduleSpec) continue
-    let data = { status: 'draft', owner: '', fields: {} }
-    try {
-      const text = await readLocalTextFile(handle, localModuleFilesPath(slug, moduleId))
-      data = parseLocalModuleFile(text, moduleSpec)
-    } catch {
-      // No saved data yet for this module — the blank draft above stands, matching GET /api/instance's own "no module file yet" default.
-    }
-    modules.push(buildLocalModuleEntry(moduleSpec, stage, data, null, structure.stages))
-  }
+  const modules = await readLocalStageModules(handle, slug, stage, structure)
 
   // #202: the same Target size and per-Field targets GET /api/instance adds (web/lib/targetSize.js),
   // so a Local-workspace instance's editor shows the same word counts — and (#219) the same
@@ -260,6 +331,8 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
     // list an artefact fractionally earlier than a server-hosted one would.
     artefacts: structure.artefacts.filter((a) => a.gate === stage.gate).map((a) => ({ id: a.id, title: a.title, requires: a.requires, ...(a.satisfiesGate === false ? { satisfiesGate: false } : {}) })),
     modules,
+    // ADR-0068 (#270): the same fingerprint the server returns, computed here from the files just read.
+    stageVersion: stageVersionOfModules(modules),
     workItem: null,
     pullRequests: {},
     approvalStates: {},
@@ -286,7 +359,7 @@ async function loadLocalInstance(workspaceId, slug, requestedStageId) {
     // no second `/api/definitions/...` fetch, and no `/api/local/status` or
     // `/api/local/check` round trip at all.
     localDefinitionStructure: structure,
-  }, structure.modules, instanceTargetSize(structure, record))
+  }, modulesWithStandard(structure.modules, structure.standardModules), instanceTargetSize(structure, record))
   return withInstanceSettings(response, structure, record)
 }
 
@@ -309,6 +382,14 @@ async function buildLocalComputePayload(instance) {
     moduleFiles[moduleId] = await readLocalTextFile(handle, `gantry-workspace/${slug}/modules/${entry.name}`)
   }
   const payload = { definitionId: instance.definition, definitionVersion: instance.localDefinitionVersion, instanceYaml, moduleFiles }
+  // #281: a render prints the title of each Source document the content cites, and the Sources appendix lists them. Only the manifest entries of the ones cited go (their title, filename and dates), and only when something cites one: a Source document and its text never leave the folder.
+  const citedSources = citedSourceIds(Object.values(moduleFiles).join('\n'))
+  if (citedSources.length) {
+    const { entries: sourceEntries } = await createLocalSourceStore(handle, slug).list()
+    payload.sources = sourceEntries
+      .filter((e) => citedSources.includes(e.id))
+      .map(({ id, filename, title, uploadedAt, removedAt }) => ({ id, filename, title, uploadedAt, removedAt }))
+  }
   // #224: the instance's own Logo, which the render puts in its documents' page header, rides along
   // as an asset at the path its instance.yaml names (`assets/instance-logo.png`).
   const logoPath = instanceLogoPath(parseInstanceYaml(instanceYaml))
@@ -842,6 +923,7 @@ function renderPreview(node, text) {
     )
   }
   node.innerHTML = renderMarkdown(withSources)
+  activateSourceCitations(node)
   // WI #353: ```mermaid fences render as diagrams in place. Async and fire-and-forget — a
   // re-render before a diagram finishes just leaves the swap with nothing to replace.
   hydrateMermaidPreview(node).catch(() => {})
@@ -850,6 +932,46 @@ function renderPreview(node, text) {
     const em = p.querySelector('em')
     if (em && em.textContent.startsWith('Source:')) p.classList.add('asset-source')
   })
+}
+
+// #281 (map #238): a citation of a Source document, `[Client brief, p. 4](source:client-brief)`, is a link in the editor's preview that opens the document. `sourceIndex` holds what the Instance's Source documents panel last listed, `{ <id>: { title, removed } }`, and `sourceOpener` how to open one (the panel's store knows where the files are); the preview reads them when it draws and redraws when they change. A document that was removed still shows the words the author wrote, marked "(removed)", and is not a link, because its file is gone; so does an id the Instance has no document for.
+const sourceIndex = signal(null) // null: this kind of workspace keeps no Source documents (yet), so a citation is left as the words it holds
+const sourceOpener = { open: null }
+
+function activateSourceCitations(node) {
+  const index = sourceIndex.value
+  for (const link of node.querySelectorAll('a[href^="source:"]')) {
+    const id = link.getAttribute('href').slice('source:'.length)
+    if (index === null) {
+      const plain = document.createElement('span')
+      plain.className = 'source-citation unavailable'
+      plain.title = 'Source documents are not kept for this kind of workspace yet'
+      plain.append(...link.childNodes)
+      link.replaceWith(plain)
+      continue
+    }
+    const entry = index[id]
+    if (entry && !entry.removed) {
+      link.classList.add('source-citation')
+      link.dataset.sourceId = id
+      link.title = `Open the Source document "${entry.title}"`
+      link.removeAttribute('target')
+      continue
+    }
+    const gone = document.createElement('span')
+    gone.className = `source-citation ${entry ? 'removed' : 'missing'}`
+    gone.dataset.sourceId = id
+    gone.title = entry ? `The Source document "${entry.title}" was removed` : 'No Source document in this Instance has this id'
+    gone.append(...link.childNodes, entry ? ' (removed)' : ' (not found)')
+    link.replaceWith(gone)
+  }
+  // One handler on the preview itself, replaced each time it is drawn, so redraws never stack them.
+  node.onclick = (event) => {
+    const link = event.target.closest?.('a.source-citation')
+    if (!link || !node.contains(link)) return
+    event.preventDefault()
+    sourceOpener.open?.(link.dataset.sourceId)
+  }
 }
 
 // ---------- Instance-scoped state ----------
@@ -1520,7 +1642,7 @@ const IDLE_STAGE_SAVE = { dirtyModuleIds: [], phase: 'idle', message: '' }
 const stageSave = signal(IDLE_STAGE_SAVE)
 // Each module card's "Saved — …" line, by module id.
 const moduleSaveStatus = signal({})
-const NO_STAGE_SAVE = { save: async () => true, confirmLeave: async () => true }
+const NO_STAGE_SAVE = { save: async () => true, confirmLeave: async () => true, restoreApprovedText: async () => false }
 let stageSaveActions = NO_STAGE_SAVE
 // Browser back/forward fires popstate on the window itself, where listeners run
 // in the order they were added — so this one is added now, before the router
@@ -1556,7 +1678,7 @@ function StageSaveButton() {
   const title = count
     ? `Save (${shortcut}) — ${count} module${count === 1 ? '' : 's'} with changes`
     : `Save (${shortcut}) — nothing to save`
-  const state = { saving: 'Saving…', saved: 'Saved', error: message }[phase] ?? ''
+  const state = { saving: 'Saving…', saved: message || 'Saved', error: message }[phase] ?? ''
   return html`
     <span class="stage-save">
       <button
@@ -1587,6 +1709,97 @@ function UnsavedChangesDialog({ count, onAnswer }) {
         <button type="button" class="btn ghost" onClick=${() => onAnswer('cancel')}>Cancel</button>
         <button type="button" class="btn" onClick=${() => onAnswer('discard')}>Discard</button>
         <button type="button" class="btn primary" ref=${saveRef} onClick=${() => onAnswer('save')}>Save</button>
+      </div>
+    <//>
+  `
+}
+
+// What a clashing Field is called in the dialog: its Module and its own title.
+function clashLabel(inst, conflict) {
+  const mod = inst.modules.find((m) => m.id === conflict.moduleId)
+  const name =
+    conflict.kind === 'status' ? 'Status'
+    : conflict.kind === 'owner' ? 'Owner'
+    : conflict.kind === 'custom' ? (conflict.mine ?? conflict.theirs).title
+    : mod?.fields.find((f) => `field:${f.id}` === conflict.key)?.title ?? conflict.key.replace(/^field:/, '')
+  return mod ? `${mod.title} › ${name}` : name
+}
+
+// The Field-by-Field dialog (ADR-0068, #270): shown when the stage was saved by someone else after
+// this editor read it, for each Field both sides changed. Every Field needs an answer — keep the
+// saved version, keep yours, or edit — so nothing is overwritten silently. Resolves a map for
+// mergeStage's `resolutions`, or null on Cancel.
+function StageClashDialog({ inst, conflicts, onAnswer }) {
+  const [choices, setChoices] = useState({})
+  const firstRef = useRef(null)
+  useEffect(() => firstRef.current?.focus(), [])
+  const idOf = (conflict) => `${conflict.moduleId}\u0000${conflict.key}`
+  const choose = (conflict, choice) => setChoices((previous) => ({ ...previous, [idOf(conflict)]: choice }))
+  const sideValue = (side) => (side === undefined ? undefined : side.value)
+  const answered = conflicts.every((conflict) => choices[idOf(conflict)])
+
+  function resolutions() {
+    const out = {}
+    for (const conflict of conflicts) {
+      const choice = choices[idOf(conflict)]
+      const side = choice.mode === 'theirs' ? conflict.theirs : conflict.mine
+      out[idOf(conflict)] =
+        choice.mode === 'edit'
+          ? { value: conflictValueFromText(choice.text, sideValue(conflict.mine) ?? sideValue(conflict.theirs)) }
+          : side === undefined
+            ? { remove: true }
+            : { value: side.value }
+    }
+    return out
+  }
+
+  return html`
+    <${Modal} ariaLabel="Changes saved meanwhile" onClose=${() => onAnswer(null)}>
+      <h3>Someone saved changes to this stage while you were editing</h3>
+      <p class="guidance">
+        ${conflicts.length === 1 ? 'One Field was' : `${conflicts.length} Fields were`} changed both in what is saved and in
+        your editor. Everything else has been combined. Choose what to keep for each; nothing is saved until you do.
+      </p>
+      <div class="clash-list">
+        ${conflicts.map((conflict, index) => {
+          const choice = choices[idOf(conflict)]
+          const show = (side) => (side === undefined ? '(removed)' : conflictText(side.value) || '(empty)')
+          return html`
+            <section class="clash" data-clash-field=${conflict.key} key=${idOf(conflict)}>
+              <h4>${clashLabel(inst, conflict)}</h4>
+              <div class="clash-versions">
+                <div class=${'clash-version' + (choice?.mode === 'theirs' ? ' chosen' : '')}>
+                  <h5>Saved by someone else</h5>
+                  <pre class="clash-text" data-clash-side="theirs">${show(conflict.theirs)}</pre>
+                  <button type="button" class="btn small" ref=${index === 0 ? firstRef : null} aria-pressed=${choice?.mode === 'theirs'} onClick=${() => choose(conflict, { mode: 'theirs' })}>Keep theirs</button>
+                </div>
+                <div class=${'clash-version' + (choice?.mode === 'mine' ? ' chosen' : '')}>
+                  <h5>Your version</h5>
+                  <pre class="clash-text" data-clash-side="mine">${show(conflict.mine)}</pre>
+                  <button type="button" class="btn small" aria-pressed=${choice?.mode === 'mine'} onClick=${() => choose(conflict, { mode: 'mine' })}>Keep mine</button>
+                </div>
+              </div>
+              ${choice?.mode === 'edit'
+                ? html`<textarea
+                    class="clash-edit"
+                    aria-label=${`Edit ${clashLabel(inst, conflict)}`}
+                    value=${choice.text}
+                    onInput=${(e) => choose(conflict, { mode: 'edit', text: e.target.value })}
+                  />`
+                : html`<button
+                    type="button"
+                    class="btn small ghost"
+                    onClick=${() => choose(conflict, { mode: 'edit', text: conflictText(sideValue(conflict.mine) ?? sideValue(conflict.theirs)) })}
+                  >
+                    Edit instead
+                  </button>`}
+            </section>
+          `
+        })}
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onClick=${() => onAnswer(null)}>Cancel</button>
+        <button type="button" class="btn primary" disabled=${!answered} onClick=${() => onAnswer(resolutions())}>Save</button>
       </div>
     <//>
   `
@@ -1697,7 +1910,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
     const splitEditableCompartment = new Compartment()
     const wrapCompartment = new Compartment()
     const visualCompartment = new Compartment()
-    const visualLayer = () => visualMode({ renderMarkdown: renderPreview, historyView: () => view })
+    const visualLayer = () => visualMode({ renderMarkdown: renderPreview, historyView: () => view, sourceDocument: (id) => (sourceIndex.value === null ? { unavailable: true } : sourceIndex.value[id]), openSourceDocument: (id) => sourceOpener.open?.(id) })
     let hideToolbarTimer = null
     const state = EditorState.create({
       doc: field.value ?? '',
@@ -1808,6 +2021,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
     const stopAssetSourceSync = effect(() => {
       const _sources = assetSources.value
       const _localUrls = localAssetUrls.value
+      const _sourceDocuments = sourceIndex.value
       view.dispatch({ effects: refreshVisual.of(null) })
       splitViewRef.current?.dispatch({ effects: refreshVisual.of(null) })
     })
@@ -2287,6 +2501,159 @@ function ListField({ field, moduleId, onRegister, onRemove, onRequestSection, on
   `
 }
 
+// ---------- Key decisions (#284, ADR-0065) ----------
+// The Key decisions standard module's one Field is Markdown to Save, the merge, the render and every other
+// surface; this editor reads and writes the text inside it (web/lib/keyDecisions.js). Each decision has a
+// number given once, and Move up / Move down / Remove leave every number as it is. The Definition chose the
+// style (`keyDecisions.style`): the default parts, or WH(Y)'s six-part statement and typed links.
+function DecisionTextArea({ label, hint, value, disabled, onInput, testId }) {
+  const ref = useRef(null)
+  useEffect(() => autosizeTextarea(ref.current), [value])
+  return html`
+    <label class="decision-part">
+      <span class="decision-part-label">${label}</span>
+      <textarea ref=${ref} rows="2" disabled=${disabled} placeholder=${hint} data-testid=${testId} value=${value} onInput=${(e) => { autosizeTextarea(e.currentTarget); onInput(e.currentTarget.value) }}></textarea>
+    </label>
+  `
+}
+
+function DecisionsField({ field, moduleId, keyDecisions, onRegister }) {
+  const { prefix, style } = keyDecisions
+  const [parsed, setParsed] = useState(() => parseKeyDecisions(field.value ?? ''))
+  // The text exactly as stored stays the Field's value until the first edit, so opening a Field written by hand
+  // (and so not in this editor's exact layout) never counts as a change.
+  const storedRef = useRef(field.value ?? '')
+  const parsedRef = useRef(parsed)
+  const touchedRef = useRef(false)
+  const textOf = (value) => (touchedRef.current ? serialiseKeyDecisions(value, { prefix }) : storedRef.current)
+
+  function update(next) {
+    touchedRef.current = true
+    parsedRef.current = next
+    setParsed(next)
+    noteContentEdit()
+  }
+
+  useEffect(() => {
+    onRegister({
+      getValue: () => textOf(parsedRef.current),
+      setValue: (value) => {
+        storedRef.current = value ?? ''
+        touchedRef.current = false
+        parsedRef.current = parseKeyDecisions(storedRef.current)
+        setParsed(parsedRef.current)
+        noteContentEdit()
+      },
+    })
+    // eslint-disable-next-line
+  }, [])
+
+  const blocked = isEditingBlocked()
+  const parts = STYLE_PARTS[style]
+  const otherStyle = style === 'why' ? 'default' : 'why'
+  const headingIdForField = moduleId ? headingId(moduleId, field.title) : null
+  const text = textOf(parsed)
+  const words = field.targetWords ? countWords(text) : 0
+  const problems = keyDecisionProblems(text, { prefix, style })
+  const setDecision = (number, change) => update({ ...parsed, decisions: parsed.decisions.map((d) => (d.number === number ? { ...d, ...change } : d)) })
+
+  return html`
+    <div class="field field-decisions" data-testid="key-decisions-field" data-style=${style} data-prefix=${prefix}>
+      ${headingIdForField
+        ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
+        : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
+      ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      <p class="decisions-style muted" data-testid="decision-style">Decision style: ${STYLE_TITLES[style]}</p>
+      ${field.targetWords ? html`<${FieldTargetWords} field=${field} words=${words} />` : null}
+      ${parsed.decisions.length === 0 ? html`<p class="muted decisions-empty">No decisions recorded yet.</p>` : null}
+      ${parsed.decisions.map((decision, index) => {
+        const reference = decisionReference(prefix, decision.number)
+        const otherTargets = parsed.decisions.filter((d) => d.number !== decision.number)
+        return html`
+          <section class="decision-card" key=${decision.number} data-testid="decision" data-number=${decision.number}>
+            <header class="decision-card-head">
+              <span class="decision-number" data-testid="decision-number">${reference}</span>
+              <input
+                type="text"
+                class="decision-title"
+                aria-label=${`Title of ${reference}`}
+                placeholder="Decision title"
+                disabled=${blocked}
+                value=${decision.title}
+                onInput=${(e) => setDecision(decision.number, { title: e.currentTarget.value })}
+              />
+              ${!blocked
+                ? html`
+                    <span class="decision-actions">
+                      <button type="button" class="btn small ghost" disabled=${index === 0} aria-label=${`Move ${reference} up`} onClick=${() => update(moveDecision(parsed, decision.number, -1))}>↑</button>
+                      <button type="button" class="btn small ghost" disabled=${index === parsed.decisions.length - 1} aria-label=${`Move ${reference} down`} onClick=${() => update(moveDecision(parsed, decision.number, 1))}>↓</button>
+                      <button type="button" class="btn small ghost" aria-label=${`Remove ${reference}`} onClick=${() => update(removeDecision(parsed, decision.number))}>Remove</button>
+                    </span>
+                  `
+                : null}
+            </header>
+            ${decision.lead ? html`<p class="decision-lead muted">${decision.lead}</p>` : null}
+            ${parts.map(
+              (part) => html`<${DecisionTextArea}
+                key=${part.key}
+                label=${part.label}
+                hint=${part.hint}
+                value=${decision[part.key] ?? ''}
+                disabled=${blocked}
+                testId=${`decision-${part.key}`}
+                onInput=${(value) => setDecision(decision.number, { [part.key]: value })}
+              />`
+            )}
+            ${hasStyleText(decision, otherStyle)
+              ? html`
+                  <details class="decision-other-style" data-testid="decision-other-style">
+                    <summary>Also holds text written in the ${STYLE_TITLES[otherStyle]} style (kept, and printed as written)</summary>
+                    ${STYLE_PARTS[otherStyle].filter((part) => (decision[part.key] ?? '').trim() !== '').map((part) => html`<p><strong>${part.label}:</strong> ${decision[part.key]}</p>`)}
+                  </details>
+                `
+              : null}
+            ${style === 'why'
+              ? html`
+                  <div class="decision-links" data-testid="decision-links">
+                    ${decision.links.map(
+                      (link, linkIndex) => html`
+                        <div class="decision-link" key=${linkIndex} data-testid="decision-link">
+                          <select
+                            aria-label=${`Link type of ${reference}`}
+                            disabled=${blocked}
+                            value=${link.type}
+                            onChange=${(e) => setDecision(decision.number, { links: decision.links.map((l, i) => (i === linkIndex ? { ...l, type: e.currentTarget.value } : l)) })}
+                          >
+                            ${LINK_TYPES.map((t) => html`<option value=${t.type}>${t.label}</option>`)}
+                          </select>
+                          <select
+                            aria-label=${`Link target of ${reference}`}
+                            disabled=${blocked}
+                            value=${link.to === null ? '' : String(link.to)}
+                            onChange=${(e) => setDecision(decision.number, { links: decision.links.map((l, i) => (i === linkIndex ? { ...l, to: Number(e.currentTarget.value), raw: decisionReference(prefix, Number(e.currentTarget.value)) } : l)) })}
+                          >
+                            ${link.to === null || !parsed.decisions.some((d) => d.number === link.to) ? html`<option value=${link.to === null ? '' : String(link.to)}>${link.to === null ? link.raw : `${decisionReference(prefix, link.to)} (not in this list)`}</option>` : null}
+                            ${otherTargets.map((d) => html`<option value=${String(d.number)}>${decisionReference(prefix, d.number)}${d.title ? ` ${d.title}` : ''}</option>`)}
+                          </select>
+                          ${!blocked ? html`<button type="button" class="btn small ghost" aria-label=${`Remove link from ${reference}`} onClick=${() => setDecision(decision.number, { links: decision.links.filter((_, i) => i !== linkIndex) })}>✕</button>` : null}
+                        </div>
+                      `
+                    )}
+                    ${!blocked && otherTargets.length > 0
+                      ? html`<button type="button" class="btn small ghost" data-testid="add-decision-link" onClick=${() => setDecision(decision.number, { links: [...decision.links, { type: 'relates-to', to: otherTargets[0].number, raw: decisionReference(prefix, otherTargets[0].number) }] })}>+ Add link</button>`
+                      : null}
+                  </div>
+                `
+              : null}
+          </section>
+        `
+      })}
+      ${problems.length > 0 ? html`<ul class="decisions-problems" data-testid="decision-problems">${problems.map((p) => html`<li>${p}</li>`)}</ul>` : null}
+      ${!blocked ? html`<button type="button" class="btn small" data-testid="add-decision" onClick=${() => update(addDecision(parsed))}>Add decision</button>` : null}
+    </div>
+  `
+}
+
 // ---------- Read-only carried-forward module (#152, docs/adr/0050) ----------
 // A module the viewed stage lists in `read-only-modules`: mounted so the stage's documents render and
 // its gate can be evaluated, but owned — and edited — at an earlier stage. Shown as its saved content
@@ -2308,7 +2675,7 @@ function ReadOnlyFieldValue({ field }) {
         : null
   useEffect(() => {
     if (markdown !== null) renderPreview(ref.current, markdown)
-  }, [markdown, assetSources.value])
+  }, [markdown, assetSources.value, sourceIndex.value])
   if (isEmpty) return html`<p class="read-only-value muted">Not filled in.</p>`
   if (markdown !== null) return html`<div class="read-only-value" ref=${ref}></div>`
   return html`<p class="read-only-value">${Array.isArray(value) ? value.join(', ') : value}</p>`
@@ -2418,15 +2785,37 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
     }
   }
 
+  // #289: the editor shows saved content only. A Module with AI drafts the architect has not saved says so, and where to edit them.
+  const inst = instanceData.value
+  const outOfDateNow = outOfDateState.value
+  const outOfDateFlagsNow = inst?.stage && outOfDateNow.key === `${inst.slug}|${inst.stage.id}` ? outOfDateNow.flags : []
+  const unsaved = inst?.stage ? unsavedDraftModules(inst.slug, inst.stage.id).find((u) => u.moduleId === mod.id) : null
+  const interviewHref = (() => {
+    const here = new URL(window.location.href)
+    here.searchParams.set('interview', '1')
+    return `${here.pathname}${here.search}`
+  })()
   return html`
     <section class="module">
       <h2 id=${headingId(mod.id, mod.title)}>${mod.title}</h2>
+      ${unsaved
+        ? html`<p class="unsaved-drafts-banner" role="status" data-testid="unsaved-ai-drafts">
+            ${unsaved.fields === 1 ? '1 Field here has an unsaved AI draft' : `${unsaved.fields} Fields here have unsaved AI drafts`}. This editor shows saved content only: edit them on the
+            <a href=${interviewHref} data-testid="unsaved-ai-drafts-link">Interview page</a>.
+          </p>`
+        : null}
       ${mod.purpose ? html`<p class="purpose">${mod.purpose}</p>` : null}
-      ${mod.fields.filter((field) => !visibleFieldIds || visibleFieldIds.has(`${mod.id}.${field.id}`)).map((field) => {
+      ${mod.fields.filter((field) => !visibleFieldIds || visibleFieldIds.has(`${mod.id}.${field.id}`)).flatMap((field) => {
         const onRegister = (control) => {
           controlsRef.current[field.id] = control
           onFieldRegistered(field, control, mod.id)
         }
+        // #297: a Field that drew on a Source document that has since changed says so, above the Field. The mark is a keyed sibling, so the Field itself is never remounted when it appears.
+        const flags = flagsForField(outOfDateFlagsNow, `${mod.id}.${field.id}`)
+        const mark = flags.length
+          ? html`<p key=${`ood-${field.id}`} class="out-of-date-mark" role="status" data-testid="field-out-of-date" data-field=${`${mod.id}.${field.id}`}>${outOfDateFieldNote(flags)}</p>`
+          : null
+        const rendered = (() => {
         if (field.type === 'select') {
           return html`<${SelectField} key=${field.id} field=${field} moduleId=${mod.id} onRegister=${onRegister} />`
         }
@@ -2435,6 +2824,9 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
         }
         if (field.type === 'date') {
           return html`<${DateField} key=${field.id} field=${field} moduleId=${mod.id} onRegister=${onRegister} />`
+        }
+        if (mod.keyDecisions && field.type === 'markdown' && !field.custom) {
+          return html`<${DecisionsField} key=${field.id} field=${field} moduleId=${mod.id} keyDecisions=${mod.keyDecisions} onRegister=${onRegister} />`
         }
         const isList = isMultiValuedField(field)
         return isList
@@ -2456,6 +2848,8 @@ function ModuleCard({ mod, onFieldRegistered, visibleFieldIds }) {
               onRequestSection=${() => setSectionAfterId(field.id)}
               onRequestList=${() => setListAfterId(field.id)}
             />`
+        })()
+        return mark ? [mark, rendered] : [rendered]
       })}
       <div class="save-status">${moduleSaveStatus.value[mod.id] ?? ''}</div>
       ${imageFieldId !== null
@@ -3112,6 +3506,9 @@ function SyncedFieldsPanel({ instance }) {
   // Sign-off (#124/#125, ADR-0014/ADR-0018) — same state RequestApprovalPanel used to own.
   const [signoffStatus, setSignoffStatus] = useState('')
   const [signoffConfirming, setSignoffConfirming] = useState(false)
+  // #276 (ADR-0069): the earlier approved stages' documents Request approval refused over, still to be re-rendered onto this stage's branch.
+  const [reRenderNeeded, setReRenderNeeded] = useState([])
+  const [reRenderBusy, setReRenderBusy] = useState(null)
   const [commitHistoryOpen, setCommitHistoryOpen] = useState(false)
   const [commitHistory, setCommitHistory] = useState([])
   const [commitHistoryStatus, setCommitHistoryStatus] = useState('')
@@ -3328,20 +3725,54 @@ function SyncedFieldsPanel({ instance }) {
     )
     const body = await res.json().catch(() => ({}))
     if (!res.ok) {
+      // #276: refused until earlier approved documents are re-rendered here — offer to do it.
+      if (Array.isArray(body.reRenderRequired) && body.reRenderRequired.length > 0) {
+        setReRenderNeeded(body.reRenderRequired)
+        setSignoffStatus(reRenderRefusalLine(body.reRenderRequired))
+        return
+      }
       setSignoffStatus(`Request sign-off failed: ${body.message ?? body.error}`)
       return
     }
+    setReRenderNeeded([])
     setJustOpened(body)
     if (body.pullRequest) {
       const current = instanceData.value
-      if (current?.stage.id === stageId) instanceData.value = { ...current, pullRequest: body.pullRequest }
+      // `alsoReapproves` (#275) is what the new Pull Request also re-approves; the screen keeps showing it as `alsoReapproving`.
+      if (current?.stage.id === stageId) instanceData.value = { ...current, pullRequest: body.pullRequest, alsoReapproving: body.alsoReapproves ?? current.alsoReapproving ?? [] }
     }
     if (body.reapproval?.method === 'comment') {
       setSignoffStatus(`Approval reset was not permitted, so a note was posted to Pull Request #${body.pullRequestId}. The Owner must review and vote again.`)
     } else if (body.reapproval) {
       setSignoffStatus(`Approval withdrawn from Pull Request #${body.pullRequestId} — awaiting the Owner's review again.`)
     } else {
-      setSignoffStatus(`Pull Request #${body.pullRequestId} opened — awaiting the Owner's review.`)
+      setSignoffStatus(requestedStatusWithReapproval(body.pullRequestId, body.alsoReapproves))
+    }
+  }
+
+  // #276: renders one earlier approved stage's document onto this stage's branch, keeping the approved copy.
+  async function handleReRenderEarlier(item) {
+    setReRenderBusy(item.artefactId)
+    setSignoffStatus(`Rendering ${item.artefactTitle} onto this stage…`)
+    try {
+      const res = await apiFetchForInstance(
+        currentSlug.value,
+        `/api/instance/rerender-earlier/${encodeURIComponent(item.artefactId)}?slug=${encodeURIComponent(currentSlug.value)}`,
+        { method: 'POST' }
+      )
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSignoffStatus(`Render failed: ${body.message ?? body.error ?? `HTTP ${res.status}`}`)
+        return
+      }
+      const remaining = reRenderNeeded.filter((other) => other.artefactId !== item.artefactId)
+      setReRenderNeeded(remaining)
+      const kept = body.approvedCopyPath ? ` The approved copy is kept as ${body.approvedCopyPath.split('/').pop()}.` : ''
+      setSignoffStatus(
+        `${item.artefactTitle} re-rendered.${kept}${remaining.length === 0 ? ' Request Sign-off again.' : ''}`
+      )
+    } finally {
+      setReRenderBusy(null)
     }
   }
 
@@ -3451,7 +3882,9 @@ function SyncedFieldsPanel({ instance }) {
             const current = instanceData.value
             if (current?.stage.id === stageId) instanceData.value = { ...current, pullRequest: body.pullRequest }
           }
-          if (body.review?.state === 'approved-then-invalidated') {
+          if (body.waitingForStage) {
+            messages.push(body.message ?? `Waiting for the earlier stage "${body.waitingForStage.title}" to be approved first.`)
+          } else if (body.review?.state === 'approved-then-invalidated') {
             messages.push(
               `Approval invalidated — commit(s) landed after ${body.review.approver?.displayName ?? 'the Owner'} approved Pull Request #${body.pullRequestId}. Request Sign-off again for a fresh review.`
             )
@@ -3459,6 +3892,8 @@ function SyncedFieldsPanel({ instance }) {
             messages.push(`Rejected — the Owner voted to reject Pull Request #${body.pullRequestId}. Address the feedback, then re-request sign-off.`)
           } else if (body.review?.state === 'changes-requested') {
             messages.push(`Changes requested — the Owner sent Pull Request #${body.pullRequestId} back for more work before approving.`)
+          } else if (body.waitingForReviewers?.length) {
+            messages.push(waitingForReapproversLine(body.pullRequestId, body.waitingForReviewers))
           } else {
             messages.push(`Still pending — the Owner hasn't reviewed Pull Request #${body.pullRequestId} yet.`)
           }
@@ -3685,6 +4120,14 @@ function SyncedFieldsPanel({ instance }) {
                     ? html`<button type="button" class="btn small" disabled=${isEditingBlocked()} onClick=${afterUnsavedCheck(handleCheckAndMaybeRequestSignoff)}>Request Sign-off</button>`
                     : null}
                 </div>
+                ${isCurrentStage && alsoReapprovesLine(instance.changedSinceApproval)
+                  ? html`<p class="changed-since-approval-line" data-testid="also-reapproves">
+                      Sign-off ${alsoReapprovesLine(instance.changedSinceApproval)}
+                    </p>`
+                  : null}
+                ${openPullRequestId && pullRequestIsActive && reapprovingLine(instance.alsoReapproving)
+                  ? html`<p class="changed-since-approval-line" data-testid="also-reapproving">${reapprovingLine(instance.alsoReapproving)}</p>`
+                  : null}
                 ${openPullRequestId
                   ? html`
                       <ul class="review-list">
@@ -3723,6 +4166,33 @@ function SyncedFieldsPanel({ instance }) {
                   : isCurrentStage
                     ? null
                     : html`<p class="synced-value">Not requested</p>`}
+                ${reRenderNeeded.length > 0
+                  ? html`
+                      <div class="rerender-earlier" data-testid="rerender-earlier">
+                        <p class="guidance">
+                          This sign-off also re-approves earlier stages, so their documents are re-rendered on this stage's branch first. The approved copies are kept in <code>out/approved/</code>.
+                        </p>
+                        <ul class="rerender-earlier-list">
+                          ${reRenderNeeded.map(
+                            (item) => html`
+                              <li key=${item.artefactId} data-testid="rerender-earlier-item">
+                                <span>${reRenderItemLabel(item)}</span>
+                                <button
+                                  type="button"
+                                  class="btn small"
+                                  data-testid="rerender-earlier-button"
+                                  disabled=${reRenderBusy !== null || isEditingBlocked()}
+                                  onClick=${() => handleReRenderEarlier(item)}
+                                >
+                                  Render onto this stage
+                                </button>
+                              </li>
+                            `
+                          )}
+                        </ul>
+                      </div>
+                    `
+                  : null}
                 ${signoffStatus ? html`<p class="save-status">${signoffStatus}</p>` : null}
               </div>
             </div>
@@ -3837,6 +4307,53 @@ function SyncedFieldsPanel({ instance }) {
   `
 }
 
+// Moves `instance` on to its next Stage: the gate is checked again first (the browser for a Local workspace, the server's own
+// `advance-stage` for a server one), then the stage pointer moves and the page is told to load the new current Stage. Used by the
+// "Advance to next stage" panel below and by the AI interview's "Save, advance, carry on" (#293). Never throws: resolves
+// `{ ok: true, toStage }` or `{ ok: false, message }`, the message being what the panel shows as its status. `onMoved(toStage)` is
+// called once the stage pointer has moved and before the page loads the new Stage, which can replace what is on screen.
+async function advanceCurrentStage(instance, { onMoved } = {}) {
+  let toStage
+  if (instance.isLocalWorkspace) {
+    try {
+      const checkBody = await runLocalCheck(instance)
+      if (!checkBody.pass) return { ok: false, message: formatGateFailure(checkBody) }
+      const handle = localDirHandle.value
+      if (!handle) throw new Error('Local workspace folder is not open.')
+      const slug = instance.slug
+      const idx = instance.stages.findIndex((s) => s.id === instance.stage.id)
+      const nextStage = instance.stages[idx + 1]
+      if (!nextStage) return { ok: false, message: 'Already at the final stage.' }
+      const instanceYamlText = await readLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`)
+      const record = parseInstanceYaml(instanceYamlText)
+      await writeLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`, withInstanceStage(record, nextStage.id))
+      toStage = nextStage
+    } catch (err) {
+      return { ok: false, message: err.offline ? LOCAL_OFFLINE_MESSAGE : `Advance failed: ${err.message}` }
+    }
+  } else {
+    try {
+      const res = await apiFetchForInstance(instance.slug, `/api/instance/advance-stage?slug=${encodeURIComponent(instance.slug)}`, { method: 'POST' })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, message: `Advance failed: ${body.message ?? body.error}` }
+      toStage = body.toStage
+    } catch (err) {
+      return { ok: false, message: `Advance failed: ${err.message}` }
+    }
+  }
+  onMoved?.(toStage)
+  // Reset to no explicit stage so the form now shows the instance's new current stage, otherwise `viewedStage` would still hold
+  // the (now-completed) stage's id. Assigning `viewedStage.value` already re-triggers the shared instance-loading effect near
+  // the top of this file whenever it is a genuine change; fetching directly as well would race that effect's own fetch, so this
+  // fetches only when `viewedStage.value` was already `null`, the one case where setting it again is a no-op the effect never sees.
+  const effectWillReload = viewedStage.value !== null
+  viewedStage.value = null
+  if (!effectWillReload) {
+    instanceData.value = instance.isLocalWorkspace ? await loadLocalInstance(instance.localWorkspaceId, instance.slug, null) : await loadInstance(instance.slug, null)
+  }
+  return { ok: true, toStage }
+}
+
 // ---------- Stage advancement (local instances only; #115, ADR-0012) ----------
 // The self-serve "Advance to next stage" action: never rendered at all for
 // a Workspace-backed instance (`instance.workspaceBacked` — that one always
@@ -3887,79 +4404,14 @@ function AdvanceStagePanel({ instance }) {
     setConfirming(true)
   }
 
-  // Re-checks the gate (client-side, `runLocalCheck`, WI #313) before writing
-  // the new stage (the same defense-in-depth the server-backed `advanceStage`
-  // path gets for free by re-evaluating the gate server-side) — a local
-  // instance has no server-side call of its own to fall back on for that, so
-  // this repeats the check done above rather than trusting the earlier PASS
-  // is still current.
-  async function handleConfirmAdvanceLocal() {
-    setConfirming(false)
-    setStatus('Advancing…')
-    try {
-      const checkBody = await runLocalCheck(instance)
-      if (!checkBody.pass) {
-        setStatus(formatGateFailure(checkBody))
-        return
-      }
-      const handle = localDirHandle.value
-      if (!handle) throw new Error('Local workspace folder is not open.')
-      const slug = instance.slug
-      const idx = instance.stages.findIndex((s) => s.id === instance.stage.id)
-      const nextStage = instance.stages[idx + 1]
-      if (!nextStage) {
-        setStatus('Already at the final stage.')
-        return
-      }
-      const instanceYamlText = await readLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`)
-      const record = parseInstanceYaml(instanceYamlText)
-      await writeLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`, withInstanceStage(record, nextStage.id))
-      setStatus(`Advanced to "${nextStage.title}".`)
-      const effectWillReload = viewedStage.value !== null
-      viewedStage.value = null
-      if (!effectWillReload) {
-        instanceData.value = await loadLocalInstance(instance.localWorkspaceId, slug, null)
-      }
-    } catch (err) {
-      setStatus(err.offline ? LOCAL_OFFLINE_MESSAGE : `Advance failed: ${err.message}`)
-    }
-  }
-
+  // The gate is re-checked before the stage moves (client-side for a local instance, `runLocalCheck`, WI #313; the server's own
+  // `advance-stage` otherwise): a local instance has no server-side call of its own to fall back on, so this repeats the check
+  // done above rather than trusting the earlier PASS is still current. See `advanceCurrentStage`.
   async function handleConfirmAdvance() {
-    if (instance.isLocalWorkspace) {
-      await handleConfirmAdvanceLocal()
-      return
-    }
     setConfirming(false)
     setStatus('Advancing…')
-    const res = await apiFetchForInstance(currentSlug.value, `/api/instance/advance-stage?slug=${encodeURIComponent(currentSlug.value)}`, {
-      method: 'POST',
-    })
-    const body = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      setStatus(`Advance failed: ${body.message ?? body.error}`)
-      return
-    }
-    setStatus(`Advanced to "${body.toStage.title}".`)
-    // Reset to no explicit stage so the form now shows the instance's new
-    // current stage — otherwise `viewedStage` would still hold this
-    // (now-completed) stage's id and the screen would appear unchanged.
-    //
-    // Assigning `viewedStage.value` here already re-triggers the shared
-    // instance-loading effect (near the top of this file) *whenever it's
-    // a genuine change* — e.g. the user had at some point explicitly
-    // clicked this (the current) stage's own nav button, leaving
-    // `viewedStage.value` set to its id rather than `null`. Also calling
-    // `loadInstance` directly below in that case would race that effect's
-    // own fetch (mirrors the exact hazard `ModuleEditorPage`'s own
-    // `batch()` comment describes) — so this only fetches directly when
-    // `viewedStage.value` was already `null`, the one case where setting
-    // it to `null` again is a no-op the effect will never react to.
-    const effectWillReload = viewedStage.value !== null
-    viewedStage.value = null
-    if (!effectWillReload) {
-      instanceData.value = await loadInstance(currentSlug.value, null)
-    }
+    const result = await advanceCurrentStage(instance, { onMoved: (toStage) => setStatus(`Advanced to "${toStage.title}".`) })
+    if (!result.ok) setStatus(result.message)
   }
 
   function handleDecline() {
@@ -4105,8 +4557,449 @@ function ReopenStagePanel({ instance }) {
   `
 }
 
+// ---------- Approval merged on the Provider, not recorded yet (#144, docs/adr/0014, docs/adr/0026) ----------
+// The current stage's approval Pull Request has been merged on the Provider, but nobody has pressed Check status,
+// so Gantry hasn't recorded it and the stage still reads as current (and Re-open, which is only for completed
+// stages, is nowhere to be found). Loading the page only *reads* that (`instance.mergedApproval`); recording is
+// these two buttons, each one step. Re-open stays subject to ADR-0026's guard: when the server says it can't be
+// done the button is shown disabled with the reason.
+function MergedApprovalPanel({ instance }) {
+  const notice = instance.mergedApproval
+  const show = Boolean(notice) && instance.workspaceBacked && !isArchived() && !isWriteAccessBlocked()
+  const [busy, setBusy] = useState(null)
+  const [error, setError] = useState('')
+
+  if (!show) return null
+
+  async function record(reopen) {
+    setBusy(reopen ? 'reopen' : 'advance')
+    setError('')
+    try {
+      const params = new URLSearchParams({ slug: instance.slug })
+      const res = await apiFetchForInstance(instance.slug, `/api/instance/stage/record-approval?${params}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reopen }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.message ?? body.error ?? `Recording the approval failed (${res.status})`)
+      // The instance's stage pointer has moved (on, or back to this stage after a re-open); reload it the way Check status does.
+      const effectWillReload = viewedStage.value !== null
+      viewedStage.value = null
+      if (!effectWillReload) {
+        instanceData.value = await loadInstance(instance.slug, null)
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const moveOnLabel = notice.next ? `Record approval and move on to ${notice.next.title}` : 'Record approval'
+  return html`
+    <div class="merged-approval-panel" data-testid="merged-approval-panel" role="status">
+      <p class="merged-approval-notice">
+        <strong>Approval merged, not recorded yet.</strong> Pull Request #${notice.pullRequestId} for "${notice.title}" has been merged on the
+        Provider, but Gantry hasn't recorded the approval — that only happens when you ask it to.
+        ${notice.next
+          ? html`Record it to move on to "${notice.next.title}", or record it and re-open "${notice.title}" if late feedback means it needs more changes.`
+          : html`This is the final stage: recording the approval completes the instance.`}
+      </p>
+      <div class="merged-approval-actions">
+        <button type="button" class="btn primary" disabled=${busy !== null} onClick=${() => record(false)} data-testid="record-approval-advance">
+          ${busy === 'advance' ? 'Recording…' : moveOnLabel}
+        </button>
+        ${notice.next
+          ? html`<button
+              type="button"
+              class="btn"
+              disabled=${busy !== null || !notice.reopen?.allowed}
+              title=${notice.reopen?.allowed ? '' : notice.reopen?.reason ?? ''}
+              onClick=${() => record(true)}
+              data-testid="record-approval-reopen"
+            >
+              ${busy === 'reopen' ? 'Recording…' : 'Record approval and re-open for changes'}
+            </button>`
+          : null}
+      </div>
+      ${notice.next && !notice.reopen?.allowed
+        ? html`<p class="guidance merged-approval-reason" data-testid="record-approval-reopen-reason">Re-open isn't available: ${notice.reopen?.reason}</p>`
+        : null}
+      ${error ? html`<p class="save-status error" role="alert" data-testid="merged-approval-error">${error}</p>` : null}
+    </div>
+  `
+}
+
 // ---------- The viewed stage's whole screen: modules + work-item panel ----------
 // Keyed by stage id from the parent (see ModuleEditorPage) so switching stages remounts this wholesale — fresh CodeMirror instances, matching the old full-DOM-rebuild behaviour. "Clear all fields" and "Render" now live in the view-toggle bar (see ViewModeToolbar, ModuleEditorPage) rather than here, so the field registry they depend on is owned by ModuleEditorPage instead — `onFieldRegistered` is threaded straight through. StageNavigation now lives in ViewModeToolbar to the right of the artefact selector, not as a standalone block here.
+// "Changed since approval" in the editor (#274, ADR-0069): on the current stage, each Field an earlier approved
+// stage prints that a later stage has changed shows its approved wording beside its current wording, with
+// **Restore approved text**. Restoring is an ordinary Save on this stage's branch (so it goes through the Save
+// check), and the flag clears once no flagged Field differs from its approved wording.
+function ChangedSinceApprovalPanel({ instance }) {
+  const [restoring, setRestoring] = useState(null)
+  const flagged = (instance.changedSinceApproval ?? []).filter((entry) => entry.changes?.length)
+  if (flagged.length === 0 || instance.stage.id !== instance.currentStageId || instance.isLocalWorkspace) return null
+  async function restore(change) {
+    setRestoring(change.ref)
+    try {
+      await stageSaveActions.restoreApprovedText(change)
+    } finally {
+      setRestoring(null)
+    }
+  }
+  return html`
+    <section class="changed-since-approval-panel" data-testid="changed-since-approval-panel" aria-label="Changed since approval">
+      <h2>Changed since approval</h2>
+      ${flagged.map(
+        (entry) => html`
+          <div class="changed-approval-stage" key=${entry.stageId} data-stage=${entry.stageId}>
+            <h3>${restorePanelHeading(entry)}</h3>
+            ${entry.changes.map((change) => {
+              const restorable = canRestoreChange(change, instance.modules)
+              return html`
+                <div class="changed-approval-field" key=${change.ref} data-field=${change.ref}>
+                  <h4>${changeLabel(change)}</h4>
+                  <div class="changed-approval-versions">
+                    <div class="changed-approval-version">
+                      <h5>Approved text</h5>
+                      <pre class="changed-approval-text" data-side="approved">${wordingText(change.approved) || '(empty)'}</pre>
+                    </div>
+                    <div class="changed-approval-version">
+                      <h5>Current text</h5>
+                      <pre class="changed-approval-text" data-side="current">${wordingText(change.current) || '(empty)'}</pre>
+                    </div>
+                  </div>
+                  ${restorable
+                    ? html`<button
+                        type="button"
+                        class="btn small"
+                        data-testid="restore-approved-text"
+                        disabled=${isEditingBlocked() || restoring !== null}
+                        onClick=${() => restore(change)}
+                      >
+                        ${restoring === change.ref ? 'Restoring…' : 'Restore approved text'}
+                      </button>`
+                    : html`<p class="changed-approval-note">This stage does not show ${change.moduleTitle} for editing, so its approved text cannot be restored from here.</p>`}
+                </div>
+              `
+            })}
+          </div>
+        `
+      )}
+    </section>
+  `
+}
+
+// ---------- Reviewed copies (#302, ADR-0066) ----------
+// A Reviewed copy is a Word document Gantry rendered that has come back with someone's comments and tracked
+// changes. "Bring in review comments" (in the header) reads the chosen files with Gantry's own reader, refuses
+// any that are not one of this Instance's renders, and keeps the rest with the Instance under `reviews/`;
+// the panel below lists each kept copy's threads by Field, read-only. Gantry never writes into a Reviewed
+// copy or replies to its commenters.
+
+// Bumped after a copy is brought in, so the panel reads the list again.
+const reviewTick = signal(0)
+// #288: bumped after a Save that wrote the decisions log, so the editor's Decisions log panel reads the file again.
+const decisionsLogTick = signal(0)
+
+// Today's content of every Field of a Local workspace's Definition (a folder keeps no history to rebuild a
+// render from), for placing comments by text; `texts: false` gives the Fields alone.
+async function localReviewBasis(inst, { texts }) {
+  const handle = localDirHandle.peek()
+  const structure = inst.localDefinitionStructure
+  const fields = []
+  for (const spec of modulesWithStandard(structure.modules, structure.standardModules)) {
+    let values = {}
+    if (texts) {
+      try {
+        values = parseLocalModuleFile(await readLocalTextFile(handle, localModuleFilesPath(inst.slug, spec.id)), spec).fields ?? {}
+      } catch {
+        // No saved data yet for this module: its Fields are empty.
+      }
+    }
+    for (const field of spec.fields) {
+      const value = values[field.id]
+      fields.push({
+        moduleId: spec.id,
+        moduleTitle: spec.title,
+        fieldId: field.id,
+        fieldTitle: field.title,
+        ...(texts ? { text: Array.isArray(value) ? value.join('\n') : value ?? '' } : {}),
+      })
+    }
+  }
+  return { basis: 'today', fields }
+}
+
+function reviewIoFor(inst) {
+  if (inst.isLocalWorkspace) {
+    const handle = localDirHandle.peek()
+    return localReviewIo(inst.slug, {
+      readText: (path) => readLocalTextFile(handle, path),
+      readBinary: (path) => readLocalBinaryFile(handle, path),
+      localBasis: (options) => localReviewBasis(inst, options),
+    })
+  }
+  return remoteReviewIo(inst.slug, apiFetchForInstance)
+}
+
+function ReviewImportDialog({ instance, onClose }) {
+  const [analysis, setAnalysis] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [added, setAdded] = useState(null)
+  const accepted = analysis ? analysis.items.filter((item) => item.ok) : []
+  const tooBig = Boolean(analysis?.tooBig)
+
+  async function choose(event) {
+    const files = [...event.currentTarget.files]
+    setAnalysis(null)
+    setAdded(null)
+    setError('')
+    if (files.length === 0) return
+    setBusy(true)
+    try {
+      setAnalysis(await analyseReviewFiles(files, expectedFromInstance(instance)))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function bringIn() {
+    setBusy(true)
+    setError('')
+    try {
+      let entries
+      if (instance.isLocalWorkspace) {
+        const handle = localDirHandle.peek()
+        if (!handle) throw new Error('Local workspace folder is not open.')
+        entries = await addReviewedCopiesLocally(instance.slug, accepted, {
+          readText: (path) => readLocalTextFile(handle, path),
+          writeText: (path, text) => writeLocalTextFile(handle, path, text),
+          writeBinary: (path, bytes) => writeLocalBinaryFile(handle, path, bytes),
+        })
+      } else {
+        entries = await uploadReviewedCopies(instance.slug, accepted, apiFetchForInstance)
+      }
+      reviewTick.value = reviewTick.value + 1
+      setAdded(entries)
+      setAnalysis(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return html`
+    <${Modal} ariaLabel="Bring in review comments" onClose=${onClose}>
+      <h3>Bring in review comments</h3>
+      <p class="guidance">
+        Choose the Word documents Gantry rendered that came back with comments. Only Gantry's own renders are accepted; a document from anywhere else
+        belongs among the Source documents. Gantry keeps each one with this Instance as the record of what came back. It never changes the document
+        or replies to the people who commented.
+      </p>
+      <div class="upload-field">
+        <label class="field-label" for="review-files">Reviewed copies (.docx)</label>
+        <input id="review-files" data-testid="review-file-input" type="file" multiple accept=${REVIEW_FILE_ACCEPT} disabled=${busy} onChange=${choose} />
+      </div>
+      ${analysis
+        ? html`<ul class="review-import-list" data-testid="review-import-list">
+            ${analysis.items.map(
+              (item) => html`<li key=${item.name} class=${item.ok ? 'review-import-ok' : 'review-import-refused'} data-ok=${item.ok ? 'true' : 'false'} data-code=${item.code ?? ''}>
+                <strong>${item.name}</strong>
+                <span>${item.ok ? `Accepted: ${item.summary}` : `Refused. ${item.message}`}</span>
+              </li>`
+            )}
+          </ul>`
+        : null}
+      ${tooBig
+        ? html`<p class="load-error" role="alert">These come to ${(analysis.total / 1024 / 1024).toFixed(1)} MB. One upload can hold up to ${REVIEWED_COPY_MAX_BYTES / 1024 / 1024} MB.</p>`
+        : null}
+      ${error ? html`<p class="load-error" role="alert" data-testid="review-import-error">${error}</p>` : null}
+      ${added
+        ? html`<p class="review-import-done" data-testid="review-import-done" role="status">
+            Brought in ${added.length} Reviewed ${added.length === 1 ? 'copy' : 'copies'}. ${instance.isLocalWorkspace ? 'Saved in the workspace folder.' : 'Saved with this Instance.'}
+          </p>`
+        : null}
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onClick=${onClose}>${added ? 'Close' : 'Cancel'}</button>
+        <button type="button" class="btn primary" data-testid="review-bring-in" disabled=${busy || accepted.length === 0 || tooBig} onClick=${bringIn}>
+          ${busy ? 'Working…' : accepted.length > 1 ? `Bring in ${accepted.length} copies` : 'Bring in'}
+        </button>
+      </div>
+    <//>
+  `
+}
+
+function ReviewThreadView({ thread }) {
+  const { placement } = thread
+  return html`
+    <div class="review-thread" data-testid="review-thread" data-resolved=${thread.resolved ? 'true' : 'false'}>
+      ${thread.anchor.text ? html`<blockquote class="review-anchor">${thread.anchor.text}</blockquote>` : null}
+      <p class="review-comment">
+        <strong>${thread.author || 'Unknown'}</strong>
+        <span class="review-date">${reviewDay(thread.date)}</span>
+        ${thread.resolved ? html`<span class="review-badge">Resolved</span>` : null}
+        ${placement.confidence === 'low' ? html`<span class="review-badge" title="Matched by text, to more than one Field or only loosely">Best guess</span>` : null}
+      </p>
+      <p class="review-text">${thread.text}</p>
+      ${thread.replies.length
+        ? html`<ul class="review-replies">
+            ${thread.replies.map(
+              (reply) => html`<li key=${reply.id}><strong>${reply.author || 'Unknown'}</strong> <span class="review-date">${reviewDay(reply.date)}</span><br />${reply.text}</li>`
+            )}
+          </ul>`
+        : null}
+      ${placement.alsoFields?.length
+        ? html`<p class="review-also">Also runs into ${placement.alsoFields.map((f) => f.fieldTitle).join(', ')}.</p>`
+        : null}
+      ${placement.method === 'heading' ? html`<p class="review-also">On the heading above this Field.</p>` : null}
+    </div>
+  `
+}
+
+function ReviewChangeView({ change }) {
+  return html`
+    <div class="review-change" data-testid="review-change" data-kind=${change.kind}>
+      <strong>${change.kind === 'insertion' ? 'Inserted' : 'Deleted'}</strong> by ${change.author || 'Unknown'}
+      <span class="review-date">${reviewDay(change.date)}</span>
+      ${change.placement?.confidence === 'low' ? html`<span class="review-badge">Best guess</span>` : null}
+      <blockquote class="review-anchor">${change.text}</blockquote>
+    </div>
+  `
+}
+
+function ReviewGroupView({ group }) {
+  const title =
+    group.kind === 'field'
+      ? `${group.field.moduleTitle} › ${group.field.fieldTitle}`
+      : group.kind === 'document'
+        ? 'About the document'
+        : "Couldn't be placed"
+  const note =
+    group.kind === 'document'
+      ? 'Comments on the cover, Document Control and table of contents, which Gantry supplies rather than the architect.'
+      : group.kind === 'unplaced'
+        ? 'These could not be matched to a Field.'
+        : null
+  return html`
+    <section class="review-group" data-testid="review-group" data-kind=${group.kind} data-field=${group.kind === 'field' ? `${group.field.moduleId}.${group.field.fieldId}` : undefined}>
+      <h4>${title}</h4>
+      ${note ? html`<p class="review-note">${note}</p>` : null}
+      ${group.threads.map((thread, i) => html`<${ReviewThreadView} key=${`${thread.id}-${i}`} thread=${thread} />`)}
+      ${group.changes.map((change, i) => html`<${ReviewChangeView} key=${`${change.id}-${i}`} change=${change} />`)}
+    </section>
+  `
+}
+
+// The copies read last, so switching Stage (which remounts the panel) doesn't read every one again.
+let reviewCopiesCache = { key: null, copies: [] }
+
+// The Definition version an Instance was made from: a Local workspace holds it itself, otherwise the server serves it.
+async function loadDefinitionStructure(instance) {
+  if (instance.localDefinitionStructure) return instance.localDefinitionStructure
+  const res = await fetch(`/api/definitions/${encodeURIComponent(instance.definition)}/versions/${encodeURIComponent(String(instance.definitionVersion ?? 1))}`)
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.error ?? `Failed to load the Definition "${instance.definition}" (${res.status})`)
+  return body
+}
+
+function ReviewCommentsPanel({ instance }) {
+  const location = useLocation()
+  const tick = reviewTick.value
+  // #303: the AI interview works through review comments as a focused round of cards, where the AI interview itself is available.
+  const interviewBlocked = interviewUnavailableReason(instance, { update: true })
+  const goHere = new URL(window.location.href)
+  goHere.searchParams.set('interview', '1')
+  goHere.searchParams.set('review', '1')
+  const workThroughHref = !interviewBlocked && (!instance.workspaceBacked || offersSourceDocuments(instance)) ? `${goHere.pathname}${goHere.search}` : ''
+  function workThrough(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    location.route(`${goHere.pathname}${goHere.search}`)
+  }
+  // #304 (ADR-0066): the Review response list, made on demand from the decisions logs. Nothing is written to the Reviewed copy or committed.
+  const decisionsStore = useDecisionsStore(instance)
+  const [response, setResponse] = useState({ phase: 'idle', message: '' })
+  async function downloadResponseList() {
+    setResponse({ phase: 'working', message: '' })
+    try {
+      const structure = await loadDefinitionStructure(instance)
+      const stages = structure.stages ?? instance.stages
+      const logs = Object.fromEntries(await Promise.all(stages.map(async (st) => [st.id, await decisionsStore.read(st.id).catch(() => null)])))
+      const modules = modulesWithStandard(structure.modules, structure.standardModules)
+      const fieldTitle = (fieldKey) => {
+        const [moduleId, ...rest] = String(fieldKey).split('.')
+        const mod = modules.find((m) => m.id === moduleId)
+        const field = mod?.fields?.find((f) => f.id === rest.join('.'))
+        return mod && field ? `${mod.title ?? mod.id} · ${field.title ?? field.id}` : String(fieldKey)
+      }
+      const stageTitle = (id) => stages.find((st) => st.id === id)?.title ?? id
+      const made = downloadReviewResponseList(logs, { instanceName: instance.name || instance.slug, fieldTitle, stageTitle })
+      setResponse({ phase: 'idle', message: made ? '' : 'No comment has been answered yet, so there is nothing to list.' })
+    } catch (err) {
+      setResponse({ phase: 'error', message: `The Review response list could not be made: ${err.message}` })
+    }
+  }
+  const key = `${instance.slug}#${tick}`
+  const [state, setState] = useState(() =>
+    reviewCopiesCache.key === key ? { phase: 'ready', copies: reviewCopiesCache.copies, error: '' } : { phase: 'loading', copies: [], error: '' }
+  )
+  useEffect(() => {
+    if (reviewCopiesCache.key === key) {
+      setState({ phase: 'ready', copies: reviewCopiesCache.copies, error: '' })
+      return undefined
+    }
+    let live = true
+    loadReviewedCopies(reviewIoFor(instance))
+      .then((copies) => {
+        reviewCopiesCache = { key, copies }
+        if (live) setState({ phase: 'ready', copies, error: '' })
+      })
+      .catch((err) => live && setState({ phase: 'error', copies: [], error: err.message }))
+    return () => {
+      live = false
+    }
+  }, [key])
+
+  if (state.phase === 'error') return html`<p class="review-note" data-testid="review-copies-error">Couldn't list the Reviewed copies: ${state.error}</p>`
+  if (state.copies.length === 0) return null
+  const artefactTitles = new Map((instance.localDefinitionStructure?.artefacts ?? instance.artefacts ?? []).map((a) => [a.id, a.title]))
+  const stageTitles = new Map(instance.stages.map((s) => [s.id, s.title]))
+  return html`
+    <section class="review-copies-panel" data-testid="review-copies-panel" aria-label="Review comments">
+      <h2>Review comments</h2>
+      ${workThroughHref
+        ? html`<p class="review-note"><a class="btn small" href=${workThroughHref} data-testid="review-work-through" onClick=${workThrough}>Work through these with the AI</a> One card for each comment thread; nothing changes until you answer.</p>`
+        : null}
+      ${decisionsStore && state.copies.some(({ entry }) => (entry.commentsAnswered ?? 0) > 0)
+        ? html`<p class="review-note" data-testid="review-response">
+            <button type="button" class="btn small" data-testid="review-response-download" disabled=${response.phase === 'working'} onClick=${downloadResponseList}>${response.phase === 'working' ? 'Making the list…' : 'Download Review response list'}</button>
+            Each answered comment, who made it, what was decided and why, as a Word document to send back. Gantry never changes the Reviewed copy or replies to the commenters.
+          </p>
+          ${response.message ? html`<p class=${response.phase === 'error' ? 'inline-error' : 'review-note'} role=${response.phase === 'error' ? 'alert' : 'status'} data-testid="review-response-message">${response.message}</p>` : null}`
+        : null}
+      ${state.copies.map(
+        ({ entry, read, placed, error }) => html`
+          <article class="review-copy" key=${entry.id} data-review-id=${entry.id} data-testid="review-copy">
+            <h3>${entry.name}</h3>
+            <p class="review-meta">${describeReview(entry, { artefactTitle: artefactTitles.get(entry.artefact), stageTitle: stageTitles.get(entry.stage) })} · brought in ${reviewDay(entry.date)}</p>
+            ${error ? html`<p class="load-error">Couldn't read this Reviewed copy: ${error}</p>` : null}
+            ${placed?.notice ? html`<p class="review-notice" role="note" data-testid="review-notice">${placed.notice}</p>` : null}
+            ${read && placed.groups.length === 0 ? html`<p class="review-note">No comments or tracked changes in this copy.</p>` : null}
+            ${placed ? placed.groups.map((group, i) => html`<${ReviewGroupView} key=${`${group.kind}-${i}`} group=${group} />`) : null}
+          </article>
+        `
+      )}
+    </section>
+  `
+}
+
 function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   const [topSectionOpen, setTopSectionOpen] = useState(false)
   const [topListOpen, setTopListOpen] = useState(false)
@@ -4170,6 +5063,11 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   return html`
     <main id="modules" data-view-mode=${viewMode.value}>
       <${ReopenStagePanel} instance=${instance} />
+      <${MergedApprovalPanel} instance=${instance} />
+      <${OutOfDatePanel} instance=${instance} />
+      <${ChangedSinceApprovalPanel} instance=${instance} />
+      <${ReviewCommentsPanel} instance=${instance} />
+      <${DecisionsLogSection} instance=${instance} />
       ${advancedMode.value
         ? html`<${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />`
         : null}
@@ -4211,6 +5109,323 @@ const VIEW_MODE_HOTKEY = { ctrlKey: true, shiftKey: true, key: 'v' }
 // folded the old standalone Review/Sign-off panel's review and sign-off
 // functionality into that card, so this shortcut now targets it directly)
 // and briefly highlights it so the author's eye is drawn down.
+// #279/#280 (map #238): the Source documents panel under the toolbar of a local, server, Azure DevOps or GitHub Instance — the evidence an architect uploads before connecting any AI Provider. A local Instance reads and writes its own folder through the handle; every other one goes through /api/instance/sources, which keeps them in the server's storage or, for a Provider's Instance, commits each change (one upload, rename, Extract text again or removal is one commit) to the current Stage's branch. GitLab Instances don't have it yet: they take it when their module Save lands. The person's name stamped on an upload is the Instance's assignee, the nearest thing to an identity the Instance has.
+function offersSourceDocuments(instance) {
+  if (!instance.workspaceBacked) return true
+  return Boolean(instance.workspace?.owner || instance.workspace?.organization)
+}
+
+// The Instance's Source document store: its own folder for a Local workspace, the server's routes otherwise. Shared by the editor's panel and the Interview page (#286).
+function useSourceStore(instance) {
+  const handle = localDirHandle.value
+  const slug = instance.slug
+  return useMemo(() => {
+    if (instance.isLocalWorkspace) return handle ? createLocalSourceStore(handle, slug) : null
+    return createServerSourceClient(slug, (url, init) => apiFetchForInstance(slug, url, init))
+  }, [slug, instance.isLocalWorkspace, handle])
+}
+
+// #288 (map #238, docs/adr/0064): the Instance's decisions log store: its own folder for a Local workspace, /api/instance/decisions otherwise (on an Azure DevOps or GitHub workspace the server keeps the file on the Stage's own branch, #295).
+function useDecisionsStore(instance) {
+  const handle = localDirHandle.value
+  const slug = instance.slug
+  return useMemo(() => {
+    if (instance.workspaceBacked && !offersSourceDocuments(instance)) return null // GitLab and Atlassian take the decisions log when their module Save lands (#295 covers Azure DevOps and GitHub)
+    if (instance.isLocalWorkspace) return handle ? createLocalDecisionsStore(handle, slug) : null
+    return createServerDecisionsStore(slug, (url, init) => apiFetchForInstance(slug, url, init))
+  }, [slug, instance.isLocalWorkspace, instance.workspaceBacked, handle])
+}
+
+// The read-only Decisions log panel in the editor (#288): this Stage's latest answers, open questions and, on request, its history.
+// `reloadKey` changes after a Save so the panel reads the file again.
+function DecisionsLogSection({ instance }) {
+  const store = useDecisionsStore(instance)
+  const [log, setLog] = useState(null)
+  const tick = decisionsLogTick.value
+  useEffect(() => {
+    if (!store) return undefined
+    let live = true
+    store
+      .read(instance.stage.id)
+      .then((found) => live && setLog(found))
+      .catch(() => live && setLog(null))
+    return () => {
+      live = false
+    }
+  }, [store, instance.stage.id, tick])
+  if (!store) return null
+  const fieldTitle = (key) => {
+    const [moduleId, ...rest] = String(key).split('.')
+    const mod = instance.modules.find((m) => m.id === moduleId)
+    const field = mod?.fields?.find((f) => f.id === rest.join('.'))
+    return mod && field ? `${mod.title ?? mod.id} · ${field.title ?? field.id}` : key
+  }
+  const here = new URL(window.location.href)
+  here.searchParams.set('interview', '1')
+  const canResume = instance.stage.id === instance.currentStageId && !instance.archived
+  return html`<${DecisionsLogPanel} log=${log} stageTitle=${instance.stage.title} fieldTitle=${fieldTitle} resumeHref=${canResume ? `${here.pathname}${here.search}` : ''} />`
+}
+
+// #297 (map #238, decided in #249): another Stage's saved Modules, read the way each workspace kind reads them, for working out which Fields are Out of date.
+async function loadStageModulesOf(instance, stage) {
+  if (instance.isLocalWorkspace) {
+    const structure = instance.localDefinitionStructure
+    const full = structure?.stages?.find((s) => s.id === stage.id)
+    return full ? readLocalStageModules(localDirHandle.peek(), instance.slug, full, structure) : []
+  }
+  return (await loadInstance(instance.slug, stage.id)).modules
+}
+
+// #297: the Fields of this Instance that drew on a Source document that has since changed (removed, replaced, or read again with different text), and the documents added since the last interview. The watcher works them out on opening and again after every Source document change and Save (nothing polls); the editor's banner and Field marks, the Source documents panel and the Interview page read what it found.
+function OutOfDateWatcher({ instance }) {
+  const sourceStore = useSourceStore(instance)
+  const decisionsStore = useDecisionsStore(instance)
+  const mountedAt = useRef(sourceListTick.peek())
+  const listed = sourceListTick.value
+  const savedTick = decisionsLogTick.value
+  const key = `${instance.slug}|${instance.stage.id}`
+  useEffect(() => {
+    // The Source documents panel lists the documents on opening and bumps the tick: that is the signal to look, so opening costs one pass.
+    if (!sourceStore || listed === mountedAt.current || !offersSourceDocuments(instance)) return undefined
+    let live = true
+    loadOutOfDate({
+      sourceStore,
+      decisionsStore,
+      stages: instance.stages ?? [],
+      currentStageId: instance.stage.id,
+      currentModules: instance.modules,
+      loadStageModules: (stage) => loadStageModulesOf(instance, stage),
+    })
+      .then((result) => live && (outOfDateState.value = { key, ...result }))
+      .catch(() => live && (outOfDateState.value = { key, flags: [], newSince: [], sources: [] }))
+    return () => {
+      live = false
+    }
+  }, [sourceStore, decisionsStore, key, listed, savedTick, instance.stageVersion])
+  return null
+}
+
+// What the watcher last found for the Instance and Stage on screen (nothing for another one's).
+function useOutOfDate(instance) {
+  const state = outOfDateState.value
+  return state.key === `${instance.slug}|${instance.stage.id}` ? state : { key: '', flags: [], newSince: [], sources: [] }
+}
+
+// The editor's banner: one line per changed document, such as "4 Fields drew on Client brief, now replaced", with the way to bring them up to date (the Interview page, which works on the current Stage of a local or server workspace).
+function OutOfDatePanel({ instance }) {
+  const { flags } = useOutOfDate(instance)
+  const location = useLocation()
+  const lines = outOfDateBannerLines(flags)
+  if (lines.length === 0) return null
+  // #298: "Bring up to date" opens the Interview page on just the flagged Fields, stage by stage in order. A local or server workspace begins at
+  // the first Stage that has any; a remote one can only write its current Stage, so it goes there.
+  const stageIds = (instance.stages ?? []).map((s) => s.id)
+  const startStage = instance.workspaceBacked ? instance.currentStageId : firstFlaggedStage(flags, stageIds) ?? instance.stage.id
+  const reason = interviewUnavailableReason({ ...instance, stage: { ...instance.stage, id: startStage }, currentStageId: instance.currentStageId }, { update: true })
+  const here = new URL(window.location.href)
+  here.searchParams.set('interview', '1')
+  here.searchParams.set('update', '1')
+  function bringUpToDate(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    // The Instance loads again for that Stage when it differs from the one on screen; the Interview page for it replaces this one.
+    if (instance.workspaceBacked) {
+      if (instance.stage.id !== instance.currentStageId) viewedStage.value = null
+    } else if (startStage !== instance.stage.id) {
+      viewedStage.value = startStage
+    }
+    location.route(`${here.pathname}${here.search}`)
+  }
+  const fieldName = (key) => {
+    const [moduleId, ...rest] = String(key).split('.')
+    const mod = instance.modules.find((m) => m.id === moduleId)
+    const field = mod?.fields?.find((f) => f.id === rest.join('.'))
+    return mod && field ? `${mod.title ?? mod.id} › ${field.title ?? field.id}` : key
+  }
+  return html`
+    <section class="out-of-date-banner" data-testid="out-of-date-banner" role="status" aria-label="Out of date Fields">
+      <h2>Out of date</h2>
+      <ul>
+        ${lines.map(
+          (line) => html`<li key=${`${line.source ?? 'field'}|${line.change}`} data-source=${line.source ?? ''} data-change=${line.change}>
+            <span data-testid="out-of-date-line">${line.text}:</span>
+            ${reason
+              ? html`<span class="ood-fields" title=${reason}>Bring up to date from the Interview page (${reason})</span>`
+              : html`<a class="btn small" href=${`${here.pathname}${here.search}`} data-testid="bring-up-to-date" onClick=${bringUpToDate}>Bring up to date</a>`}
+            <span class="ood-fields">${line.fields.map(fieldName).join(', ')}</span>
+          </li>`
+        )}
+      </ul>
+    </section>
+  `
+}
+
+// #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
+function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval, onDraftAhead, update = false, review = false, revise = false, onReopenStage, onOpenStage, onReviseStage, onLeaveRevision, onUpdateStage }) {
+  const store = useSourceStore(instance)
+  const location = useLocation()
+  // #303: the kept Reviewed copies, read and placed on Fields, for the review round; read again after one is brought in.
+  const reviewVersion = reviewTick.value
+  const [reviewCopies, setReviewCopies] = useState(null)
+  const [reviewDialog, setReviewDialog] = useState(false)
+  useEffect(() => {
+    let live = true
+    loadReviewedCopies(reviewIoFor(instance))
+      .then((copies) => live && setReviewCopies(copies))
+      .catch(() => live && setReviewCopies([]))
+    return () => {
+      live = false
+    }
+  }, [instance.slug, reviewVersion])
+  function openReviewRound() {
+    const here = new URL(window.location.href)
+    here.searchParams.set('interview', '1')
+    here.searchParams.set('review', '1')
+    location.route(`${here.pathname}${here.search}`)
+  }
+  async function recordReviewAnswers(counts) {
+    if (instance.isLocalWorkspace) {
+      const handle = localDirHandle.peek()
+      await recordAnsweredReviewsLocally(instance.slug, counts, {
+        readText: (path) => readLocalTextFile(handle, path),
+        writeText: (path, text) => writeLocalTextFile(handle, path, text),
+      })
+    } else {
+      await recordAnsweredReviews(instance.slug, counts, apiFetchForInstance)
+    }
+    reviewTick.value = reviewTick.value + 1
+  }
+  const outOfDate = useOutOfDate(instance)
+  const decisionsStore = useDecisionsStore(instance)
+  // #298: on an Azure DevOps or GitHub workspace a re-open (ADR-0026) is refused while the current Stage has a branch, and uploading a Source
+  // document starts that branch. The Instance in the editor may have been read before that, so when Fields are flagged it is read once more here,
+  // and the cards are built from the answer. `undefined` until known.
+  const hasFlags = outOfDate.flags.length > 0
+  const [stageStarted, setStageStarted] = useState(undefined)
+  useEffect(() => {
+    if (!instance.workspaceBacked || !hasFlags) return undefined
+    let live = true
+    loadInstance(instance.slug, null)
+      .then((fresh) => live && setStageStarted(Boolean(fresh.stageBranchExists)))
+      .catch(() => live && setStageStarted(Boolean(instance.stageBranchExists)))
+    return () => {
+      live = false
+    }
+  }, [instance.slug, instance.currentStageId, hasFlags])
+  if (!store || !decisionsStore) return html`<p class="loading">Loading…</p>`
+  const loadStructure = () => loadDefinitionStructure(instance)
+  // #299: every comment on the Stage's Pull Request, resolved ones included. Read-only: nothing is ever written to a Pull Request. Never throws.
+  async function loadPrComments(stageId) {
+    try {
+      const res = await apiFetchForInstance(instance.slug, `/api/instance/pull-request-comments?slug=${encodeURIComponent(instance.slug)}&stage=${encodeURIComponent(stageId)}`)
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, message: `The comments on the Pull Request could not be read: ${body.error ?? body.message ?? res.status}` }
+      return { ok: true, comments: body.comments ?? [], pullRequestId: body.pullRequestId ?? null }
+    } catch (err) {
+      return { ok: false, message: `The comments on the Pull Request could not be read: ${err.message}` }
+    }
+  }
+  async function loadOtherSaved() {
+    const modules = []
+    if (instance.isLocalWorkspace) {
+      const handle = localDirHandle.peek()
+      const structure = instance.localDefinitionStructure
+      for (const stage of structure.stages) {
+        if (stage.id !== instance.stage.id) modules.push(...(await readLocalStageModules(handle, instance.slug, stage, structure)))
+      }
+    } else {
+      for (const stage of instance.stages) {
+        if (stage.id !== instance.stage.id) modules.push(...(await loadInstance(instance.slug, stage.id)).modules)
+      }
+    }
+    return modules
+  }
+  // #290 (ADR-0064) / #295: opening the Interview page on an Azure DevOps or GitHub workspace runs Check status once, and what the Provider
+  // reports overrides the log's status block. The page does that itself (it shows the answer, and a merge replaces the page), and only when
+  // the Stage has a Pull Request on file: with none there is nothing to ask. A local or server workspace has no Provider to ask; its own
+  // record of the current Stage is the report (the page does that).
+  // `key`: a run (#293) moves the Instance on to its next Stage, and the page for that Stage starts afresh.
+  return html`<${OutOfDateWatcher} instance=${instance} />${reviewDialog ? html`<${ReviewImportDialog} instance=${instance} onClose=${() => setReviewDialog(false)} />` : null}<${InterviewPage}
+    key=${`${instance.stage.id}${update ? '|update' : ''}${review ? '|review' : ''}${revise ? '|revise' : ''}`}
+    review=${review}
+    reviewCopies=${reviewCopies}
+    onBringInReview=${() => setReviewDialog(true)}
+    onOpenReview=${openReviewRound}
+    onReviewAnswered=${recordReviewAnswers}
+    outOfDate=${outOfDate.flags}
+    newSince=${outOfDate.newSince}
+    flagsReady=${outOfDate.key !== '' && (!instance.workspaceBacked || !hasFlags || stageStarted !== undefined)}
+    stageStarted=${stageStarted}
+    instance=${instance}
+    store=${store}
+    actor=${instance.assignee ?? ''}
+    editorHref=${editorHref}
+    blockedReason=${interviewUnavailableReason(instance, { update: update || review, revise })}
+    update=${update}
+    revise=${revise}
+    loadPrComments=${loadPrComments}
+    onReviseStage=${onReviseStage}
+    onLeaveRevision=${onLeaveRevision}
+    onUpdateStage=${onUpdateStage}
+    onReopenStage=${onReopenStage}
+    onOpenStage=${onOpenStage}
+    loadStructure=${loadStructure}
+    loadOtherSaved=${loadOtherSaved}
+    decisionsStore=${decisionsStore}
+    onSaveDrafts=${onSaveDrafts}
+    onAdvance=${onAdvance}
+    onRequestApproval=${onRequestApproval}
+    onReRenderEarlier=${onReRenderEarlier}
+    onCheckApproval=${onCheckApproval}
+    onDraftAhead=${onDraftAhead}
+  />`
+}
+
+function SourceDocumentsSection({ instance }) {
+  const store = useSourceStore(instance)
+  const { newSince } = useOutOfDate(instance)
+  const newSinceIds = useMemo(() => new Set(newSince.map((s) => s.id)), [newSince])
+  const [notice, setNotice] = useState('')
+  const known = useRef({})
+  // #281: what the editor's preview needs to show a citation (the panel tells us each time it lists) and how to open one.
+  const onList = useCallback((list) => {
+    const index = {}
+    for (const e of list.entries) index[e.id] = { title: e.title, filename: e.filename, removed: Boolean(e.removedAt) }
+    known.current = index
+    sourceIndex.value = index
+  }, [])
+  useEffect(() => {
+    if (!store) return undefined
+    sourceOpener.open = async (id) => {
+      const entry = known.current[id]
+      if (!entry || entry.removed) return
+      try {
+        setNotice('')
+        await openSourceDocument(store, { id, ...entry })
+      } catch (err) {
+        setNotice(err.message)
+      }
+    }
+    return () => {
+      sourceOpener.open = null
+      sourceIndex.value = null
+    }
+  }, [store])
+  if (!store) return null
+  return html`<div class="source-documents-wrap">
+    <${SourceDocumentsPanel}
+      store=${store}
+      actor=${instance.assignee ?? ''}
+      readOnly=${Boolean(instance.archived) || isWriteAccessBlocked()}
+      commitNote=${instance.workspaceBacked ? "Each upload, rename, new text read and removal is saved straight away as its own commit on this Stage's branch. It does not wait for Save." : ''}
+      onList=${onList}
+      newSince=${newSinceIds}
+      archiveName=${`${String(instance.name || instance.slug || 'Instance').replace(/[\\/:*?"<>|]/g, ' ').trim()} - Source documents.zip`}
+    />
+    ${notice ? html`<p class="inline-error" role="alert" data-testid="source-document-open-error">${notice}</p>` : null}
+  </div>`
+}
+
 function ViewModeToolbar({
   instance,
   visibleFieldIds,
@@ -4600,8 +5815,36 @@ function GantryBrandIcon() {
 // instance.yaml) rather than only the slug — falling back to the slug, unchanged, when no name is
 // set. Once a name is shown, the slug moves to its own small badge beside `.instance-ref` so it's
 // still visible, just no longer the primary label.
-function AppHeader({ instance }) {
+// #286/#295: the AI interview works on the current Stage of a local, server, Azure DevOps or GitHub workspace Instance (GitLab and Atlassian take it when their module Save lands, as Source documents do). '' when it can be opened, else the reason it can't.
+// #298: Bring up to date (`update`) is let in on a Stage other than the current one, because the link that opens it goes to the Stage that has something to bring up to date (a local or server workspace edits any Stage; a remote one is taken to its current Stage).
+function interviewUnavailableReason(instance, { update = false, revise = false } = {}) {
+  if (instance.workspaceBacked && !offersSourceDocuments(instance)) return 'The AI interview is not available on GitLab or Atlassian workspaces yet.'
+  if (instance.archived) return 'This Instance is archived. Restore it to use the AI interview.'
+  if (isWriteAccessBlocked()) return 'The AI interview needs write access to this Instance.'
+  if (revise) {
+    // #299: a Stage the Owner sent back is the Instance's current Stage, with its Pull Request open.
+    if (!instance.workspaceBacked) return 'Only a Stage awaiting approval on an Azure DevOps or GitHub workspace can be revised.'
+    if (instance.stage.id !== instance.currentStageId) return 'A revision works on the current Stage. Open the current Stage to use it.'
+  } else if (update) {
+    // A remote workspace brings up its current Stage and (#299, for Fields drafted from content a revision changed) one drafted ahead of it; a Stage the Instance has moved past is closed.
+    const order = (instance.stages ?? []).map((s) => s.id)
+    const ahead = order.indexOf(instance.stage.id) > order.indexOf(instance.currentStageId)
+    if (instance.workspaceBacked && instance.stage.id !== instance.currentStageId && !ahead) return 'Bring up to date works on the current Stage of a remote workspace. Open the current Stage to use it.'
+  } else if (instance.stage.id !== instance.currentStageId) {
+    // #296 (docs/adr/0063): on an Azure DevOps or GitHub workspace the AI drafts ahead on a Stage after the current one while the Owner
+    // reviews the earlier one. A Stage the Instance has moved past is complete and stays closed to it.
+    const order = (instance.stages ?? []).map((s) => s.id)
+    const ahead = instance.workspaceBacked && order.indexOf(instance.stage.id) > order.indexOf(instance.currentStageId)
+    if (!ahead) return 'The AI interview works on the current Stage. Open the current Stage to use it.'
+  }
+  return ''
+}
+
+function AppHeader({ instance, onOpenInterview }) {
   const [openMenu, setOpenMenu] = useState(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const reviewBlocked = isArchived() || isWriteAccessBlocked()
+  const interviewReason = interviewUnavailableReason(instance)
 
   return html`
     <header class="app-header">
@@ -4625,20 +5868,53 @@ function AppHeader({ instance }) {
           open=${openMenu === 'settings'}
           onOpenChange=${(next) => setOpenMenu(next ? 'settings' : null)}
         />
+        ${onOpenInterview && (!instance.workspaceBacked || offersSourceDocuments(instance))
+          ? html`<button
+              type="button"
+              class="btn small"
+              data-testid="open-ai-interview"
+              disabled=${Boolean(interviewReason)}
+              title=${interviewReason || 'Open the AI interview: the AI reads your Source documents and drafts this Stage with you'}
+              onClick=${onOpenInterview}
+            >
+              ✦ AI interview
+            </button>`
+          : null}
+        <button
+          type="button"
+          class="btn small"
+          data-testid="bring-in-review-comments"
+          disabled=${reviewBlocked}
+          title=${reviewBlocked ? 'Editing is not available here, so a Reviewed copy cannot be brought in.' : 'Bring in a Word document of this Instance that came back with comments'}
+          onClick=${() => setReviewOpen(true)}
+        >
+          Bring in review comments
+        </button>
+        ${reviewOpen ? html`<${ReviewImportDialog} instance=${instance} onClose=${() => setReviewOpen(false)} />` : null}
       </div>
       <p id="stage-line">${instance.stage.title} (gate: ${instance.stage.gate})</p>
+      ${instance.changedSinceApproval?.length
+        ? html`<p class="changed-since-approval-notice" data-testid="changed-since-approval-notice">
+            <strong>Changed since approval:</strong>
+            ${instance.changedSinceApproval.map((entry) => changedEntryLabel(entry)).join(' · ')}
+            — a later stage changed Fields these approved stages print. The current stage's approval re-approves them.
+          </p>`
+        : null}
       <nav id="stage-nav">
         ${instance.stages.map((stage) => {
           const isCurrent = stage.id === instance.currentStageId
           const isViewed = stage.id === instance.stage.id
+          const changed = changedEntryFor(instance.changedSinceApproval, stage.id)
           return html`
             <button
               type="button"
               key=${stage.id}
-              class=${'btn small' + (isViewed ? ' active' : '') + (isCurrent ? ' stage-current' : '')}
+              class=${'btn small' + (isViewed ? ' active' : '') + (isCurrent ? ' stage-current' : '') + (changed ? ' stage-changed-since-approval' : '')}
+              data-changed-since-approval=${changed ? 'true' : undefined}
+              title=${changed ? `Changed since approval — ${changedEntryLabel(changed)}` : undefined}
               onClick=${isViewed ? undefined : afterUnsavedCheck(() => (viewedStage.value = stage.id))}
             >
-              ${stage.title}${isCurrent ? ' (current)' : ''}
+              ${stage.title}${isCurrent ? ' (current)' : ''}${changed ? html` <span class="changed-since-approval-flag">Changed since approval</span>` : null}
             </button>
           `
         })}
@@ -4721,6 +5997,9 @@ function ModuleEditorPage({ slug: routeRef }) {
     })
   }, [routeRef])
 
+  // #286: an AI interview session lives while this Instance's editor page is open, so going to the editor and back keeps it.
+  useEffect(() => () => clearInterviewSessions(), [routeRef])
+
   const instance = instanceData.value
   const error = loadError.value
   const [selectedArtefactId, setSelectedArtefactId] = useState(null)
@@ -4748,8 +6027,14 @@ function ModuleEditorPage({ slug: routeRef }) {
   // the saved text makes it clean again. Everything here reads signals and
   // refs, never this render's `instance`, because the listeners below are
   // installed once.
-  const savedRef = useRef({ key: null, payloads: new Map(), keys: new Map() })
+  const savedRef = useRef({ key: null, payloads: new Map(), keys: new Map(), version: null })
+  // #288: the decisions log the next stage Save is to write with the Modules (set by the Interview page's Save, taken by `writeStage`).
+  const pendingDecisionsRef = useRef(null)
+  // #290: the log entries a Save's clash cards added (how the architect settled each Field), kept so the Interview page can commit them too.
+  const settledEntriesRef = useRef([])
   const [leavePrompt, setLeavePrompt] = useState(null)
+  // The Field-by-Field dialog (ADR-0068, #270): `{ inst, conflicts, resolve }` while a Save waits on the author.
+  const [clashPrompt, setClashPrompt] = useState(null)
   const locationRef = useRef(null)
   locationRef.current = useLocation()
   const editorUrlRef = useRef(null)
@@ -4778,6 +6063,8 @@ function ModuleEditorPage({ slug: routeRef }) {
       key: stageKey(inst),
       payloads,
       keys: new Map([...payloads].map(([id, payload]) => [id, payloadKey(payload)])),
+      // ADR-0068 (#270): the stage's version when this baseline was read, the one a Save is checked against.
+      version: inst.stageVersion ?? null,
     }
     batch(() => {
       moduleSaveStatus.value = {}
@@ -4796,10 +6083,105 @@ function ModuleEditorPage({ slug: routeRef }) {
     if (ids.join('\n') !== current.dirtyModuleIds.join('\n')) stageSave.value = { ...current, dirtyModuleIds: ids }
   }
 
-  // Writes only the changed modules: through the folder handle for a local
-  // workspace (works offline, ADR-0029), otherwise one request — one commit on
-  // an Azure-DevOps-backed stage branch. Resolves true when the save worked.
-  async function saveStage() {
+  // One attempt to write `payloads` for the stage, checked against `baseVersion` (ADR-0068, #270).
+  // Resolves `{ statusModules, stageVersion }` when it was written, or `{ clash: { stageVersion,
+  // current } }` — what is saved now, Module by Module — when the stage has moved on since it was
+  // read, in which case nothing was written. A local workspace is read and written through the
+  // folder handle (works offline, ADR-0029), so it makes the same check itself; any other workspace
+  // is one request, which is one commit on the stage's branch.
+  async function writeStage(inst, payloads, baseVersion) {
+    if (inst.isLocalWorkspace) {
+      const handle = localDirHandle.peek()
+      if (!handle) throw new Error('Local workspace folder is not open.')
+      const structure = inst.localDefinitionStructure
+      const stage = structure.stages.find((s) => s.id === inst.stage.id)
+      if (baseVersion) {
+        const current = await readLocalStageModules(handle, inst.slug, stage, structure)
+        const currentVersion = stageVersionOfModules(current)
+        if (currentVersion !== baseVersion) return { clash: { stageVersion: currentVersion, current: stagePayloads(current) } }
+      }
+      // #288: the Stage's decisions log is worked out first (a delta that would change an entry fails here, before any Module is
+      // written) and written with the Modules.
+      const decisions = pendingDecisionsRef.current
+      const logPlan = decisions ? await planLocalDecisions(handle, inst.slug, inst.stage.id, decisions) : null
+      for (const [id, payload] of Object.entries(payloads)) {
+        const mod = inst.modules.find((m) => m.id === id)
+        const moduleSpec = {
+          id: mod.id,
+          title: mod.title,
+          fields: mod.fields.filter((f) => !f.custom).map((f) => ({ id: f.id, title: f.title, type: f.type })),
+        }
+        await writeLocalTextFile(handle, localModuleFilesPath(inst.slug, id), renderLocalModuleInstanceFile(id, moduleSpec, payload))
+      }
+      if (logPlan) {
+        await writeLocalTextFile(handle, logPlan.path, logPlan.text)
+        pendingDecisionsRef.current = null
+        decisionsLogTick.value += 1
+      }
+      return {
+        statusModules: (await getLocalStatus(handle, inst.slug, structure, inst.stage.id)).modules,
+        stageVersion: stageVersionOfModules(await readLocalStageModules(handle, inst.slug, stage, structure)),
+      }
+    }
+    const params = new URLSearchParams({ stage: inst.stage.id, slug: inst.slug })
+    const res = await apiFetchForInstance(inst.slug, `/api/instance/modules?${params}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modules: payloads, ...(baseVersion ? { baseVersion } : {}), ...(pendingDecisionsRef.current ? { decisions: pendingDecisionsRef.current } : {}) }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (res.status === 409 && body.code === 'stage_changed') return { clash: { stageVersion: body.stageVersion, current: body.current } }
+    if (!res.ok) throw new Error(body.message ?? body.error ?? `the server answered ${res.status}`)
+    if (pendingDecisionsRef.current) {
+      pendingDecisionsRef.current = null
+      decisionsLogTick.value += 1
+    }
+    return { statusModules: body.modules ?? [], stageVersion: body.stageVersion ?? null }
+  }
+
+  // Asks which version to keep for each Field both sides changed; resolves a map for mergeStage's
+  // `resolutions`, or null when the author cancels (nothing is saved).
+  function askClashes(inst, conflicts) {
+    return new Promise((resolve) => setClashPrompt({ inst, conflicts, resolve }))
+  }
+
+  // Puts the settled content of every Module into the editors and the saved baseline: Fields
+  // taken from the other side appear, and what was just written is what is saved. A Field whose
+  // value is already right is left alone, so the caret stays where it is.
+  function applySettled(inst, settled, version) {
+    const key = stageKey(inst)
+    const latest = instanceData.peek()
+    if (savedRef.current.key !== key || !latest || stageKey(latest) !== key) return
+    for (const [id, payload] of Object.entries(settled)) {
+      savedRef.current.payloads.set(id, payload)
+      savedRef.current.keys.set(id, payloadKey(payload))
+    }
+    savedRef.current.version = version
+    instanceData.value = {
+      ...latest,
+      ...(version ? { stageVersion: version } : {}),
+      modules: latest.modules.map((mod) => {
+        const payload = settled[mod.id]
+        return payload ? { ...mod, status: payload.status, owner: payload.owner, fields: savedFields(mod, payload) } : mod
+      }),
+    }
+    if (registryRef.current.stageKey !== key) return
+    const controls = new Map(registryRef.current.entries.map((entry) => [`${entry.moduleId}.${entry.field.id}`, entry]))
+    for (const { field, control, moduleId } of controls.values()) {
+      const payload = settled[moduleId]
+      if (!payload || !(field.id in payload.fields)) continue
+      if (JSON.stringify(control.getValue()) !== JSON.stringify(payload.fields[field.id])) control.setValue(payload.fields[field.id])
+    }
+  }
+
+  // Saves every changed module (ADR-0068): first against the version the stage had when it was
+  // read. If someone else has saved since, each Field is settled three ways between what the
+  // author started from, what is saved now and what the author has — only they changed it, theirs
+  // is kept; only the other side did, theirs is taken; both did, the author picks or edits — and
+  // the result is saved against the version just seen. Resolves true when the save worked.
+  async function saveStage(options) {
+    // #290: an AI session settles a clash as a round of cards (`options.settleClashes`); the editor asks with its dialog.
+    const settleClashes = typeof options?.settleClashes === 'function' ? options.settleClashes : null
     refreshDirty()
     const inst = instanceData.peek()
     const { dirtyModuleIds, phase } = stageSave.peek()
@@ -4811,45 +6193,69 @@ function ModuleEditorPage({ slug: routeRef }) {
     )
     stageSave.value = { ...stageSave.peek(), phase: 'saving', message: '' }
     try {
-      let statusModules
-      if (inst.isLocalWorkspace) {
-        const handle = localDirHandle.peek()
-        if (!handle) throw new Error('Local workspace folder is not open.')
-        for (const id of dirtyModuleIds) {
-          const mod = inst.modules.find((m) => m.id === id)
-          const moduleSpec = {
-            id: mod.id,
-            title: mod.title,
-            fields: mod.fields.filter((f) => !f.custom).map((f) => ({ id: f.id, title: f.title, type: f.type })),
+      const base = Object.fromEntries(savedRef.current.key === key ? savedRef.current.payloads : [])
+      let toWrite = payloads
+      let baseVersion = savedRef.current.key === key ? savedRef.current.version : null
+      let settled = null
+      let result
+      for (let attempt = 0; ; attempt++) {
+        result = await writeStage(inst, toWrite, baseVersion)
+        if (!result.clash) break
+        if (attempt >= 4) throw new Error('this stage keeps changing under you — try again in a moment')
+        const theirs = result.clash.current
+        const mineAll = { ...base, ...payloads }
+        let merge = mergeStage({ base, mine: mineAll, theirs })
+        if (merge.conflicts.length > 0) {
+          let resolutions
+          if (settleClashes) {
+            const settled = await settleClashes(merge.conflicts.map((conflict) => ({ ...conflict, label: clashLabel(inst, conflict) })))
+            resolutions = settled?.resolutions ?? null
+            if (settled?.entries?.length) {
+              settledEntriesRef.current = [...settledEntriesRef.current, ...settled.entries]
+              const pending = pendingDecisionsRef.current ?? { entries: [] }
+              pendingDecisionsRef.current = { ...pending, entries: [...(pending.entries ?? []), ...settled.entries] }
+            }
+          } else {
+            resolutions = await askClashes(inst, merge.conflicts)
           }
-          await writeLocalTextFile(handle, localModuleFilesPath(inst.slug, id), renderLocalModuleInstanceFile(id, moduleSpec, payloads[id]))
+          if (!resolutions) {
+            // Cancelled: nothing was written and the author's edits stay as they are.
+            stageSave.value = { ...stageSave.peek(), phase: 'idle', message: '' }
+            return false
+          }
+          merge = mergeStage({ base, mine: mineAll, theirs, resolutions })
         }
-        statusModules = (await getLocalStatus(handle, inst.slug, inst.localDefinitionStructure, inst.stage.id)).modules
-      } else {
-        const params = new URLSearchParams({ stage: inst.stage.id, slug: inst.slug })
-        const res = await apiFetchForInstance(inst.slug, `/api/instance/modules?${params}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ modules: payloads }),
-        })
-        const body = await res.json().catch(() => ({}))
-        if (!res.ok) throw new Error(body.message ?? body.error ?? `the server answered ${res.status}`)
-        statusModules = body.modules ?? []
+        settled = merge.payloads
+        baseVersion = result.clash.stageVersion
+        toWrite = Object.fromEntries(merge.toWrite.map((id) => [id, merge.payloads[id]]))
+        if (merge.toWrite.length === 0) {
+          // What is saved already has everything the author had: nothing to write.
+          result = { statusModules: [], stageVersion: baseVersion }
+          break
+        }
       }
-      if (savedRef.current.key === key) {
+      if (settled) {
+        applySettled(inst, settled, result.stageVersion)
+      } else if (savedRef.current.key === key) {
         for (const id of dirtyModuleIds) {
           savedRef.current.payloads.set(id, payloads[id])
           savedRef.current.keys.set(id, payloadKey(payloads[id]))
         }
+        savedRef.current.version = result.stageVersion
       }
+      const { statusModules } = result
       batch(() => {
         moduleSaveStatus.value = {
           ...moduleSaveStatus.peek(),
-          ...Object.fromEntries(dirtyModuleIds.map((id) => [id, saveStatusLine(statusModules.find((m) => m.id === id))])),
+          ...Object.fromEntries(
+            dirtyModuleIds.filter((id) => statusModules.some((m) => m.id === id)).map((id) => [id, saveStatusLine(statusModules.find((m) => m.id === id))])
+          ),
         }
-        stageSave.value = { ...stageSave.peek(), phase: 'saved', message: '' }
+        stageSave.value = { ...stageSave.peek(), phase: 'saved', message: settled ? 'Saved — merged with changes saved meanwhile' : '' }
       })
       refreshDirty()
+      // #274: a Save can clear (or raise) the "changed since approval" flag, so look at it again while it is showing.
+      if (inst.changedSinceApproval?.length) void refreshChangedSinceApproval(inst)
       setTimeout(() => {
         if (stageSave.peek().phase === 'saved') stageSave.value = { ...stageSave.peek(), phase: 'idle' }
       }, 2500)
@@ -4858,6 +6264,44 @@ function ModuleEditorPage({ slug: routeRef }) {
       stageSave.value = { ...stageSave.peek(), phase: 'error', message: `Save failed: ${err.message}` }
       return false
     }
+  }
+
+  // Re-reads which earlier approved stages are flagged "changed since approval" (ADR-0069, #274) and swaps
+  // only that into the page, so nothing the author is typing is disturbed. The flag is advisory: a failed
+  // read leaves what is showing.
+  async function refreshChangedSinceApproval(inst) {
+    try {
+      const fresh = await loadInstance(inst.slug, inst.stage.id)
+      const latest = instanceData.peek()
+      if (!latest || stageKey(latest) !== stageKey(inst)) return
+      instanceData.value = { ...latest, changedSinceApproval: fresh.changedSinceApproval ?? [] }
+    } catch {
+      // keep the flag as it was
+    }
+  }
+
+  // Restore approved text (#274, ADR-0069): puts one flagged Field's approved wording into the editor and
+  // saves it on this stage's branch. It is the ordinary stage Save, so it is checked against what a
+  // colleague saved meanwhile (ADR-0068) and asks only when you both changed the same Field. Resolves true
+  // when the wording was saved.
+  async function restoreApprovedText(change) {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked() || !canRestoreChange(change, inst.modules)) return false
+    const entry = registryRef.current.stageKey === stageKey(inst)
+      ? registryRef.current.entries.findLast((e) => e.moduleId === change.moduleId && e.field.id === change.fieldId)
+      : null
+    if (entry) {
+      entry.control.setValue(change.approved)
+    } else {
+      // The Field's editor is not on screen (another Artefact is selected): put the wording where the Save reads it from.
+      instanceData.value = {
+        ...inst,
+        modules: inst.modules.map((mod) =>
+          mod.id === change.moduleId ? { ...mod, fields: mod.fields.map((field) => (field.id === change.fieldId ? { ...field, value: change.approved } : field)) } : mod
+        ),
+      }
+    }
+    return saveStage()
   }
 
   // Puts every unsaved module back to what's saved: editor text, list rows,
@@ -4908,7 +6352,7 @@ function ModuleEditorPage({ slug: routeRef }) {
     }
   }
 
-  stageSaveActions = { save: saveStage, confirmLeave }
+  stageSaveActions = { save: saveStage, confirmLeave, restoreApprovedText }
 
   useEffect(() => {
     editorUrlRef.current = window.location.pathname + window.location.search
@@ -5031,6 +6475,271 @@ function ModuleEditorPage({ slug: routeRef }) {
     setSelectedArtefactId(artefactId)
   }
 
+  // ---- The AI interview (#286) ----
+  // The Interview page is this same route with `?interview=1`, so the Save, the Save check and its dialogs below are the editor's own.
+  const interviewUrl = new URL(locationRef.current.url, window.location.origin)
+  const interviewOpen = interviewUrl.searchParams.get('interview') === '1'
+  // #298: `?interview=1&update=1` is Bring up to date, the Interview page on just the Fields flagged Out of date.
+  const updateOpen = interviewOpen && interviewUrl.searchParams.get('update') === '1'
+  // #303: `?interview=1&review=1` is the review round, the Interview page on just the comments of the Reviewed copies kept with the Instance.
+  const reviewRoundOpen = interviewOpen && !updateOpen && interviewUrl.searchParams.get('review') === '1'
+  // #299: `?interview=1&revise=1` is the revision of a Stage the Owner sent back, the Interview page on the current Stage of an Azure DevOps or GitHub workspace.
+  const reviseOpen = interviewOpen && interviewUrl.searchParams.get('revise') === '1'
+  const editorHref = (() => {
+    const params = new URLSearchParams(interviewUrl.search)
+    params.delete('interview')
+    params.delete('update')
+    params.delete('review')
+    params.delete('revise')
+    return interviewUrl.pathname + (params.size ? `?${params}` : '')
+  })()
+
+  async function openInterview() {
+    if (!(await confirmLeave())) return
+    // The editors of the Stage are about to go away; the Save reads the Fields' values from the page's data, not from them.
+    registryRef.current = { stageKey: null, entries: [] }
+    const params = new URLSearchParams(interviewUrl.search)
+    params.set('interview', '1')
+    locationRef.current.route(`${interviewUrl.pathname}?${params}`)
+  }
+
+  // Puts the AI's drafts into the Modules' Fields, leaves those Modules `draft`, and does the ordinary stage Save (one Save, through the
+  // Save check). On a failure or a cancelled clash the Fields go back to what was saved. `check` is Gantry's real Gate check on what
+  // was just saved, for the Artefact aimed for.
+  async function saveInterviewDrafts(drafts, { artefactId, decisions = null, settleClashes = null } = {}) {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    // No editor is mounted on the Interview page. Any still registered are left over from a visit to the editor (the unsaved-drafts banner
+    // sends people back and forth, #289) and hold stale values that would hide the drafts from the Save.
+    registryRef.current = { stageKey: stageKey(inst), entries: [] }
+    settledEntriesRef.current = []
+    // #288: the decisions log is part of this Save. `writeStage` takes it with the Modules; if the Save has no Module to write
+    // (the drafts equal what is saved), it is written on its own below.
+    pendingDecisionsRef.current = decisions
+    const touched = new Set(Object.values(drafts).map((draft) => draft.moduleId))
+    instanceData.value = {
+      ...inst,
+      modules: inst.modules.map((mod) =>
+        touched.has(mod.id)
+          ? {
+              ...mod,
+              status: 'draft',
+              fields: mod.fields.map((field) => {
+                const draft = drafts[`${mod.id}.${field.id}`]
+                return draft ? { ...field, value: draft.value } : field
+              }),
+            }
+          : mod
+      ),
+    }
+    const saved = await saveStage({ settleClashes })
+    // What was actually sent for the log: the session's delta and the entries the clash cards added.
+    const sentDecisions = decisions ? { ...decisions, entries: [...(decisions.entries ?? []), ...settledEntriesRef.current] } : null
+    if (saved && pendingDecisionsRef.current) {
+      try {
+        const store = inst.isLocalWorkspace ? createLocalDecisionsStore(localDirHandle.peek(), inst.slug) : createServerDecisionsStore(inst.slug, (url, init) => apiFetchForInstance(inst.slug, url, init))
+        await store.write(inst.stage.id, pendingDecisionsRef.current)
+        decisionsLogTick.value += 1
+      } catch (err) {
+        pendingDecisionsRef.current = null
+        return { ok: false, message: `The Stage was saved, but its decisions log was not: ${err.message}`, settledIds: settledEntriesRef.current.map((e) => e.id) }
+      }
+      pendingDecisionsRef.current = null
+    }
+    if (!saved) {
+      pendingDecisionsRef.current = null
+      const latest = instanceData.peek()
+      if (latest && stageKey(latest) === stageKey(inst)) {
+        instanceData.value = { ...latest, modules: latest.modules.map((mod) => (touched.has(mod.id) ? inst.modules.find((m) => m.id === mod.id) ?? mod : mod)) }
+      }
+      return { ok: false, message: stageSave.peek().message || 'The Save was cancelled, so nothing was saved.', settledIds: settledEntriesRef.current.map((e) => e.id) }
+    }
+    // #300: a Save can raise "changed since approval" on an earlier approved Stage, and the run plan shows it, so look at it again.
+    if (inst.workspaceBacked) await refreshChangedSinceApproval(inst)
+    let check = null
+    try {
+      const latest = instanceData.peek()
+      let result
+      if (latest.isLocalWorkspace) {
+        result = await runLocalCheck(latest)
+      } else {
+        const res = await apiFetchForInstance(latest.slug, `/api/instance/check?slug=${encodeURIComponent(latest.slug)}`)
+        result = res.ok ? await res.json() : null
+      }
+      if (result) {
+        const aimed = (result.artefacts ?? []).find((a) => a.id === artefactId)
+        check = { pass: aimed ? aimed.complete && aimed.satisfiesGate !== false : Boolean(result.pass), outstanding: aimed?.outstanding ?? [] }
+      }
+    } catch {
+      // The Gate check is a confirmation, not part of the Save: a Save that worked is reported either way.
+    }
+    return { ok: true, check, decisions: sentDecisions }
+  }
+
+  // #298: Bring up to date re-opens a signed-off Stage (ADR-0026) when only that Stage can change a Field, if the architect chooses it. The server
+  // refuses it when a later Stage is already in progress, and says why. Resolves `{ ok, message? }`; when it worked the Instance is loaded again
+  // on that Stage (now its current one) and the Interview page for it replaces this one.
+  async function reopenInterviewStage(stageId) {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    try {
+      const params = new URLSearchParams({ slug: inst.slug, stage: stageId })
+      const res = await apiFetchForInstance(inst.slug, `/api/instance/stage/reopen?${params}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: stageId }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, message: `Re-open failed: ${body.message ?? body.error ?? res.status}` }
+      const effectWillReload = viewedStage.value !== null
+      viewedStage.value = null
+      if (!effectWillReload) instanceData.value = await loadInstance(inst.slug, null)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: `Re-open failed: ${err.message}` }
+    }
+  }
+
+  // #298: a local or server workspace brings its Stages up to date one at a time, in order; this shows the Interview page on another one.
+  function openInterviewStage(stageId) {
+    viewedStage.value = stageId
+  }
+
+  // #299: the Owner sent the Instance's current Stage back. The revision is the Interview page on that Stage with `revise=1`; from a Stage drafted
+  // ahead of it the page first goes back to the current Stage (`viewedStage` reset), as Check status does.
+  function interviewRoute(extra) {
+    const params = new URLSearchParams(interviewUrl.search)
+    params.set('interview', '1')
+    params.delete('update')
+    params.delete('revise')
+    for (const [name, value] of Object.entries(extra)) params.set(name, value)
+    return `${interviewUrl.pathname}?${params}`
+  }
+  // The Instance is loaded for the Stage first and the route changes with it in the same step, so the page of the Stage being left never runs again in the
+  // new mode (it would, for one, run a Check status that loads the Stage it was on over the one this is going to).
+  async function goToInterview(stageId, extra = {}) {
+    const inst = instanceData.peek()
+    if (!inst?.stage) return
+    let data = null
+    try {
+      data = await loadInstance(inst.slug, stageId)
+    } catch {
+      data = null
+    }
+    batch(() => {
+      viewedStage.value = stageId
+      if (data) instanceData.value = data
+    })
+    locationRef.current.route(interviewRoute(extra))
+  }
+  const reviseInterviewStage = () => goToInterview(null, { revise: '1' })
+  // "Back to the run": the Interview page of the current Stage, which is awaiting approval again.
+  const leaveRevision = () => goToInterview(null)
+  // After a revision: the Interview page on a later Stage, in Bring up to date, for the Fields drafted from content the revision changed (keep or redraft each).
+  const updateInterviewStage = (stageId) => goToInterview(stageId, { update: '1' })
+
+  // #293: "Save, advance, carry on" moves the Instance on to its next Stage once the Save has worked. The Gate is checked again here,
+  // on what was just saved, by the same code as the editor's "Advance to next stage".
+  async function advanceInterviewStage() {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    return advanceCurrentStage(inst)
+  }
+
+  // #295 (docs/adr/0063): on an Azure DevOps or GitHub workspace a Stage moves on only when its Pull Request merges. "Save, request
+  // approval" opens that Pull Request once the Save has worked; the server re-checks the Gate itself and refuses a Stage that isn't the
+  // Instance's current one. Never throws: resolves `{ ok: true, pullRequestId, webUrl }` or `{ ok: false, message }`. The Instance is
+  // loaded again afterwards so the page knows the Stage now has a Pull Request open.
+  async function requestInterviewApproval() {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    try {
+      const res = await apiFetchForInstance(inst.slug, `/api/instance/request-approval?slug=${encodeURIComponent(inst.slug)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        // #300: the refusal names the earlier documents to re-render; the stage-end card that said it would do so renders them and asks again.
+        if (Array.isArray(body.reRenderRequired) && body.reRenderRequired.length > 0) return { ok: false, message: reRenderRefusalLine(body.reRenderRequired), reRenderRequired: body.reRenderRequired }
+        return { ok: false, message: `Request approval failed: ${body.message ?? body.error ?? res.status}` }
+      }
+      instanceData.value = await loadInstance(inst.slug, null)
+      return { ok: true, pullRequestId: body.pullRequestId, webUrl: body.webUrl ?? null, alsoReapproves: body.alsoReapproves ?? [] }
+    } catch (err) {
+      return { ok: false, message: `Request approval failed: ${err.message}` }
+    }
+  }
+
+  // #300 (docs/adr/0069): renders one earlier approved Stage's document onto this Stage's branch, keeping the approved copy in out/approved/
+  // (the editor's "Render onto this stage"). The stage-end Save does this for every document Request approval would refuse over, before
+  // it asks. Never throws: resolves `{ ok: true, approvedCopyPath }` or `{ ok: false, message }`.
+  async function reRenderEarlierForInterview(item) {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    try {
+      const res = await apiFetchForInstance(inst.slug, `/api/instance/rerender-earlier/${encodeURIComponent(item.artefactId)}?slug=${encodeURIComponent(inst.slug)}`, { method: 'POST' })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, message: `Rendering ${item.artefactTitle} onto this Stage failed: ${body.message ?? body.error ?? `HTTP ${res.status}`}` }
+      return { ok: true, approvedCopyPath: body.approvedCopyPath ?? null }
+    } catch (err) {
+      return { ok: false, message: `Rendering ${item.artefactTitle} onto this Stage failed: ${err.message}` }
+    }
+  }
+
+  // Check status for the Interview page (#295): the same server action as the editor's Check status, run only when the architect asks
+  // (a click on an "awaiting approval" row or the Check status button), at a stage-end confirm and once when a session resumes, never
+  // on a timer (ADR-0014). Resolves `{ ok, merged, message }`; when the Pull Request has merged the Instance has moved on and has been
+  // loaded again, which replaces the page of the Stage that was approved.
+  async function checkInterviewApproval() {
+    const inst = instanceData.peek()
+    if (!inst?.stage) return { ok: false, merged: false, message: 'This Instance is not loaded.' }
+    try {
+      const res = await apiFetchForInstance(inst.slug, `/api/instance/check-status?slug=${encodeURIComponent(inst.slug)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) return { ok: false, merged: false, message: `Check status failed: ${body.message ?? body.error ?? res.status}` }
+      // Check status is always about the Instance's current Stage, which is not the one on the page when the AI is drafting ahead (#296).
+      const checkedTitle = inst.stages?.find((s) => s.id === inst.currentStageId)?.title ?? inst.stage.title
+      const message = approvalStatusLine(body, checkedTitle)
+      const sentBack = sentBackOf(body) // #299: the Owner asked for changes or rejected the Stage
+      const order = (inst.stages ?? []).map((s) => s.id)
+      // A page that is on a Stage ahead of the one that merged stays where it is: the Instance has moved on, the page's Stage has not, and its held
+      // Modules are open now (#296). Only a page on the Stage that merged (or an earlier one) goes to the Instance's new current Stage.
+      const staysAhead = Boolean(body.merged) && inst.stage.id !== inst.currentStageId && order.indexOf(inst.stage.id) >= order.indexOf(body.advancedTo?.id ?? inst.currentStageId)
+      if (body.merged && !staysAhead) {
+        // Reset to no explicit Stage so the page shows the Instance's new current Stage (see `advanceCurrentStage`).
+        const effectWillReload = viewedStage.value !== null
+        viewedStage.value = null
+        if (!effectWillReload) instanceData.value = await loadInstance(inst.slug, null)
+        return { ok: true, merged: true, message }
+      }
+      instanceData.value = await loadInstance(inst.slug, inst.stage.id !== inst.currentStageId ? inst.stage.id : null)
+      return { ok: true, merged: Boolean(body.merged), message, sentBack }
+    } catch (err) {
+      return { ok: false, merged: false, message: `Check status failed: ${err.message}` }
+    }
+  }
+
+  // #296 (docs/adr/0063): while the Owner reviews a Stage, the AI interview moves on to the next one of its run. The Instance does not move:
+  // this only shows the later Stage (as the stage switcher does), and the Interview page for it replaces the one for the Stage just saved.
+  // Never throws: resolves `{ ok: true }` or `{ ok: false, message }`.
+  async function draftAheadOnStage(stageId) {
+    const inst = instanceData.peek()
+    if (!inst?.stage || isEditingBlocked()) return { ok: false, message: 'This Instance cannot be written to right now.' }
+    try {
+      if (viewedStage.value !== stageId) viewedStage.value = stageId // the shared loading effect fetches that Stage
+      else instanceData.value = await loadInstance(inst.slug, stageId)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: `The next Stage could not be opened: ${err.message}` }
+    }
+  }
+
   async function handleSyncFromMain() {
     if (!instance || syncing) return
     setSyncing(true)
@@ -5085,13 +6794,49 @@ function ModuleEditorPage({ slug: routeRef }) {
   // not the raw `routeRef` prop — a numeric reference (WI200) never equals `instance.slug` itself.
   if (!instance || instance.slug !== currentSlug.value) return html`<p class="loading">Loading…</p>`
 
+  const dialogs = html`
+    ${leavePrompt
+      ? html`<${UnsavedChangesDialog} count=${stageSave.value.dirtyModuleIds.length} onAnswer=${answerLeavePrompt} />`
+      : null}
+    ${clashPrompt
+      ? html`<${StageClashDialog}
+          inst=${clashPrompt.inst}
+          conflicts=${clashPrompt.conflicts}
+          onAnswer=${(resolutions) => {
+            clashPrompt.resolve(resolutions)
+            setClashPrompt(null)
+          }}
+        />`
+      : null}
+  `
+  if (interviewOpen && (!instance.workspaceBacked || offersSourceDocuments(instance))) {
+    return html`<${InterviewScreen}
+        instance=${instance}
+        update=${updateOpen}
+        review=${reviewRoundOpen}
+        revise=${reviseOpen}
+        onReviseStage=${reviseInterviewStage}
+        onLeaveRevision=${leaveRevision}
+        onUpdateStage=${updateInterviewStage}
+        onReopenStage=${reopenInterviewStage}
+        onOpenStage=${openInterviewStage}
+        editorHref=${editorHref}
+        onSaveDrafts=${saveInterviewDrafts}
+        onAdvance=${advanceInterviewStage}
+        onRequestApproval=${requestInterviewApproval}
+        onReRenderEarlier=${reRenderEarlierForInterview}
+        onCheckApproval=${checkInterviewApproval}
+        onDraftAhead=${draftAheadOnStage}
+      />${dialogs}`
+  }
+
   const selectedArtefact = instance.artefacts.find((artefact) => artefact.id === selectedArtefactId) ??
     instance.artefacts.find((artefact) => artefact.id === defaultArtefactId(instance.artefacts)) ?? null
   const visibleFieldIds = selectedArtefact ? artefactFieldIds(instance.modules, selectedArtefact) : null
   const stageSync = instance.stageSync
   const showStageSyncBanner = Boolean(stageSync?.behind) && (stageSync?.behindFiles?.length ?? 0) > 0
   return html`
-    <${AppHeader} instance=${instance} />
+    <${AppHeader} instance=${instance} onOpenInterview=${openInterview} />
     ${instance.archived
       ? html`<div class="archived-banner">
           This instance is <strong>archived</strong> and hidden from the dashboard. Restore it from
@@ -5105,6 +6850,14 @@ function ModuleEditorPage({ slug: routeRef }) {
           ${instance.crossStageEdit
             ? html` <strong>${instance.crossStageEdit.title}</strong> has changes to modules shown here that haven't reached main yet — check there for the latest.`
             : null}
+        </div>`
+      : null}
+    ${instance.reapprovals?.length
+      ? html`<div class="archived-banner reapproval-history" role="status" data-testid="reapproval-history">
+          <strong>Re-approved by a later stage</strong>
+          <ul>
+            ${instance.reapprovals.map((entry) => html`<li key=${entry.pullRequestId} data-testid="reapproval-entry">${reapprovalHistoryLine(entry)}</li>`)}
+          </ul>
         </div>`
       : null}
     ${!instance.archived && writeAccessBlockedReason()
@@ -5131,15 +6884,14 @@ function ModuleEditorPage({ slug: routeRef }) {
       onClearAllFields=${clearAllFields}
       requestApprovalSlug=${advancedMode.value && instance.workspaceBacked ? instance.slug : null}
     />
+    ${offersSourceDocuments(instance) ? html`<${OutOfDateWatcher} instance=${instance} /><${SourceDocumentsSection} instance=${instance} />` : null}
     <${StageScreen}
       key=${instance.stage.id}
       instance=${instance}
       visibleFieldIds=${visibleFieldIds}
       onFieldRegistered=${registerField}
     />
-    ${leavePrompt
-      ? html`<${UnsavedChangesDialog} count=${stageSave.value.dirtyModuleIds.length} onAnswer=${answerLeavePrompt} />`
-      : null}
+    ${dialogs}
   `
 }
 
@@ -5178,6 +6930,20 @@ async function loadWorkspaces() {
   return res.json()
 }
 
+// #268: every server workspace on the server's disk (`GET /api/server-workspaces`, no credential needed),
+// so one with no instance yet - such as a workspace just made in the "+ New Workspace" wizard - still
+// gets a dashboard row (web/lib/dashboardWorkspaces.js's `unrepresentedServerWorkspaceGroups`). It only
+// adds rows, so a failure here is swallowed rather than failing the dashboard.
+async function loadServerWorkspaces() {
+  try {
+    // `include=blob` (#269) adds the workspaces kept in the operator's Blob containers, each with whether its container can be reached.
+    const res = await apiFetch('/api/server-workspaces?include=blob', {}, { silent: true })
+    return res.ok ? await res.json() : []
+  } catch {
+    return []
+  }
+}
+
 // Registry `status` is only ever 'complete'/'incomplete' (the current stage's requirements) — a different, coarser vocabulary than a module's own draft/review/agreed frontmatter status. Reuses the same `.stamp` tokens (agreed = done, draft = still in progress) rather than inventing a third visual language, since the Gate Ledger only defines those three.
 function statusStampClass(status) {
   return status === 'complete' ? 'agreed' : 'draft'
@@ -5185,6 +6951,13 @@ function statusStampClass(status) {
 
 function StatusStamp({ status }) {
   return html`<span class="stamp ${statusStampClass(status)}">${status.toUpperCase()}</span>`
+}
+
+// #273: the dashboard row's flag for an instance whose earlier approved stage has changed since approval.
+function changedSinceApprovalBadge(inst) {
+  const text = dashboardBadgeText(inst.changedSinceApproval)
+  if (!text) return null
+  return html`<span class="pr-badge changed-since-approval-badge" data-testid="changed-since-approval-badge" title=${dashboardBadgeTitle(inst.changedSinceApproval)}>${text}</span>`
 }
 
 function pullRequestBadge(inst) {
@@ -5406,6 +7179,8 @@ function groupSummaryText(group) {
   if (group.kind === 'placeholder') {
     // #187: 'blank' — every instance here is archived; it reads like any other empty workspace.
     if (group.state === 'blank') return 'No instances'
+    // #269: a workspace in a Blob container that can't be reached right now.
+    if (group.state === 'unavailable') return 'Unavailable'
     return group.state === 'unreadable' ? "Can't read this workspace" : 'Nothing registered yet'
   }
   const definitions = [...new Set(group.instances.map((inst) => inst.definition))]
@@ -5416,7 +7191,7 @@ function groupSummaryText(group) {
 // A group's dot in the list pane reflects every one of its instances being complete, not just the first — a multi-instance workspace with even one outstanding instance is "in progress" as a whole. A local-workspace group has no per-instance `status` at all (ADR-0029) — its dot instead reflects whether its folder permission is currently granted. #122: a placeholder group's dot reflects its own `state` instead — `unreadable` gets the same red the Gate Ledger's `.stamp.error` already uses (`.dot.unreadable`, web/style.css), visually distinct from the neutral `draft` amber `empty` shares with "in progress" — deliberately, since "can't read this" and "still in progress" are different situations, but "nothing registered yet" and "in progress" are close enough in urgency to share a color.
 function groupStatusClass(group) {
   if (group.kind === 'local') return group.state === 'granted' ? 'agreed' : 'draft'
-  if (group.kind === 'placeholder') return group.state === 'unreadable' ? 'unreadable' : 'draft'
+  if (group.kind === 'placeholder') return group.state === 'unreadable' || group.state === 'unavailable' ? 'unreadable' : 'draft'
   return group.instances.every((inst) => inst.status === 'complete') ? 'agreed' : 'draft'
 }
 
@@ -5721,6 +7496,7 @@ function InstanceCard({ inst, editHref, checkStatus, onCheck }) {
           <span class="instance-card-status">
             <${StatusStamp} status=${inst.status} />
             ${pullRequestBadge(inst)}
+            ${changedSinceApprovalBadge(inst)}
           </span>
         </div>
         <div class="instance-card-context">
@@ -5913,6 +7689,18 @@ function MasterDetailView({ instances, localGroups, workspaceGroups = [] }) {
                     `
                   : null}
               `
+            : selectedGroup.kind === 'placeholder' && selectedGroup.state === 'unavailable'
+              ? html`
+                  <${WorkspaceDetailHead} group=${selectedGroup} />
+                  <div class="local-workspace-recovery workspace-placeholder-unavailable" data-testid="workspace-unavailable">
+                    <p>
+                      This workspace is unavailable${selectedGroup.reason ? `: ${selectedGroup.reason}` : ''}. It is kept in
+                      ${selectedGroup.container ? html`the Blob container <code>${selectedGroup.container}</code>` : 'a Blob container'}, which
+                      this server can't reach right now. Nothing in it has been lost; it will come back when the container does.
+                      Gantry's other workspaces are not affected.
+                    </p>
+                  </div>
+                `
             : selectedGroup.kind === 'placeholder' && selectedGroup.state === 'blank'
               ? html`
                   <${WorkspaceDetailHead} group=${selectedGroup} />
@@ -6240,6 +8028,7 @@ function ArchivedWorkspacesPanel({ onRestored }) {
 function DashboardPage() {
   const [instances, setInstances] = useState(null)
   const [workspaces, setWorkspaces] = useState(null)
+  const [serverWorkspaces, setServerWorkspaces] = useState([])
   // #131: rows from the per-workspace credentialed listings, kept separate from `instances` (the
   // unscoped listing) so a reload of one never discards the other.
   const [workspaceScopedInstances, setWorkspaceScopedInstances] = useState([])
@@ -6259,10 +8048,11 @@ function DashboardPage() {
   // nothing for, merged in below. It issues no request at all when nothing qualifies, and at most one
   // per qualifying workspace per page-session — see web/lib/workspaceDiscovery.js for those bounds.
   function reloadInstances() {
-    Promise.all([loadInstances(), loadWorkspaces()])
-      .then(([instancesData, workspacesData]) => {
+    Promise.all([loadInstances(), loadWorkspaces(), loadServerWorkspaces()])
+      .then(([instancesData, workspacesData, serverWorkspacesData]) => {
         setInstances(instancesData)
         setWorkspaces(workspacesData)
+        setServerWorkspaces(serverWorkspacesData)
         setError(null)
         return loadWorkspaceScopedInstances(instancesData, workspacesData)
       })
@@ -6312,7 +8102,11 @@ function DashboardPage() {
   // fetching them.
   const workspaceGroups =
     allInstances && workspaces
-      ? unrepresentedWorkspaceGroups(allInstances, workspaces).filter((group) => advancedMode.value || !group.isAzureDevOps)
+      ? [
+          ...unrepresentedWorkspaceGroups(allInstances, workspaces).filter((group) => advancedMode.value || !group.isAzureDevOps),
+          // #268: a server workspace with nothing in it yet.
+          ...unrepresentedServerWorkspaceGroups(allInstances, serverWorkspaces),
+        ]
       : []
 
   return html`

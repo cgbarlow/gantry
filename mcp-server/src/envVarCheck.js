@@ -39,6 +39,8 @@ export const OTHER_SERVICE_LABEL = 'the Gantry web server (gantry serve)'
  * it is simply on the wrong process — so it gets named as such rather than reported as unknown.
  */
 export const OTHER_SERVICE_ENV_VARS = [
+  'GANTRY_AI_ALLOW_PRIVATE_URLS',
+  'GANTRY_BLOB_CONTAINERS',
   'GANTRY_BOOTSTRAP_WORKSPACES',
   'GANTRY_DEBUG',
   'GANTRY_INSTANCES_DIR',

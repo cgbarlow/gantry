@@ -44,6 +44,10 @@ import { withFakeBitbucketServer, BITBUCKET_OWNER, BITBUCKET_REPOSITORY, BITBUCK
 // #202 (spec #192, ADR-0054) adds a Field's `target-words` — its word budget per Target size — to the
 // fixture, so it is held to the same round trip as every key before it.
 //
+// #282 (ADR-0062) adds Interview instructions, an `interview:` text key on the Definition, on a Stage
+// and on a Module, so the fixture sets all three levels (and leaves the first Stage and the second
+// Module without one, which must stay without a key).
+//
 // #220 (spec #223, ADR-0058) adds the Definition's `instance-settings` — the Instance settings it
 // declares, here a Classification with its own markings and a default — at the top level. #221 adds
 // Target size's default to it, the one part of Size a Definition declares.
@@ -53,7 +57,13 @@ const PROJECT = 'fake-project'
 const ADO_REPOSITORY = 'fake-ado-repo'
 const ADO_VALID_PAT = 'valid-ado-test-pat'
 
+// #283 (ADR-0065): the standard modules the fixture mounts — Gantry's, so they have no module file.
+const STANDARD_MODULES_MOUNTED = [{ id: 'glossary', version: 1, guidance: 'Use our house spellings.', interview: 'Ask for the legacy product names first.' }]
+
 const INSTANCE_SETTINGS = { size: { default: 'small' }, classification: { choices: ['PUBLIC', 'IN-CONFIDENCE'], default: 'PUBLIC' } }
+const DEFINITION_INTERVIEW = 'Ask who the sponsor is before anything else.'
+const STAGE_INTERVIEW = 'Probe every external integration.'
+const MODULE_INTERVIEW = 'Spell "authorisation" with an s.\nKeep a formal tone.'
 const STAGE_PROVENANCE = { definition: 'elsewhere', version: 2, element: 'stage:second' }
 const ARTEFACT_PROVENANCE = { definition: 'elsewhere', version: 2, element: 'artefact:letter' }
 
@@ -63,6 +73,7 @@ version: ${version}
 status: ${status}
 title: Round Trip
 description: Sets every definition key
+interview: Ask who the sponsor is before anything else.
 instance-settings:
   size:
     default: small
@@ -71,6 +82,11 @@ instance-settings:
       - PUBLIC
       - IN-CONFIDENCE
     default: PUBLIC
+standard-modules:
+  - id: glossary
+    version: 1
+    guidance: Use our house spellings.
+    interview: Ask for the legacy product names first.
 stages:
   - id: first
     title: First
@@ -78,6 +94,7 @@ stages:
     gate: first-gate
     modules:
       - details
+      - glossary
   - id: second
     title: Second
     purpose: The second stage
@@ -87,6 +104,7 @@ stages:
       - notes
     read-only-modules:
       - details
+    interview: Probe every external integration.
     copied-from:
       definition: elsewhere
       version: 2
@@ -134,6 +152,9 @@ artefacts:
 const DETAILS_MODULE_YAML = `id: details
 title: Details
 purpose: What the engagement is
+interview: |-
+  Spell "authorisation" with an s.
+  Keep a formal tone.
 fields:
   - id: kind
     title: Kind
@@ -197,11 +218,18 @@ function withScratch(fn) {
 function assertEveryKey(projection, where) {
   const byId = (list, id) => list.find((x) => x.id === id)
   assert.deepEqual(projection.instanceSettings, INSTANCE_SETTINGS, `${where}: instance-settings`)
+  assert.equal(projection.interview, DEFINITION_INTERVIEW, `${where}: definition interview`)
   const first = byId(projection.stages, 'first')
   const second = byId(projection.stages, 'second')
   assert.deepEqual(second.modules, ['details', 'notes'], where)
+  // #283: the mount survives every operation as the Definition's own key; the module itself is Gantry's, never a file or a `modules` entry.
+  assert.deepEqual(first.modules, ['details', 'glossary'], `${where}: a stage mounts a standard module by id`)
+  assert.deepEqual(projection.standardModules, STANDARD_MODULES_MOUNTED, `${where}: standard-modules`)
+  assert.equal(projection.modules.some((m) => m.id === 'glossary'), false, `${where}: a standard module is not one of the Definition's own modules`)
   assert.deepEqual(second.readOnlyModules, ['details'], `${where}: stage read-only-modules`)
   assert.deepEqual(second.copiedFrom, STAGE_PROVENANCE, `${where}: stage copied-from`)
+  assert.equal(second.interview, STAGE_INTERVIEW, `${where}: stage interview`)
+  assert.equal('interview' in first, false, `${where}: a stage without interview has no such key`)
   assert.equal('readOnlyModules' in first, false, `${where}: a stage without read-only-modules has no such key`)
   assert.equal('copiedFrom' in first, false, where)
 
@@ -227,6 +255,8 @@ function assertEveryKey(projection, where) {
   }
 
   const details = byId(projection.modules, 'details')
+  assert.equal(details.interview, MODULE_INTERVIEW, `${where}: module interview`)
+  assert.equal('interview' in byId(projection.modules, 'notes'), false, `${where}: a module without interview has no such key`)
   const kind = byId(details.fields, 'kind')
   const tags = byId(details.fields, 'tags')
   assert.deepEqual(kind.options, ['Permanent', 'Fixed term'], `${where}: select options`)
@@ -247,6 +277,10 @@ function assertTargetWordsOnDisk(moduleYamlText, where) {
 
 function assertKebabKeysOnDisk(definitionYamlText, where) {
   assert.match(definitionYamlText, /^instance-settings:\n  size:\n    default: small\n  classification:\n    choices:\n      - PUBLIC\n      - IN-CONFIDENCE\n    default: PUBLIC$/m, where)
+  assert.match(definitionYamlText, /^standard-modules:\n  - id: glossary\n    version: 1\n    guidance: Use our house spellings\.\n    interview: Ask for the legacy product names first\.$/m, where)
+  assert.doesNotMatch(definitionYamlText, /standardModules/, where)
+  assert.match(definitionYamlText, /^interview: Ask who the sponsor is before anything else\.$/m, where)
+  assert.match(definitionYamlText, /^    interview: Probe every external integration\.$/m, where)
   assert.match(definitionYamlText, /read-only-modules:/, where)
   assert.match(definitionYamlText, /document-control: false/, where)
   assert.match(definitionYamlText, /satisfies-gate: false/, where)

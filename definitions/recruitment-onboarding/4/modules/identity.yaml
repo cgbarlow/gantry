@@ -1,0 +1,52 @@
+id: identity
+title: Identity
+purpose: >
+  The digital identity created for the starter: the user ID, the account itself, where it
+  propagated to, and how the credentials reached the person.
+
+  Identity creation and device build together account for around five days of the schedule, and
+  they are the last five. There is no slack behind them.
+
+fields:
+  - id: user-id
+    title: User ID
+    type: text
+    required: true
+    guidance: >
+      The user ID issued to the starter, exactly as they will sign in with it, and nothing
+      else. This is what the hiring manager sends the starter, and it is printed in the Manager
+      Handover. Never the password.
+
+  - id: account
+    title: Account
+    type: markdown
+    required: true
+    guidance: >
+      When the account was created and in which identity platform, and how long it took from
+      the request. Record the date the account was created rather than the date it was
+      requested — the gap between the two is where this phase loses time. The user ID itself
+      goes in `user-id` above.
+
+  - id: propagation
+    title: Propagation
+    type: markdown
+    required: true
+    guidance: >
+      Confirmation that the identity reached the directory service and the downstream systems
+      provisioned from it, including the service management platform. Note anything that had to
+      be pushed manually. Anything here the hiring manager must know about goes in
+      `access.outstanding`, which the Manager Handover prints.
+
+  - id: credential-issue
+    title: Credential issue
+    type: markdown
+    required: true
+    guidance: >
+      How the user ID and password reached the starter: the channel, who sent them, and when.
+      Never the password, and never the address it was sent to — "emailed to the starter's
+      personal address by the hiring manager" is the record.
+
+      Today this is the hiring manager emailing them. That is a manual step and it puts
+      credentials in an email inbox, where they stay. Record what actually happened rather than
+      what should happen — this field exists to make the practice countable, and a row of
+      entries saying "emailed by the hiring manager" is the argument for changing it.

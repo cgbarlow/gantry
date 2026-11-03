@@ -113,7 +113,7 @@ test('WI #306 item 1: switching to Local defaults to and leads with "Register ne
       // Server-hosted (the wizard's initial location): Pick first, Pick
       // selected by default — unchanged.
       const sourceButtons = page.locator('.wizard-mode-toggle[aria-label="Workspace source"] button')
-      assert.deepEqual(await sourceButtons.allTextContents(), ['Pick existing workspace', 'Register new workspace'])
+      assert.deepEqual(await sourceButtons.allTextContents(), ['An existing workspace', 'New remote workspace', 'New server workspace'])
       assert.match(await sourceButtons.first().getAttribute('class'), /active/)
 
       // Local: Register leads, and is the one already selected — no click
@@ -129,7 +129,7 @@ test('WI #306 item 1: switching to Local defaults to and leads with "Register ne
       // Back to Server-hosted: still Pick-first/Pick-default, never
       // clobbered by the Local-only default.
       await page.getByRole('button', { name: 'Server-hosted', exact: true }).click()
-      assert.deepEqual(await sourceButtons.allTextContents(), ['Pick existing workspace', 'Register new workspace'])
+      assert.deepEqual(await sourceButtons.allTextContents(), ['An existing workspace', 'New remote workspace', 'New server workspace'])
       assert.match(await sourceButtons.first().getAttribute('class'), /active/)
     } finally {
       await browser.close()
@@ -546,7 +546,7 @@ test('Unsupported browser: the Local option is present but disabled with a messa
 
       // Server-hosted still works: switch back and reach the register form.
       await page.getByRole('button', { name: 'Server-hosted', exact: true }).click()
-      await page.getByRole('button', { name: 'Register new workspace', exact: true }).click()
+      await page.getByRole('button', { name: 'New remote workspace', exact: true }).click()
       await page.waitForSelector('#ws-organization')
     } finally {
       await browser.close()

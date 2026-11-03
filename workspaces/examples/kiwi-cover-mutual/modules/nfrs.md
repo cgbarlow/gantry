@@ -7,7 +7,7 @@ owner: p.natarajan
 
 ## Scalability and capacity
 
-About 38,000 claims a year, peaking at about 600 claims a day after a major weather event (claims volumes report FY2025). The shared services are sized for 3,000 registrations a day, five times that peak (target assumption). Policy Data Management exposures were tested at 20 transactions a second against a design peak of 4 a second (capacity test CT-03). Documents grow by about 90 GB a year (records volumes report FY2025).
+About 38,000 claims a year, peaking at about 600 claims a day after a major weather event [Requirements register, Volumes and targets](source:requirements-register). The shared services are sized for 3,000 registrations a day, five times that peak (target assumption). Policy Data Management exposures were tested at 20 transactions a second against a design peak of 4 a second (capacity test CT-03). Documents grow by about 90 GB a year [Requirements register, Volumes and targets](source:requirements-register).
 
 ## Performance
 

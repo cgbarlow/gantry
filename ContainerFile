@@ -58,6 +58,11 @@ COPY tests/             tests/
 # for CI extraction.  The stage always exits 0 so results are
 # available regardless of test outcome; the CI pipeline's
 # PublishTestResults (failTaskOnFailedTests) enforces the gate.
+#
+# Azure Blob tests (#267, docs/adr/0070) run against Azurite, the Blob emulator. It is an npm
+# devDependency that the test files start themselves (tests/helpers/azurite.js), so there is no service
+# container to wire up here. `npm ci` in the deps stage installs it, and `@azure/storage-blob` is held
+# at 12.32.x in package.json because Azurite rejects the newer service API versions.
 FROM source AS test
 
 ENV CI=true

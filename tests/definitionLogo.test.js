@@ -9,6 +9,7 @@ import { renderArtefact } from '../lib/render.js'
 import { LOGO_ALT_TEXT, logoImageInfo, readHeaderLogo, replaceHeaderLogo } from '../web/lib/definitionLogo.js'
 import { docxPart } from './helpers/wordDocx.js'
 import { jpegImage, pngImage } from './helpers/logoImages.js'
+import { markDesignV3Draft } from './helpers/designDraft.js'
 
 // #222 (docs/adr/0059): a Definition's logo is the picture in its reference documents' page header.
 // The Logo control on the Definitions page replaces it in every reference document of a draft at
@@ -89,6 +90,8 @@ async function withScratchDesign(fn) {
   const definitionsDir = mkdtempSync(join(tmpdir(), 'gantry-logo-defs-'))
   try {
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
+    // design v3 is published (#308), and a logo can only be replaced on a draft: these tests work on a draft copy of it.
+    markDesignV3Draft(definitionsDir)
     return await fn(definitionsDir)
   } finally {
     rmSync(definitionsDir, { recursive: true, force: true })

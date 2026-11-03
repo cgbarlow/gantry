@@ -48,7 +48,7 @@ fields:
       they relate. This is a sketch, not the Detailed Design stage's
       `architecture` module; go only as deep as a SOAP-stage reader needs.
 
-      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      Use the glossary's preferred terms (`glossary.terms`)
       consistently in headings, tables, diagrams and prose.
 
       Lay out each diagram in this order: one introductory sentence ("The

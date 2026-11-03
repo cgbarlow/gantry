@@ -33,6 +33,7 @@
 //     can consume a local instance unchanged.
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 import { parseFieldBody, serialiseFieldBody, emptyFieldValue } from './fieldShape.js'
+import { moduleKeyDecisions } from './standardModules.js'
 import { readOnlyModuleAt } from './readOnlyModules.js'
 import { chosenInstanceSettings, withChangedInstanceSettings } from './instanceSettings.js'
 import { withInstanceLogoPath } from './instanceLogo.js'
@@ -376,5 +377,7 @@ export function buildLocalModuleEntry(moduleSpec, stage, data, exampleData, stag
     owner: data.owner ?? '',
     fields: entries,
     ...(readOnly ? { readOnly } : {}),
+    // #284: the editor writes a Key decisions Module its own way, in the Definition's numbering and style.
+    ...(moduleKeyDecisions(moduleSpec) ? { keyDecisions: moduleKeyDecisions(moduleSpec) } : {}),
   }
 }

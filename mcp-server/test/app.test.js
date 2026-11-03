@@ -93,6 +93,7 @@ test('a connected MCP client receives the authoring rule in the server instructi
       assert.ok(rule, 'the authoring rule is in the instructions')
       assert.match(rule, /the example's conventions/)
       assert.match(rule, /never invent figures or names/)
+      assert.match(client.getInstructions(), /list_source_documents.*read_decisions_log.*outOfDate/s)
     } finally {
       await client.close()
     }

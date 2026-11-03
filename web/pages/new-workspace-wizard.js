@@ -24,7 +24,7 @@
 // route change and back, not just component-local state that'd reset on
 // remount.
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { signal, effect } from '@preact/signals'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
 import { basicAuthHeaderForValue, setPatForWorkspace } from '../lib/credential.js'
@@ -56,6 +56,8 @@ import { InstanceSettingSelect } from '../lib/instanceSettingsView.js'
 import { instanceLogoPath, instanceLogoRecordPath } from '../lib/instanceLogo.js'
 import { logoImageInfo } from '../lib/definitionLogo.js'
 import { InstanceLogoPicker } from '../lib/instanceLogoControl.js'
+import { modulesWithStandard } from '../lib/standardModules.js'
+import { isBundledServerWorkspace } from '../lib/dashboardWorkspaces.js'
 
 // The work item type used when nothing more specific is looked up or
 // chosen — mirrors lib/workItemLink.js's own `DEFAULT_WORK_ITEM_TYPE`
@@ -155,7 +157,7 @@ const importForgetResolved = signal(false)
 const importForgotten = signal(false)
 
 // ---------- Step 1: pick or register a Workspace ----------
-const workspaceMode = signal('pick') // 'pick' | 'register'
+const workspaceMode = signal('pick') // 'pick' | 'register' | 'server'
 
 // WI #306 item 1: a first-time local-workspace user has nothing to pick
 // yet — Server-hosted's own empty-state nudge on the Pick screen already
@@ -169,7 +171,7 @@ const workspaceMode = signal('pick') // 'pick' | 'register'
 // (which would violate "Server-hosted's existing Pick-first/Pick-default
 // behaviour must not change"). Only fires on an actual workspaceLocation
 // change (effects re-run on their dependencies changing, not on every
-// render), so a deliberate in-place choice of "Register new workspace"
+// render), so a deliberate in-place choice of "New remote workspace"
 // while already on Server-hosted is left alone unless the architect
 // round-trips through Local and back.
 effect(() => {
@@ -177,6 +179,25 @@ effect(() => {
 })
 
 const workspaces = signal(null) // fetched GET /api/workspaces list, null while loading
+// #268: the server workspaces on the server's disk (GET /api/server-workspaces), which a `?workspace=<id>`
+// shortcut can also name - a Provider workspace is found in `workspaces` above, a server one here.
+const serverWorkspaceList = signal(null)
+
+// ---------- Step 1: a new server workspace on the server's disk (#268, docs/adr/0070) ----------
+// "New server workspace": a name and where to store it. Server disk is the only place today; Blob
+// containers arrive in a later ticket, so "Store in" has the one choice.
+const serverWsName = signal('')
+// Where the new workspace is kept (#269): 'disk' (the server's disk, Advanced mode only) or 'blob:<container>', one of
+// the Blob containers the operator declared (GET /api/blob-containers).
+const serverWsStore = signal('disk')
+// The Blob containers the operator declared, with whether each can be reached right now. Empty when none are declared,
+// which is when the wizard behaves exactly as it did before they existed.
+const blobContainerList = signal([])
+// With Advanced mode off the wizard asks only where to keep a new workspace: 'local' (a folder on the architect's
+// computer) or 'blob:<container>'.
+const simpleStoreIn = signal('local')
+const serverWsStatus = signal('idle') // idle | creating | failed
+const serverWsError = signal('')
 const workspacesLoadError = signal('')
 const pickedWorkspaceId = signal('')
 
@@ -320,6 +341,9 @@ const createNotice = signal('')
 const linkStatus = signal('idle') // idle | linking | failed
 const linkError = signal('')
 const createdSlug = signal('')
+// The new Instance's short reference (w3i1) when the server hands one back: a slug is only unique within its
+// workspace, so a server-workspace Instance is opened by this rather than by its slug.
+const createdRef = signal('')
 const linkMode = signal('create') // 'create' | 'existing'
 const newWorkItemTitle = signal('')
 const newWorkItemCreateStatus = signal('idle') // idle | creating | failed
@@ -378,11 +402,27 @@ effect(() => {
 // "+ New Instance" link, WI151) — once the workspace list loads, resolve
 // the id and advance straight to the instance step so the architect never
 // has to re-pick the workspace they were already viewing.
+// What the wizard holds as the selected workspace when it is a server workspace (#268): no `provider` and
+// no `location`, so the Link step is skipped and nothing Provider-shaped is read off it.
+function serverWorkspaceSelection(w) {
+  return { serverWorkspace: true, id: w.id, name: w.name, ...(w.description ? { description: w.description } : {}) }
+}
+
 const preselectedWorkspaceId = signal(null)
 effect(() => {
   const id = preselectedWorkspaceId.value
   const list = workspaces.value
   if (!id || !list || selectedWorkspace.value) return
+  // #268: a server workspace on the server's disk is no Provider workspace, so it isn't in `workspaces`;
+  // the bundled Examples is left out - it ships with Gantry and nothing is created in it.
+  const serverFound = isBundledServerWorkspace(id) ? undefined : (serverWorkspaceList.value ?? []).find((w) => w.id === id)
+  if (serverFound && !list.some((w) => w.id === id)) {
+    selectedWorkspace.value = serverWorkspaceSelection(serverFound)
+    isLocalWorkspace.value = false
+    instanceStepIsShortcut.value = true
+    step.value = 'instance'
+    return
+  }
   const found = list.find((w) => w.id === id)
   if (found) {
     pickedWorkspaceId.value = found.id
@@ -514,6 +554,12 @@ function resetWizard() {
   // rather than rely on that effect alone.
   workspaceMode.value = workspaceLocation.value === 'local' ? 'register' : 'pick'
   workspaces.value = null
+  serverWorkspaceList.value = null
+  serverWsName.value = ''
+  serverWsStore.value = 'disk'
+  simpleStoreIn.value = 'local'
+  serverWsStatus.value = 'idle'
+  serverWsError.value = ''
   workspacesLoadError.value = ''
   pickedWorkspaceId.value = ''
   registerProvider.value = DEFAULT_PROVIDER
@@ -564,21 +610,77 @@ function resetWizard() {
   linkStatus.value = 'idle'
   linkError.value = ''
   createdSlug.value = ''
+  createdRef.value = ''
   linkMode.value = 'create'
+}
+
+// The Blob containers the operator declared (#269), so "Store in" can offer them. Failing to read them only
+// leaves the choice out: the wizard then offers what it always has.
+async function loadBlobContainers() {
+  try {
+    const res = await apiFetch('/api/blob-containers', {}, { silent: true })
+    const body = res.ok ? await res.json() : { containers: [] }
+    blobContainerList.value = Array.isArray(body.containers) ? body.containers : []
+  } catch {
+    blobContainerList.value = []
+  }
 }
 
 async function loadWorkspaces() {
   workspacesLoadError.value = ''
   try {
+    // The server workspaces ride along (#268) for a `?workspace=<id>` shortcut to resolve against; they only
+    // add a way in, so failing to read them never fails the Provider list.
+    const serverListRequest = apiFetch('/api/server-workspaces?include=blob', {}, { silent: true })
+      .then((r) => (r.ok ? r.json() : []))
+      .catch(() => [])
     const res = await apiFetch('/api/workspaces')
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
       throw new Error(body.message ?? body.error ?? `Failed to load workspaces (${res.status})`)
     }
-    workspaces.value = await res.json()
+    const providerWorkspaces = await res.json()
+    serverWorkspaceList.value = await serverListRequest
+    workspaces.value = providerWorkspaces
   } catch (err) {
     workspacesLoadError.value = err.message
+    serverWorkspaceList.value = []
     workspaces.value = []
+  }
+}
+
+// The POST body for the chosen "Store in": the server's disk, or a Blob container (#269).
+function serverWorkspaceRequestBody(name) {
+  const store = serverWsStore.value
+  return store.startsWith('blob:') ? { name, storage: 'blob', container: store.slice('blob:'.length) } : { name, storage: 'disk' }
+}
+
+// "New server workspace" (#268): creates the workspace on the server's disk, then carries on to the Instance
+// step inside it - the same hand-off registering a remote workspace makes.
+async function createServerWorkspaceFromWizard() {
+  const name = serverWsName.value.trim()
+  if (!name) return
+  serverWsStatus.value = 'creating'
+  serverWsError.value = ''
+  try {
+    const res = await apiFetch(
+      '/api/server-workspaces',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(serverWorkspaceRequestBody(name)) },
+      { silent: true }
+    )
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      serverWsStatus.value = 'failed'
+      serverWsError.value = body.message ?? body.error ?? `Failed to create workspace (${res.status})`
+      return
+    }
+    serverWsStatus.value = 'idle'
+    selectedWorkspace.value = serverWorkspaceSelection(body)
+    isLocalWorkspace.value = false
+    step.value = 'instance'
+  } catch (err) {
+    serverWsStatus.value = 'failed'
+    serverWsError.value = err.message
   }
 }
 
@@ -864,7 +966,7 @@ async function createLocalInstance() {
     const structure = await resolveDefinitionStructure(handle, defId, version)
     const firstStage = structure.stages?.[0]
     if (!firstStage) throw new Error(`Definition "${defId}" has no stages`)
-    const modulesById = new Map((structure.modules ?? []).map((m) => [m.id, m]))
+    const modulesById = new Map(modulesWithStandard(structure.modules, structure.standardModules).map((m) => [m.id, m]))
 
     const existing = await listDir(handle, 'gantry-workspace').catch(() => [])
     if (existing.some((entry) => entry.name === slug && entry.kind === 'directory')) {
@@ -1421,6 +1523,39 @@ async function createInstanceAndMaybeLink() {
   const versionToSend = resolvedVersion()
 
   let actualSlug = slug
+  if (ws.serverWorkspace) {
+    // #268: a server workspace has no Provider, so there is nothing to check, adopt or link - the Instance
+    // is created straight into its folder on the server's disk.
+    try {
+      const res = await apiFetch('/api/instances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          definition: selectedDefinitionId.value,
+          slug,
+          assignee: assigneeField.value.trim(),
+          definitionVersion: versionToSend,
+          serverWorkspace: ws.id,
+          ...chosenSettingValues(selectedInstanceSettings.value),
+          ...chosenLogoBody(),
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        createStatus.value = 'failed'
+        createError.value = body.message ?? body.error ?? `Failed to create instance (${res.status})`
+        return
+      }
+      createdSlug.value = slug
+      createdRef.value = body.ref ?? ''
+      createStatus.value = 'idle'
+      step.value = 'done'
+    } catch (err) {
+      createStatus.value = 'failed'
+      createError.value = err.message
+    }
+    return
+  }
   if (importPayload.value) {
     // #305 — import: write the source local instance's real content (not a
     // blank template) via POST /api/instances/import. No C4 adopt-check
@@ -1948,10 +2083,9 @@ function ImportSourcePanel() {
 }
 
 // ---------- Server-hosted + Register + Import: destination picker (#305) ----------
-// "New server workspace" reuses the exact same org/project/repository/owner
+// "New remote workspace" reuses the exact same org/project/repository/owner
 // form as the "Start blank" Register panel (registerForm/registerWorkspace);
-// "An already-registered server
-// workspace" reuses the exact same list as the top-level "Pick existing
+// "An existing workspace" reuses the exact same list as the top-level "Pick existing
 // workspace" mode (workspaces/pickedWorkspaceId/pickWorkspace) — #305 calls
 // for the same picker, not a new one.
 function ImportDestinationPanel() {
@@ -1970,14 +2104,14 @@ function ImportDestinationPanel() {
           class=${'btn small' + (importDestMode.value === 'new' ? ' active' : '')}
           onClick=${() => (importDestMode.value = 'new')}
         >
-          New server workspace
+          New remote workspace
         </button>
         <button
           type="button"
           class=${'btn small' + (importDestMode.value === 'existing' ? ' active' : '')}
           onClick=${() => (importDestMode.value = 'existing')}
         >
-          An already-registered server workspace
+          An existing workspace
         </button>
       </div>
     </div>
@@ -2067,7 +2201,7 @@ function ImportDestinationPanel() {
           <div class="wizard-field">
             ${workspacesLoadError.value ? html`<p class="load-error">${workspacesLoadError.value}</p>` : null}
             ${workspaces.value === null && !workspacesLoadError.value ? html`<p class="loading">Loading…</p>` : null}
-            ${workspaces.value?.length === 0 ? html`<p class="wizard-field-hint">No workspaces registered yet — use "New server workspace" instead.</p>` : null}
+            ${workspaces.value?.length === 0 ? html`<p class="wizard-field-hint">No workspaces registered yet — use "New remote workspace" instead.</p>` : null}
             ${workspaces.value?.length
               ? html`
                   <div id="import-workspace-picker">
@@ -2173,7 +2307,101 @@ async function loadRegisterJiraIssueTypes() {
   }
 }
 
+// "New server workspace" (#268, docs/adr/0070): a name and where to keep it. No Provider, so no credential
+// and no repository to name - the workspace is a folder on the server's disk.
+function ServerWorkspacePanel() {
+  const creating = serverWsStatus.value === 'creating'
+  return html`
+    <div class="wizard-field">
+      <label for="server-ws-name">Name</label>
+      <input
+        class="wizard-input"
+        id="server-ws-name"
+        type="text"
+        value=${serverWsName.value}
+        onInput=${(e) => (serverWsName.value = e.currentTarget.value)}
+        onKeyDown=${(e) => {
+          if (e.key === 'Enter' && serverWsName.value.trim() && !creating) createServerWorkspaceFromWizard()
+        }}
+      />
+    </div>
+    <div class="wizard-field">
+      <label for="server-ws-store">Store in</label>
+      <select
+        class="wizard-input"
+        id="server-ws-store"
+        value=${serverWsStore.value}
+        onChange=${(e) => (serverWsStore.value = e.currentTarget.value)}
+      >
+        ${advancedMode.value ? html`<option value="disk">Server disk</option>` : null}
+        ${blobContainerList.value.map(
+          (container) => html`
+            <option value=${`blob:${container.name}`} disabled=${container.reachable === false}>
+              Blob container: ${container.name}${container.reachable === false ? ` (not reachable now${container.reason ? `: ${container.reason}` : ''})` : ''}
+            </option>
+          `
+        )}
+      </select>
+      <p class="wizard-field-hint" id="server-ws-store-hint">
+        ${serverWsStore.value.startsWith('blob:')
+          ? 'Kept in a folder of that Blob container, so it survives a redeploy and every Gantry server sharing the container sees it. '
+          : 'Kept in a folder on the machine running Gantry. '}
+        A server workspace has no branches, Pull Requests or approvals: an Instance in it advances the way one in a Local
+        workspace does, once its Stage passes the gate.
+      </p>
+    </div>
+    <div class="wizard-field">
+      <button
+        type="button"
+        class="btn primary"
+        id="server-ws-create"
+        disabled=${!serverWsName.value.trim() || creating}
+        onClick=${createServerWorkspaceFromWizard}
+      >
+        ${creating ? 'Creating…' : 'Create workspace'}
+      </button>
+      ${serverWsStatus.value === 'failed' ? html`<div class="inline-error" id="server-ws-error">${serverWsError.value}</div>` : null}
+    </div>
+  `
+}
+
+// With Advanced mode off and a Blob container declared (#269): where to keep a new workspace - a folder on the
+// architect's computer (Local) or a Blob container. Choosing a container hands the step to the server-workspace
+// panel; Local leaves the step as it has always been.
+function SimpleStoreInChoice() {
+  return html`
+    <div class="wizard-field">
+      <label for="simple-store-in">Store in</label>
+      <select
+        class="wizard-input"
+        id="simple-store-in"
+        value=${simpleStoreIn.value}
+        onChange=${(e) => {
+          simpleStoreIn.value = e.currentTarget.value
+          if (e.currentTarget.value !== 'local') serverWsStore.value = e.currentTarget.value
+        }}
+      >
+        <option value="local">A folder on my computer (Local)</option>
+        ${blobContainerList.value.map(
+          (container) => html`
+            <option value=${`blob:${container.name}`} disabled=${container.reachable === false}>
+              Blob container: ${container.name}${container.reachable === false ? ` (not reachable now${container.reason ? `: ${container.reason}` : ''})` : ''}
+            </option>
+          `
+        )}
+      </select>
+    </div>
+  `
+}
+
 function WorkspaceStep() {
+  useEffect(() => {
+    loadBlobContainers()
+  }, [])
+
+  // Advanced mode off, a Blob container declared and chosen: the panel for a new server workspace stands in for the Local one.
+  const blobChosenSimply = !advancedMode.value && blobContainerList.value.length > 0 && simpleStoreIn.value !== 'local'
+
   useEffect(() => {
     if (
       workspaceLocation.value === 'server' &&
@@ -2185,8 +2413,10 @@ function WorkspaceStep() {
 
   return html`
     ${advancedMode.value ? html`<${WorkspaceLocationToggle} />` : null}
+    ${!advancedMode.value && blobContainerList.value.length > 0 ? html`<${SimpleStoreInChoice} />` : null}
+    ${blobChosenSimply ? html`<${ServerWorkspacePanel} />` : null}
 
-    <div class="wizard-field">
+    ${blobChosenSimply ? null : html`<div class="wizard-field">
       <div class="wizard-mode-toggle" role="group" aria-label="Workspace source">
         ${(() => {
           const isLocal = workspaceLocation.value === 'local'
@@ -2196,7 +2426,7 @@ function WorkspaceStep() {
               class=${'btn small' + (workspaceMode.value === 'pick' ? ' active' : '')}
               onClick=${() => (workspaceMode.value = 'pick')}
             >
-              ${isLocal ? 'Pick existing local workspace' : 'Pick existing workspace'}
+              ${isLocal ? 'Pick existing local workspace' : 'An existing workspace'}
             </button>
           `
           const registerButton = html`
@@ -2205,7 +2435,18 @@ function WorkspaceStep() {
               class=${'btn small' + (workspaceMode.value === 'register' ? ' active' : '')}
               onClick=${() => (workspaceMode.value = 'register')}
             >
-              ${isLocal ? 'Register new local workspace' : 'Register new workspace'}
+              ${isLocal ? 'Register new local workspace' : 'New remote workspace'}
+            </button>
+          `
+          // #268: a server workspace on the server's disk - Server-hosted only, so it is behind Advanced mode
+          // with the rest of this toggle (the Server-hosted/Local choice only renders when it is on).
+          const serverButton = html`
+            <button
+              type="button"
+              class=${'btn small' + (workspaceMode.value === 'server' ? ' active' : '')}
+              onClick=${() => (workspaceMode.value = 'server')}
+            >
+              New server workspace
             </button>
           `
           // WI #306 item 1: Local mode only — Register renders first (and
@@ -2213,12 +2454,12 @@ function WorkspaceStep() {
           // matching a first-time local-workspace user having nothing to
           // pick yet. Server-hosted keeps its existing Pick-first order and
           // default unchanged.
-          return isLocal ? html`${registerButton}${pickButton}` : html`${pickButton}${registerButton}`
+          return isLocal ? html`${registerButton}${pickButton}` : html`${pickButton}${registerButton}${serverButton}`
         })()}
       </div>
-    </div>
+    </div>`}
 
-    ${workspaceLocation.value === 'local' ? html`<${LocalWorkspacePanel} />` : null}
+    ${workspaceLocation.value === 'local' && !blobChosenSimply ? html`<${LocalWorkspacePanel} />` : null}
 
     ${workspaceLocation.value === 'server' && workspaceMode.value === 'pick'
       ? html`
@@ -2226,7 +2467,7 @@ function WorkspaceStep() {
             ${workspacesLoadError.value ? html`<p class="load-error">${workspacesLoadError.value}</p>` : null}
             ${workspaces.value === null && !workspacesLoadError.value ? html`<p class="loading">Loading…</p>` : null}
             ${workspaces.value?.length === 0
-              ? html`<p class="wizard-field-hint">No workspaces registered yet — <button type="button" class="btn-link" onClick=${() => (workspaceMode.value = 'register')}>switch to "Register new workspace"</button>.</p>`
+              ? html`<p class="wizard-field-hint">No workspaces registered yet — <button type="button" class="btn-link" onClick=${() => (workspaceMode.value = 'register')}>switch to "New remote workspace"</button>.</p>`
               : null}
             ${workspaces.value?.length
               ? html`
@@ -2275,7 +2516,7 @@ function WorkspaceStep() {
               <p class="wizard-field-hint">
                 Point at an Azure DevOps repo that already holds a gantry workspace — gantry checks it
                 and adopts the existing instance data. On GitHub, GitLab or Atlassian instead, use
-                "Register new workspace" with that repo's own real details — gantry detects and adopts
+                "New remote workspace" with that repo's own real details — gantry detects and adopts
                 existing instance data there too, no separate URL-paste step needed.
               </p>
               <label for="adopt-repo-pat">Personal Access Token</label>
@@ -2322,6 +2563,8 @@ function WorkspaceStep() {
           </div>
         `
       : null}
+
+    ${workspaceLocation.value === 'server' && workspaceMode.value === 'server' ? html`<${ServerWorkspacePanel} />` : null}
 
     ${workspaceLocation.value === 'server' && workspaceMode.value === 'register'
       ? html`
@@ -2705,7 +2948,7 @@ function InstanceStep() {
   // wizard the architect is actually on; the credential gets asked for anyway the moment something
   // that actually needs it (registering the workspace, creating the instance) runs.
   useEffect(() => {
-    if (!ws || ws.isLocal || !ws.id) return
+    if (!ws || ws.isLocal || ws.serverWorkspace || !ws.id) return
     apiFetch(`/api/workspaces/${encodeURIComponent(ws.id)}/definitions`, {}, { workspaceId: ws.id, silent: true })
       .then((res) => (res.ok ? res.json() : []))
       .then((rows) => {
@@ -2739,6 +2982,8 @@ function InstanceStep() {
       <h3><span class="stamp agreed">Workspace</span></h3>
       ${ws.isLocal
         ? html`<div class="result-row"><span class="k">Local workspace</span><span class="v">${ws.name}</span></div>`
+        : ws.serverWorkspace
+          ? html`<div class="result-row"><span class="k">Server workspace</span><span class="v">${ws.name}</span></div>`
         : ws.provider === 'github'
           ? html`<div class="result-row"><span class="k">Owner/Repository</span><span class="v">${ws.location.owner}/${ws.location.repository}</span></div>`
           : html`<div class="result-row"><span class="k">Organization/Project/Repository</span><span class="v">${ws.location.organization}/${ws.location.project}/${ws.location.repository}</span></div>`}
@@ -2837,7 +3082,7 @@ function InstanceStep() {
 
     <div class="wizard-field">
       <label for="instance-assignee">Assignee</label>
-      ${ws.isLocal
+      ${ws.isLocal || ws.serverWorkspace
         ? html`
             <input
               class="wizard-input"
@@ -3081,7 +3326,7 @@ function DoneStep() {
     <div class="result-card">
       <h3><span class="stamp agreed">Instance created</span></h3>
       <p class="result-note">"${createdSlug.value}" is registered and appears in gantry's instance listing.</p>
-      <button type="button" class="btn primary" onClick=${() => openInstance(createdSlug.value)}>Open instance</button>
+      <button type="button" class="btn primary" onClick=${() => openInstance(createdRef.value || createdSlug.value)}>Open instance</button>
       <button type="button" class="btn ghost" onClick=${resetWizard}>Create another</button>
       ${importPayload.value ? html`<${ImportForgetPrompt} />` : null}
     </div>
@@ -3118,6 +3363,21 @@ function ImportForgetPrompt() {
   `
 }
 
+// Does this visit inherit a shortcut jump (`?workspace=`/`?local=`) left over from an
+// earlier, unrelated one (#76)? True only when the *previous* visit was itself a shortcut
+// (a genuine step-by-step flow never sets `instanceStepIsShortcut`, and a mid-flow revisit
+// — #137, Home then the browser's Back — must resume where the architect left off) AND this
+// visit is not that same shortcut again: either no shortcut query param at all (a plain
+// "+ New Workspace"), or a shortcut aimed at a *different* workspace — which would otherwise
+// be swallowed, since both preselect effects ignore a new id while `selectedWorkspace` is
+// still holding the old one.
+function isStaleShortcutVisit(query) {
+  if (!instanceStepIsShortcut.value) return false
+  if (query?.workspace) return query.workspace !== preselectedWorkspaceId.value
+  if (query?.local) return query.local !== preselectedLocalWorkspaceId.value
+  return true
+}
+
 // `query` arrives as a route prop — `preact-iso` hands a matched route's
 // query string straight through this way (see web/pages/settings.js's own
 // doc comment on the same convention) — rather than this page re-parsing
@@ -3127,28 +3387,42 @@ function ImportForgetPrompt() {
 // Switcher's own "+ New Instance" link) reach this exact same component and
 // this is the one place that tells them apart.
 export function NewWorkspaceWizardPage({ query }) {
+  // Undo a stale shortcut BEFORE this visit renders anything (#76). It used to run inside the
+  // mount `useEffect` below — i.e. after the first paint — so the first frame of an unrelated
+  // "+ New Workspace" visit briefly rendered the stale "New Instance" step, and anything
+  // observing the page in that window (a user, or a test reading the heading the moment it
+  // appeared) saw it before the correction landed. Resetting synchronously, ahead of the
+  // `step`/`instanceStepIsShortcut` reads further down this render, means no frame ever shows
+  // it. Done once per visit (a ref, not state: re-renders from signal changes must not re-run
+  // it).
+  //
+  // Every wizard signal above is module-scoped, not component-scoped —
+  // `preact-iso`'s client-side routing never remounts this module between
+  // visits. That's deliberate and correct for a genuine mid-flow revisit
+  // (#137: Home then the browser's own Back button must resume exactly
+  // where the architect left off) — so this must NOT reset unconditionally
+  // on every mount, only undo a *shortcut* jump (`?workspace=`/`?local=`)
+  // that a later, unrelated visit inherited. Without this: open an
+  // instance, use the Instance Switcher's own "+ New Instance" shortcut
+  // (setting `instanceStepIsShortcut.value = true` and `step.value =
+  // 'instance'` above), then navigate Home and click the dashboard's plain
+  // "+ New Workspace" link (no query params) — that visit would still be
+  // sitting on the stale shortcut's `'instance'` step, skipping straight
+  // into creating an instance under whichever workspace the shortcut had
+  // preselected instead of actually offering to create/pick one. Reported
+  // directly by the user.
+  //
+  // Keyed on the shortcut query params rather than on mount alone: `preact-iso` re-renders the
+  // same component in place (no remount) when only the query string changes, e.g. the Switcher's
+  // "+ New Instance" from one workspace's instance and then another's.
+  const visitKey = `${query?.workspace ?? ''}|${query?.local ?? ''}`
+  const lastVisitKey = useRef(null)
+  if (lastVisitKey.current !== visitKey) {
+    lastVisitKey.current = visitKey
+    if (isStaleShortcutVisit(query)) resetWizard()
+  }
+
   useEffect(() => {
-    // Every wizard signal above is module-scoped, not component-scoped —
-    // `preact-iso`'s client-side routing never remounts this module between
-    // visits. That's deliberate and correct for a genuine mid-flow revisit
-    // (#137: Home then the browser's own Back button must resume exactly
-    // where the architect left off) — so this must NOT reset unconditionally
-    // on every mount, only undo a *shortcut* jump (`?workspace=`/`?local=`,
-    // below) that a later, unrelated, non-shortcut visit inherited. Without
-    // this: open an instance, use the Instance Switcher's own "+ New
-    // Instance" shortcut (setting `instanceStepIsShortcut.value = true` and
-    // `step.value = 'instance'` below), then navigate Home and click the
-    // dashboard's plain "+ New Workspace" link (no query params) — that
-    // visit would still be sitting on the stale shortcut's `'instance'`
-    // step, skipping straight into creating an instance under whichever
-    // workspace the shortcut had preselected instead of actually offering to
-    // create/pick one. Scoped to exactly that: only when arriving with no
-    // shortcut query param at all, and only when the *previous* visit was
-    // itself a shortcut (never a genuine step-by-step flow, which never sets
-    // this flag) — reported directly by the user.
-    if (!query?.workspace && !query?.local && instanceStepIsShortcut.value) {
-      resetWizard()
-    }
     const ws = query?.workspace
     if (ws) {
       preselectedWorkspaceId.value = ws
@@ -3158,6 +3432,9 @@ export function NewWorkspaceWizardPage({ query }) {
     if (local) {
       preselectedLocalWorkspaceId.value = local
     }
+  }, [query?.workspace, query?.local])
+
+  useEffect(() => {
     // WI #383 (ADR-0036): `includeWorkspaces=1` unions the library with every server workspace's own
     // definitions (no credential needed — a server workspace's `definitions/` folder is plain local
     // disk) — this is what makes the reserved "default" server workspace's own definitions available

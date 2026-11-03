@@ -62,6 +62,10 @@ test('Definitions page: a draft shows the Contoso logo, Replace writes a new one
   const instancesDir = join(root, 'instances')
   try {
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
+    // v3 has been published since #308 (and a published version offers Download only), so this
+    // scratch copy turns it back into the draft the Replace control is for; v2 stays the published one.
+    const v3Yaml = join(definitionsDir, 'design', '3', 'definition.yaml')
+    writeFileSync(v3Yaml, readFileSync(v3Yaml, 'utf8').replace(/^status: published$/m, 'status: draft'))
     // The bundled design v3 example, at Detailed Design so its SAD can be rendered.
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })

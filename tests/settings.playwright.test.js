@@ -554,7 +554,7 @@ test('settings: Instance Settings reports "not linked" when the instance has no 
     await withPage(async (page) => {
       await page.goto(`${base}/settings/instance?slug=my-initiative`)
       await page.waitForSelector('.settings-section', { timeout: 10_000 })
-      assert.match(await page.locator('.settings-page').textContent(), /isn't linked to an Azure DevOps work item/)
+      assert.match(await page.locator('.settings-page').textContent(), /isn't linked to a work item/)
     })(base)
   })
 })

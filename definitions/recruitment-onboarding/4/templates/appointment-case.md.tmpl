@@ -1,0 +1,61 @@
+# <%~ it.instance.name || it.instance.slug %>: Appointment Case
+<%
+  /* v3 (#155): the case put to executive approval at `approved-to-appoint`, before any offer is
+     made — v2's single Appointment stage is split, see CHANGELOG.md. The only document at its
+     gate. Candidate, rationale, vetting outcome and the proposed offer terms are bare: the
+     executive decision turns on them. Role and engagement are carried context, referenced `?`.
+     `process-gaps.gaps?` is in `requires` for authoring scope only, not printed (the
+     Hire Record prints it): without it the editor would never offer the field at this stage.
+
+     The offer outcome, contract and payroll moved to the Onboarding Case at
+     `onboarding-approved`. No approval section: the approval is the sign-off on this stage. The
+     term heading shows whenever the type is not Permanent, and the Vetting conditions heading
+     whenever the outcome is Cleared with conditions — each printing "— not stated —" when blank,
+     so a missing term or condition is visible to the approver. */
+  const apType = it.modules.engagement.type
+  const apTerm = it.modules.engagement.term
+%>
+# The appointment
+
+## Role
+
+<%~ na(it.modules.role.summary) %>
+
+## Team and reporting line
+
+<%~ na(it.modules.role.team) %>
+
+## Engagement type
+
+<%~ na(apType) %>
+<% if (apTerm || (apType && apType !== 'Permanent')) { %>
+## Term or expected duration
+
+<%~ apTerm || '— not stated —' %>
+<% } %>
+## Candidate name
+
+<%~ na(it.modules.selection['candidate-name']) %>
+
+## Selection rationale
+
+<%~ na(it.modules.selection.rationale) %>
+
+## Vetting outcome
+
+<%~ na(it.modules.vetting.outcome) %>
+<% if (it.modules.vetting.conditions || it.modules.vetting.outcome === 'Cleared with conditions') { %>
+## Vetting conditions
+
+<%~ it.modules.vetting.conditions || '— not stated —' %>
+<% } %>
+# Proposed terms
+
+## Offer terms
+
+<%~ na(it.modules.offer.terms) %>
+<% if (it.modules['open-questions'].questions) { %>
+# Open questions
+
+<%~ it.modules['open-questions'].questions %>
+<% } %>

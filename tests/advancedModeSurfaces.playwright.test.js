@@ -108,30 +108,10 @@ test('advanced mode off (fresh browser): the dashboard lists only local instance
     assert.equal(await page.locator('.instance-list .list-item .name').textContent(), 'default')
     assert.equal(await page.locator('.instance-list .list-item .name', { hasText: REPOSITORY }).count(), 0)
 
-    // Turning advanced mode on (a sticky choice) and reloading is meant to bring the ADO row back —
-    // but #9 (ADR-0038) means `GET /api/instances` (web/app.js's `loadInstances`, called with no slug
-    // for the dashboard) now carries no credential at all: there is no global default left for a
-    // multi-workspace listing with no single workspace in view to fall back to, so
-    // `lib/registry.js`'s `buildAzureDevOpsRow` drops every Provider-backed row rather than merely
-    // failing to enrich it (its own long-standing "can't authenticate, so leave it out" contract,
-    // previously masked by the global default always being available). This is a real, known gap this
-    // ticket surfaces rather than papers over — see its own PR/commit notes. What *is* still this
-    // test's own responsibility to prove: advanced mode's client-side filter itself, once a
-    // Provider-backed row is actually present in the response — exercised here by having the server's
-    // response carry one regardless of credentials (`page.route`), decoupling "does the filter work"
-    // from the separate, unresolved "can the dashboard authenticate a multi-workspace listing" gap.
-    await page.route('**/api/instances', async (route) => {
-      const response = await route.fetch()
-      const body = await response.json()
-      body.push({
-        slug: REPOSITORY,
-        definition: 'design',
-        stage: 'shape',
-        status: 'incomplete',
-        workspace: { kind: 'azureDevOps', id: 'fake-ws-id', organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY },
-      })
-      await route.fulfill({ response, json: body })
-    })
+    // Turning advanced mode on (a sticky choice) and reloading brings the Azure-DevOps-backed row
+    // back. The server genuinely returns it (the seeded PAT is migrated into that row's own
+    // workspace, ADR-0038), so the row is real — nothing is stubbed on the response. The row had
+    // been filtered out only client-side, which is the point of this test.
     await page.evaluate(() => localStorage.setItem('gantry:advancedMode', 'true'))
     await page.reload()
     await page.waitForSelector('.master-detail', { timeout: 10_000 })

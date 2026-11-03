@@ -7,6 +7,7 @@ import {
   workspacesNeedingOwnListing,
   describeInstanceRowWorkspace,
   workspaceNewInstanceHref,
+  unrepresentedServerWorkspaceGroups,
 } from '../web/lib/dashboardWorkspaces.js'
 
 // #122 (parent #109, docs/adr/0047): the dashboard's client-side join between `GET /api/workspaces`
@@ -284,8 +285,62 @@ test('workspaceNewInstanceHref: a local workspace links with ?local= once its fo
   for (const state of ['loading', 'prompt', 'denied', 'missing']) assert.equal(workspaceNewInstanceHref(group(state)), null, state)
 })
 
-test('workspaceNewInstanceHref: no button for a server directory workspace such as the bundled Examples', () => {
+test('workspaceNewInstanceHref: no button for the bundled Examples server workspace, but one for any other server workspace', () => {
   const group = { key: 'workspace:examples', instances: [{ slug: 'gantry', workspace: { kind: 'directory', id: 'examples', name: 'Examples' } }] }
   assert.equal(workspaceNewInstanceHref(group), null)
   assert.equal(workspaceNewInstanceHref({ key: 'local:legacy', instances: [{ slug: 'legacy' }] }), null)
+  const mine = { key: 'workspace:payments', instances: [{ slug: 'cards', workspace: { kind: 'directory', id: 'payments', name: 'Payments' } }] }
+  assert.equal(workspaceNewInstanceHref(mine), '/new-instance?workspace=payments')
+})
+
+// #268: a server workspace just created in the wizard has no instance yet, so no dashboard row.
+test('unrepresentedServerWorkspaceGroups: an empty server workspace gets a blank placeholder with a New Instance link', () => {
+  const groups = unrepresentedServerWorkspaceGroups([], [{ id: 'payments', name: 'Payments Team', description: null }])
+  assert.equal(groups.length, 1)
+  assert.equal(groups[0].kind, 'placeholder')
+  assert.equal(groups[0].state, 'blank')
+  assert.equal(groups[0].title, 'Payments Team')
+  assert.equal(groups[0].subtitle, 'Server workspace')
+  assert.equal(workspaceNewInstanceHref(groups[0]), '/new-instance?workspace=payments')
+})
+
+test('unrepresentedServerWorkspaceGroups: skips a workspace with a row and an empty reserved default, and takes the description as subtitle', () => {
+  const instances = [{ slug: 'a', workspace: { kind: 'directory', id: 'examples' } }]
+  const groups = unrepresentedServerWorkspaceGroups(instances, [
+    { id: 'examples', name: 'Examples' },
+    { id: 'default', name: 'default' },
+    { id: 'ledger', name: 'Ledger', description: 'Ledger team' },
+  ])
+  assert.deepEqual(groups.map((g) => g.workspaceId), ['ledger'])
+  assert.equal(groups[0].subtitle, 'Ledger team')
+  assert.deepEqual(unrepresentedServerWorkspaceGroups(undefined, undefined), [])
+})
+
+// #269: a server workspace kept in a Blob container says where it is kept, and one whose container can't be reached
+// becomes an unavailable placeholder carrying the reason - with no New Instance link, since nothing can be created in it.
+test('unrepresentedServerWorkspaceGroups: a workspace in a Blob container is labelled with its container', () => {
+  const groups = unrepresentedServerWorkspaceGroups([], [{ id: 'blob-1', name: 'Cloud Team', description: null, storage: 'blob', container: 'main', available: true }])
+  assert.equal(groups[0].state, 'blank')
+  assert.equal(groups[0].subtitle, 'Blob container: main')
+  assert.equal(groups[0].container, 'main')
+  assert.equal(workspaceNewInstanceHref(groups[0]), '/new-instance?workspace=blob-1')
+})
+
+test('unrepresentedServerWorkspaceGroups: an unavailable workspace carries the reason and offers no New Instance', () => {
+  const groups = unrepresentedServerWorkspaceGroups([], [
+    { id: 'blob-2', name: 'Fragile', description: null, storage: 'blob', container: 'main', available: false, reason: 'the credential was rejected (401)' },
+    { id: 'plain', name: 'Plain', storage: 'disk' },
+  ])
+  assert.equal(groups[0].state, 'unavailable')
+  assert.equal(groups[0].reason, 'the credential was rejected (401)')
+  assert.equal(workspaceNewInstanceHref(groups[0]), null)
+  assert.equal(groups[1].state, 'blank', 'a disk workspace is unaffected')
+  assert.equal(groups[1].reason, undefined)
+})
+
+test('describeInstanceRowWorkspace: a directory row from a Blob container names the container when it has no description', () => {
+  const blob = { kind: 'directory', id: 'blob-1', name: 'Cloud Team', storage: 'blob', container: 'main' }
+  assert.deepEqual(describeInstanceRowWorkspace(blob), { title: 'Cloud Team', subtitle: 'Blob container: main' })
+  assert.deepEqual(describeInstanceRowWorkspace({ ...blob, description: 'Quarterly' }), { title: 'Cloud Team', subtitle: 'Quarterly' })
+  assert.deepEqual(describeInstanceRowWorkspace({ kind: 'directory', id: 'p', name: 'P' }), { title: 'P', subtitle: 'Server workspace' })
 })

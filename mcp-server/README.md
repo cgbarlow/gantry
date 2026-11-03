@@ -70,6 +70,91 @@ Two independent auth layers, matching `docs/adr/0043`:
 No PAT is ever accepted as a tool argument for an *existing* workspace, and none is ever included in
 a tool's response.
 
+## Saving content safely: the stage version
+
+Two writers can be on one stage at once: an architect in the editor, a colleague, another agent. So a save
+checks what changed since the writer read it (`docs/adr/0068`).
+
+- `get_instance` returns `stageVersion`, a fingerprint of every Field's content on the stage. It follows
+  Field content only, so an uploaded Asset or a render leaves it unchanged.
+- `update_instance_modules` takes it as `stageVersion` and passes it to gantry serve as `baseVersion`. When it
+  still matches, the call saves and returns the stage's new `stageVersion`.
+- When the stage has changed since, **nothing is saved** and the call fails with `code: "stage_changed"`, the
+  stage's new `stageVersion` and `differingFields`: the Fields in the call that are saved differently now, as
+  `moduleId.fieldId` (a custom section is `moduleId."Its title"`). The agent re-reads with `get_instance`,
+  settles any difference with the architect, and saves again with the new version. The saved stage itself is
+  not echoed in the failure; `get_instance` is the one place to read it.
+- With no `stageVersion` the call saves as it did before the check, so existing agents keep working, and the
+  response carries `overwrittenFields`: every Field the call overwrote (it held content and now holds something
+  else). In an interview session the version is required (see "Running an AI interview session" below).
+
+The comparison itself lives in gantry serve, so it is the same in every workspace kind.
+
+## Source documents, decisions logs and Reviewed copies
+
+The AI interview adds three kinds of file to an Instance. Following `docs/adr/0043` (the MCP server does everything the web
+UI does) and `docs/adr/0067`, an outside agent can read all of them and upload two of them. Read what the architect gave Gantry
+before drafting, so figures and names come from a document and not from the agent.
+
+| Tool | What it does |
+| --- | --- |
+| `list_source_documents` | The Instance's Source documents: id, title, filename, size, whether text was read, and which are `replacedBy` a newer upload or `removed`. |
+| `read_source_document` | One document's committed extracted text, a `page` at a time (a PDF by its own page numbers; anything else in sections of about 20,000 characters). A picture comes back as an image block. A document with no text says why. |
+| `upload_source_document` | Adds a document under the browser's rules: the same file types, 25 MB, one commit on the current stage's branch on an Azure DevOps or GitHub workspace, an optional `replaces` link, the same manifest entry. |
+| `read_decisions_log` | A stage's decisions log (or `allStages`). Server, Azure DevOps and GitHub workspaces; GitLab and Atlassian answer 400 until their module Save lands. |
+| `list_reviewed_copies` | The Reviewed copies brought in to the Instance. |
+| `read_reviewed_copy` | One copy's comment threads and tracked changes, grouped by the Field each traces to (with `mode` and `notice` when they were placed by matching text). |
+| `upload_reviewed_copy` | Brings in one or more `.docx` Reviewed copies. A document with no `gantry-*` properties is refused with the same message the browser shows. |
+
+`get_instance` also returns `outOfDate`: the Fields that drew on a Source document that has since been removed, replaced or read
+again with different text (or that cite one with `source:<id>`), with a reason for each. It is worked out by gantry serve from the
+manifest, the decisions logs and the saved content each time, so it is the same in every workspace kind. If it can't be worked out
+the response carries `outOfDateError` and the instance is still returned.
+
+**Uploads are read on the server.** In the browser the text is read out of a document before it is sent. There is no browser here, so
+`upload_source_document` sends the file with `extractText: true` and `gantry serve` runs the same extractors (officeparser, with
+Gantry's own Word-comment reader for a Reviewed copy), so a document uploaded here and in the browser gives the same text. The
+response says whether any text was read and why not (a picture, a scanned PDF, an unreadable file). The document is kept either way.
+
+**Access control is unchanged.** These are files in the same repository an agent could already read with the workspace's PAT;
+no new credential, route or permission is involved. A Local workspace's files are on the architect's computer and are not reachable
+from here, so none of these tools can reach one. ADR-0048 stays proposed.
+
+## Running an AI interview session
+
+Following `docs/adr/0067`, an outside agent can run the whole AI interview itself. It asks its questions in its own chat (question
+cards are web-only) and Gantry gives it what Gantry's own AI gets and holds it to the same rules. The rules live in `gantry serve`;
+these tools are thin calls to it.
+
+| Tool | What it does |
+| --- | --- |
+| `get_interview_brief` | The interview brief for a stage (`brief`, nine parts in precedence order: Gantry's rules, the pinned skills, Interview instructions, the stage, Fields in scope, saved content, preferred terms, Source documents, the decisions log so far), built by the same code as the in-app AI's, plus a `recap` of the stage's log, the `heldModules` of a drafted-ahead stage and the `stageVersion` to save against. Read-only. |
+| `start_interview_session` | Starts a "run until stage X" session: returns the `session` to pass on (an id, `runUntil`, state), the brief and recap, `stageVersion` and `notes` (another session still going on the stage, held modules). Writes nothing. |
+| `pause_interview_session` | Saves the entries, the session status (state `paused`) and, if `modules` are passed, the drafts so far, in one commit. |
+| `resume_interview_session` | Resumes from the last commit, whichever side paused: runs Check status once first on a workspace whose stage has a Pull Request, then returns the brief and recap and takes over the paused session (`who` or `session` picks it). The committed log wins. |
+| `update_instance_modules` | Takes `session`, `entries` and `stageVersion`. The stage-summary confirm is its one save: the content, the entries and the status in one commit. |
+| `advance_stage`, `request_approval` | Take `session` so Gantry can hold the agent to the in-app AI's rules. |
+| `get_review_response_list` | The Review response list as a Word document (`docxBase64`), built on demand from the stages' logs. |
+| `record_review_answers` | Raises each Reviewed copy's "comments answered" count once the outcomes are saved. |
+
+**A session moves between the browser and an agent through the last commit.** There is no session state on the server. A session is
+recorded only by what the agent saves (its entries and a status line in the stage's `interview/<stage>.yaml`), so a session paused
+in the browser resumes with `resume_interview_session` and one paused here resumes in the browser, which recaps from the same log.
+
+**Saving.** Pass `session` (`id`, `runUntil`, `state`, `model`, `who`) and `entries` to `update_instance_modules` at the stage-summary
+confirm. `stageVersion` is required in a session (a save without it is refused with `code: "stage_version_required"`; a stale one with
+`stage_changed`, as outside a session). Entries have the shape the browser's log has (`answer`, `fact`, `open-question`, `term`,
+`saved-content`, `source-update`, `review-answered`, ...). Gantry assigns each its `id`, time and session, stamps it
+`recordedBy: "outside agent"` with the `agentModel` the agent reports, writes the session status (model named, tokens `"not
+reported"`), and rebuilds the log's `fields` section from the content's `source:` citations and the entries that name each Field, so
+Out of date detection works on a stage an agent drafted. Nothing is committed per answer.
+
+**Guard rails.** In a session Gantry refuses, with `code: "session-guard"` or the existing code and the in-app AI's reason: passing a
+gate (`advance_stage` is refused on a workspace with Pull Requests, and elsewhere until the session saved the stage with state
+`saved`), `request_approval` for a stage the session has not saved, approvals out of stage order (refused for everyone,
+`docs/adr/0063`) and writes to a module an earlier stage with an open Pull Request also mounts (`shared-module-pending`, also for
+everyone). A call that names no session is treated like a person in the web UI: nothing new is refused.
+
 ## Adding a tool
 
 Add a new `src/tools/<cluster>.tools.js` file exporting a `tools` array:

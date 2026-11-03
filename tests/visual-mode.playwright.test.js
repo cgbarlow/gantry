@@ -66,6 +66,25 @@ async function eventually(fn, timeout = 5000) {
   throw lastErr
 }
 
+// #72: the raw-mouse tests below turn a bounding box into page coordinates, so they must not read it
+// while the surface is still laying out (a late font load or decoration pass moves the rows by a few
+// pixels and the click lands one row down). Read the box only once it has held still across several
+// consecutive polls.
+async function settledBox(locator, { timeout = 5000 } = {}) {
+  const start = Date.now()
+  let last = null
+  let stable = 0
+  for (;;) {
+    const box = await locator.boundingBox()
+    if (box && last && ['x', 'y', 'width', 'height'].every((k) => Math.abs(box[k] - last[k]) < 0.5)) stable += 1
+    else stable = 0
+    last = box
+    if (stable >= 3) return box
+    if (Date.now() - start > timeout) return box
+    await new Promise((r) => setTimeout(r, 80))
+  }
+}
+
 const activeCell = (page) =>
   page.evaluate(() => {
     const el = document.activeElement
@@ -183,7 +202,7 @@ test('typing in a cell changes exactly that line, keeps the caret, and one Undo 
 
     // Clicking a cell's padding (not its text) still edits that cell, and the cell outlines.
     const cell = grid.locator('tr[data-r="3"] .vgrid-cell').nth(1)
-    const box = await cell.boundingBox()
+    const box = await settledBox(cell)
     await page.mouse.click(box.x + box.width - 4, box.y + box.height - 3)
     assert.equal(await activeCell(page), '3,1')
     assert.equal(await cell.evaluate((el) => getComputedStyle(el).outlineStyle), 'solid')
@@ -247,14 +266,14 @@ test('column handles appear on the top edge, open a menu, and drag to move a col
     const handles = grid.locator('.vgrid-colh .vgrid-handle')
     const opacity = (loc) => loc.evaluate((el) => Number(getComputedStyle(el).opacity))
 
-    const box = await grid.boundingBox()
+    const box = await settledBox(grid)
     await page.mouse.move(box.x + box.width / 2, box.y + box.height - 4)
     await eventually(async () => assert.equal(await opacity(handles.first()), 0, 'hidden away from the top edge'))
     await page.mouse.move(box.x + box.width / 2, box.y + 6)
     await eventually(async () => assert.equal(await opacity(handles.first()), 1, 'shown at the top edge'))
 
     // A press that barely moves is a click: the column highlights and its menu opens.
-    const second = await handles.nth(1).boundingBox()
+    const second = await settledBox(handles.nth(1))
     await page.mouse.move(second.x + second.width / 2, second.y + 5)
     await page.mouse.down()
     await page.mouse.move(second.x + second.width / 2 + 2, second.y + 5)
@@ -280,8 +299,8 @@ test('column handles appear on the top edge, open a menu, and drag to move a col
 
     // A real drag: "Team" onto the first column, with the drop target shown on the way.
     await page.mouse.move(box.x + box.width / 2, box.y + 6)
-    const from = await grid.locator('.vgrid-colh .vgrid-handle').nth(2).boundingBox()
-    const to = await grid.locator('.vgrid-colh').nth(0).boundingBox()
+    const from = await settledBox(grid.locator('.vgrid-colh .vgrid-handle').nth(2))
+    const to = await settledBox(grid.locator('.vgrid-colh').nth(0))
     await page.mouse.move(from.x + from.width / 2, from.y + 5)
     await page.mouse.down()
     await page.mouse.move(to.x + to.width / 2, to.y + 5, { steps: 8 })
@@ -304,7 +323,7 @@ test('row handles insert, delete and drag body rows; the header row does not dra
   await withEditor(async ({ page, pageErrors, instancesDir }) => {
     const field = await seedTable(page)
     const grid = field.locator('.vgrid-wrap')
-    const box = await grid.boundingBox()
+    const box = await settledBox(grid)
     const showRows = () => page.mouse.move(box.x + 8, box.y + box.height / 2)
     const rowHandle = (r) => grid.locator(`tr[data-r="${r}"] .vgrid-rowh .vgrid-handle`)
 
@@ -321,8 +340,8 @@ test('row handles insert, delete and drag body rows; the header row does not dra
 
     // Dragging the header does nothing but open its menu.
     await showRows()
-    const header = await rowHandle(0).boundingBox()
-    const lastRow = await rowHandle(4).boundingBox()
+    const header = await settledBox(rowHandle(0))
+    const lastRow = await settledBox(rowHandle(4))
     await page.mouse.move(header.x + 5, header.y + header.height / 2)
     await page.mouse.down()
     await page.mouse.move(lastRow.x + 5, lastRow.y + lastRow.height / 2, { steps: 8 })
@@ -342,8 +361,8 @@ test('row handles insert, delete and drag body rows; the header row does not dra
 
     // Drag Cy above Ana.
     await showRows()
-    const cy = await rowHandle(4).boundingBox()
-    const ana = await rowHandle(2).boundingBox()
+    const cy = await settledBox(rowHandle(4))
+    const ana = await settledBox(rowHandle(2))
     await page.mouse.move(cy.x + 5, cy.y + cy.height / 2)
     await page.mouse.down()
     await page.mouse.move(ana.x + 5, ana.y + ana.height / 2, { steps: 8 })
@@ -365,7 +384,7 @@ test('the corner selects the whole table; deleting it can be undone from Markdow
   await withEditor(async ({ page, pageErrors, instancesDir }) => {
     const field = await seedTable(page)
     const grid = field.locator('.vgrid-wrap')
-    const box = await grid.boundingBox()
+    const box = await settledBox(grid)
     await page.mouse.move(box.x + 8, box.y + 6)
     await grid.locator('.vgrid-corner .vgrid-handle').click()
     assert.equal(await grid.evaluate((el) => el.classList.contains('sel-all')), true)
@@ -558,8 +577,9 @@ test('an archived instance is read-only in Visual view: no toolbar, no editable 
       assert.equal(await grid.locator('.vgrid-handle').count(), 0)
       assert.equal(await grid.locator('[contenteditable]').count(), 0)
       const field = page.locator('.field-markdown').first()
-      const before = await field.locator('.cm-content').textContent()
+      // The caret's line shows its Markdown (a citation of a Source document, #310, among it), so the text is read once the click has put the caret there.
       await field.locator('.cm-content').click()
+      const before = await field.locator('.cm-content').textContent()
       await page.keyboard.type('nope')
       assert.equal(await field.locator('.cm-content').textContent(), before)
       assert.equal(await page.locator('.md-toolbar').count(), 0)

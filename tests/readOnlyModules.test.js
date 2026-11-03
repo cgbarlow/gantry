@@ -9,6 +9,7 @@ import { loadDefinition, definitionVersionProjection, findDefinitionProblemsInSt
 import { validateDefinition } from '../lib/validate.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { buildLocalModuleEntry } from '../web/lib/localInstanceFiles.js'
+import { pruneStageReadOnlyModules, withModuleReadOnly } from '../web/lib/readOnlyModules.js'
 import { getStatus } from '../lib/status.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
 import { createGitHubClient } from '../lib/githubClient.js'
@@ -346,4 +347,32 @@ test('buildLocalModuleEntry marks a read-only Module the same way the server doe
     const identity = buildLocalModuleEntry(projection.modules.find((m) => m.id === 'identity'), provisioning, blank, null, projection.stages)
     assert.equal('readOnly' in identity, false)
   })
+})
+
+// #171: the local-workspace Definition editor takes a Stage's modules from a text field, so it prunes
+// `readOnlyModules` back to the mounted Modules when the author finishes typing.
+test('pruneStageReadOnlyModules drops entries for Modules the Stage no longer mounts, and the key once empty', () => {
+  const stage = { id: 's', modules: ['a', 'c'], readOnlyModules: ['a', 'b', 'c'] }
+  assert.deepEqual(pruneStageReadOnlyModules(stage), { id: 's', modules: ['a', 'c'], readOnlyModules: ['a', 'c'] })
+  assert.deepEqual(pruneStageReadOnlyModules({ id: 's', modules: [], readOnlyModules: ['a'] }), { id: 's', modules: [] })
+  assert.deepEqual(stage.readOnlyModules, ['a', 'b', 'c'], 'the input is not mutated')
+})
+
+test('pruneStageReadOnlyModules returns the same Stage when there is nothing to drop', () => {
+  const marked = { id: 's', modules: ['a', 'b'], readOnlyModules: ['b'] }
+  assert.equal(pruneStageReadOnlyModules(marked), marked)
+  const unmarked = { id: 's', modules: ['a'] }
+  assert.equal(pruneStageReadOnlyModules(unmarked), unmarked)
+  const malformed = { id: 's', modules: ['a'], readOnlyModules: 'a' }
+  assert.equal(pruneStageReadOnlyModules(malformed), malformed, 'a non-list is left for validation to report')
+})
+
+test('withModuleReadOnly marks and unmarks in the Stage module order and drops the key once empty', () => {
+  const stage = { id: 's', modules: ['a', 'b', 'c'] }
+  const both = withModuleReadOnly(withModuleReadOnly(stage, 'c', true), 'a', true)
+  assert.deepEqual(both.readOnlyModules, ['a', 'c'])
+  const one = withModuleReadOnly(both, 'a', false)
+  assert.deepEqual(one.readOnlyModules, ['c'])
+  assert.equal('readOnlyModules' in withModuleReadOnly(one, 'c', false), false)
+  assert.equal('readOnlyModules' in stage, false, 'the input is not mutated')
 })

@@ -1,0 +1,119 @@
+# A server workspace can be stored in an operator-declared Blob container
+
+Ticket #212, amended by #261, map #238 (v0.13.0). Facts from #259 (`docs/research/blob-storage.md`
+on `research/blob-storage`). Builds on ADR-0031 (server workspace directories)
+and ADR-0068 (the Save check).
+
+A container host's disk is wiped on redeploy, so today a server workspace
+survives only on a persistent volume. On Render that volume ties Gantry to one
+instance with no zero-downtime deploys.
+
+**Still a server workspace, stored somewhere else.** Before v0.13.0 no part
+of the app could create a server workspace. Only the reserved `default` and
+the bundled Examples existed, and the wizard's "New server workspace" in fact
+registered a remote workspace. The "+ New Workspace" wizard now gains a real
+**New server workspace**: a name, and **Store in**, either one of the
+operator's **Blob containers** or the server's disk. With Advanced mode off,
+the wizard asks whether to keep the workspace in a folder on the architect's
+computer (Local) or in a declared Blob container. A server workspace has no
+Provider, work-item or sign-off UI, so it fits that mode. Server disk and
+Provider repos stay behind Advanced mode. The Provider-repo options are renamed
+"New remote workspace" and "An existing workspace", so "server workspace" means
+one thing only. Settings lists the declared containers read-only, each with
+whether it can be reached right now, and never shows a credential. A
+blob-stored workspace is a
+folder in the container with the same layout as on disk (`workspace.json` plus
+Instance folders, Definitions, assets, `sources/`, `reviews/`, `interview/`),
+and it behaves like any server workspace. It has no commits, PRs or work items.
+The server's own folder, its registries, library settings, library cache and
+the bundled Examples workspace stay where they are.
+
+**The operator declares the containers.** `GANTRY_BLOB_CONTAINERS` lists each
+container's name, URL and credential type: connection string, SAS, managed
+identity or service principal. Any secret sits in a separate environment variable
+that the declaration names. Gantry builds that one credential type, never
+`DefaultAzureCredential`. This is a third server-held credential, alongside
+library repos (ADR-0036) and shared workspaces (ADR-0047). No architect holds
+it, because no architect's identity is involved: the container belongs to the
+deployment. A malformed declaration stops startup with one line. A container
+that can't be reached at runtime marks its workspaces unavailable with the
+reason, and the rest of Gantry carries on.
+
+**The container is the truth, and several servers may share it.** A
+blob-stored workspace's id is derived from its container and folder. Its
+Instances and their short numbers are kept in the container and read from it,
+not from a server's own registry. A workspace made on one server shows on every
+server, and a redeploy loses nothing. A zero-downtime deploy already means two
+servers at once, so "one server at a time" would have saved little.
+
+**Gantry reads and writes the container directly**, on the same async path
+remote workspaces use to reach their repo. It keeps no local copy, because a
+copy goes stale the moment another server writes. A Save is all-or-nothing:
+it holds a short lease on the Instance for the duration, and every file write
+is conditional on the ETag it read. ADR-0068's stage version is a fingerprint
+of the stage's content, the same on disk and in blob. The saver supplies the
+base for the three-way merge, as it does on disk.
+
+**How a Save is all-or-nothing (#271).** The ETag conditions guard each file and
+the lease keeps savers apart, but neither stops a server that dies between two
+files leaving a mix. So a Save first writes one small record under
+`.gantry/journal/` (one blob, so it lands whole): for each file it will change,
+the text it holds now and a fingerprint of the text the Save writes. It then
+writes the files, each conditional on the ETag it just read and each preceded by
+a lease renewal, and removes the record. A write that fails is undone from the
+record on the spot. A record left by a dead server is settled by whoever next
+takes the Instance's lease, a Save or (without waiting) a read: if every file
+already holds the Save's text it had finished and the record is removed,
+otherwise the files it changed go back to what they held, except any someone
+else has changed since. The stage is therefore entirely as before or entirely
+as after. It rolls back rather than forward because the saver was never told it
+succeeded, so a retry then meets the usual stage-version check. A Save waits for
+the lease for as long as a dead server's lease can last (30 seconds), so two
+simultaneous Saves reach the Field-by-Field check instead of an error, and a Save
+after a crash goes ahead once the lease runs out. A create-only write that finds
+the file already there is a conflict whether Azure answers 409 or 412.
+
+**No history.** Like a server workspace on disk, a blob-stored one has no
+commits, and renders cite what they cite today. Blob versioning and soft delete
+are recommended to operators as a backup, but Gantry doesn't rely on them.
+Azurite, the emulator CI runs against, has neither. Rendering copies the
+files Pandoc needs to a scratch folder, and nothing is persisted.
+
+The storage layer offers only what Azure Blob, S3 and GCS share: text and byte
+reads and writes, listing by prefix, delete, writes conditional on what was
+read, and a short lease. Only Azure Blob is built.
+
+## Considered options
+
+- **One setting that moves the whole data folder to blob.** Rejected. It
+  would carry the registries and library cache too, but it makes storage
+  all-or-nothing for the server and hides the bundled Examples, as a volume
+  does today.
+- **A third kind of workspace ("blob workspace").** Rejected. It behaves
+  exactly like a server workspace, so a new name would be one more kind to
+  explain.
+- **Architect-entered container URL and SAS in the wizard.** Rejected. It
+  rules out managed identity, and the server would have nowhere durable to
+  remember it.
+- **A local copy filled at startup and written through.** Rejected. Every
+  read would still need a freshness check once two servers share the
+  container, and startup slows as data grows.
+- **Rediscovering blob workspaces only at boot.** Rejected. Workspaces made
+  on one server would be missing on others, and short numbers could differ
+  between servers.
+- **Per-file conditional writes without a lease.** Rejected. A server dying
+  mid-Save could leave a stage half-written.
+- **Using blob versioning as history or provenance.** Rejected. A version has
+  no author or message, it isn't available on Data Lake accounts, and it
+  can't be tested on Azurite.
+
+## Consequences
+
+- The `gantry` CLI stays disk-only. Blob-stored workspaces are used through
+  the web UI and MCP.
+- There is no in-app move between disk and blob. Because the folder layout is
+  identical, an operator copies the folder with Azure's tools and Gantry finds
+  it. The copy is a new workspace, with a new id and new short numbers.
+- Tests start Azurite from npm inside the image's test stage, with
+  `@azure/storage-blob` held at 12.32.x until Azurite accepts newer API
+  versions.

@@ -151,7 +151,7 @@ export function describeInstanceRowWorkspace(workspace) {
     case 'atlassian':
       return { title: location.repository ?? workspace.id, subtitle: location.owner ?? 'Atlassian' }
     case 'directory':
-      return { title: workspace.name, subtitle: workspace.description || 'Server workspace' }
+      return { title: workspace.name, subtitle: workspace.description || serverWorkspaceLabel(workspace) }
     default:
       return {
         title: workspace.name ?? location.repository ?? workspace.id,
@@ -160,18 +160,66 @@ export function describeInstanceRowWorkspace(workspace) {
   }
 }
 
+// The server workspaces that hold nothing yet (#268): `GET /api/server-workspaces` lists every server
+// workspace on the server's disk, but a dashboard row only exists for one with an instance in it - so
+// one just created in the "+ New Workspace" wizard would not show until its first instance. Each of
+// these becomes an empty placeholder group, "No instances in this workspace yet" with a "+ New
+// Instance" button. The reserved `default` workspace is left out while empty: gantry creates it on
+// every start and nobody chose it, so a blank row for it would be noise.
+//
+// #269: a workspace kept in a Blob container whose container cannot be reached right now (`available: false`
+// on `GET /api/server-workspaces?include=blob`) gets a placeholder in the `unavailable` state even when it holds
+// Instances - they cannot be read - carrying the `reason` the server gave, so the dashboard says why rather than
+// showing nothing. Gantry's other workspaces are untouched.
+export function unrepresentedServerWorkspaceGroups(instances, serverWorkspaces) {
+  const representedIds = new Set((instances ?? []).map((inst) => inst.workspace?.id).filter(Boolean))
+  return (serverWorkspaces ?? [])
+    .filter((workspace) => workspace?.id && workspace.id !== 'default' && !representedIds.has(workspace.id))
+    .map((workspace) => ({
+      key: `workspace:${workspace.id}`,
+      kind: 'placeholder',
+      state: workspace.available === false ? 'unavailable' : 'blank',
+      ...(workspace.available === false ? { reason: workspace.reason ?? null } : {}),
+      title: workspace.name ?? workspace.id,
+      subtitle: workspace.description || serverWorkspaceLabel(workspace),
+      workspaceId: workspace.id,
+      isAzureDevOps: false,
+      isServerWorkspace: true,
+      ...(workspace.storage === 'blob' ? { storage: 'blob', container: workspace.container } : {}),
+      instances: [],
+    }))
+}
+
+// What a server workspace is called when it has no description of its own: where it is kept.
+function serverWorkspaceLabel(workspace) {
+  return workspace?.storage === 'blob' && workspace.container ? `Blob container: ${workspace.container}` : 'Server workspace'
+}
+
+// The bundled Examples workspace ships with Gantry and is for reading, not for adding to.
+const BUNDLED_SERVER_WORKSPACE_IDS = ['examples']
+
+/** Whether `id` is a server workspace that ships with Gantry, which no new Instance is created in. */
+export function isBundledServerWorkspace(id) {
+  return BUNDLED_SERVER_WORKSPACE_IDS.includes(id)
+}
+
 // The dashboard's "+ New Instance" button in a selected workspace's header: the same `/new-instance`
 // shortcut the Instance Switcher's own "+ New Instance" link uses, which opens the wizard's New
 // Instance step already scoped to that workspace. Returns null wherever that shortcut can't create
-// into the workspace: a server directory workspace such as the bundled Examples (the wizard only
-// resolves `?workspace=` against `GET /api/workspaces`, which lists Provider workspaces), and a local
-// workspace whose folder isn't granted yet.
+// into the workspace: the bundled Examples server workspace, and a local workspace whose folder isn't
+// granted yet. Any other server workspace (#268) can take a new Instance: the wizard resolves
+// `?workspace=` against `GET /api/server-workspaces` as well as `GET /api/workspaces`.
 export function workspaceNewInstanceHref(group) {
   if (group.kind === 'local') {
     return group.state === 'granted' ? `/new-instance?local=${encodeURIComponent(group.entry.id)}` : null
   }
-  if (group.kind === 'placeholder') return `/new-instance?workspace=${encodeURIComponent(group.workspaceId)}`
+  if (group.kind === 'placeholder') {
+    // An unavailable workspace (#269) can't take a new Instance until its container is back.
+    if (group.state === 'unavailable') return null
+    return group.isServerWorkspace && isBundledServerWorkspace(group.workspaceId) ? null : `/new-instance?workspace=${encodeURIComponent(group.workspaceId)}`
+  }
   const workspace = group.instances.find((inst) => inst.workspace)?.workspace
-  if (!workspace || workspace.kind === 'directory') return null
+  if (!workspace) return null
+  if (workspace.kind === 'directory' && isBundledServerWorkspace(workspace.id)) return null
   return `/new-instance?workspace=${encodeURIComponent(workspace.id)}`
 }

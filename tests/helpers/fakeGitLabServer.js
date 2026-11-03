@@ -384,6 +384,17 @@ export function createFakeGitLabServer({
       }
     }
 
+    // POST /projects/:id/issues/:issue_iid/notes — adds a note (#275's re-approval comment on a linked work
+    // item). Kept on the issue as `notes`, so a test reads back what was said.
+    const issueNotesMatch = rest.match(/^\/issues\/(\d+)\/notes$/)
+    if (req.method === 'POST' && issueNotesMatch) {
+      const issue = issues.get(Number(issueNotesMatch[1]))
+      if (!issue) return json(404, { message: `404 Issue Not Found (fake: iid ${issueNotesMatch[1]})` })
+      const body = await readJsonBody(req)
+      issue.notes = [...(issue.notes ?? []), { id: (issue.notes?.length ?? 0) + 1, body: body.body }]
+      return json(201, issue.notes.at(-1))
+    }
+
     // ---- Merge Requests (#33) ----
     //
     // A minimal fake of GitLab's Merge Requests API: enough for `lib/gitlabPullRequestsClient.js` to
@@ -540,6 +551,8 @@ export function createFakeGitLabServer({
       const mergeCommit = { commitId: `fake-commit-${commitCounter}`, committedDate: date, authoredDate: date }
       branchTips.set(mr.target_branch, mergeCommit)
       mr.state = 'merged'
+      mr.merge_commit_sha = mergeCommit.commitId
+      mr.merged_at = date
       return json(200, { id: mr.id, iid: mr.iid, state: 'merged', merge_commit_sha: mergeCommit.commitId })
     }
 
@@ -551,6 +564,11 @@ export function createFakeGitLabServer({
 export function withFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members, mergeRefusal, viewerAccessLevel }, fn) {
   return new Promise((resolve, reject) => {
     const server = createFakeGitLabServer({ namespace, repository, validPat, files, branchFiles, repoExists, members, mergeRefusal, viewerAccessLevel })
+    // #72: never close an idle keep-alive connection from this side. The gantry server under test
+    // calls this fake from the same process through fetch(), which pools sockets; on a starved CPU
+    // the default 5s idle timer fires before the client notices, and the next request reuses a
+    // socket that has just been closed (ECONNRESET / "other side closed" -> a spurious 500).
+    server.keepAliveTimeout = 0
     server.listen(0, async () => {
       const { port } = server.address()
       try {

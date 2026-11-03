@@ -1,0 +1,311 @@
+version: 1
+stage: shape
+status:
+  - session: kcm-shape-1
+    who: p.natarajan
+    target: shape
+    state: saved
+    artefact: soap-full
+    lastAiSave: 2026-03-25T09:52:00.000Z
+    saves:
+      - 2026-03-17T11:18:00.000Z
+      - 2026-03-25T09:52:00.000Z
+    models: []
+    instructions: design@3
+    skills:
+      grilling: 1.2.3
+      domain-modeling: 1.2.3
+fields:
+  background.problem:
+    drafted: 2026-03-25T09:52:00.000Z
+    inputs:
+      - source: client-brief
+        title: Client brief
+        range: p. 1
+        fingerprint: 02a0fbc195c192
+      - source: claim-registration-screen
+        title: Claim registration screen
+        fingerprint: null
+    entries:
+      - kcm-shape-1-2
+      - kcm-shape-1-9
+      - kcm-shape-1-14
+  background.success-criteria:
+    drafted: 2026-03-17T11:18:00.000Z
+    inputs:
+      - source: client-brief
+        title: Client brief
+        range: p. 2
+        fingerprint: 02a0fbc195c192
+    entries:
+      - kcm-shape-1-3
+  design-basis.constraints:
+    drafted: 2026-03-17T11:18:00.000Z
+    inputs:
+      - source: client-brief
+        title: Client brief
+        range: p. 2
+        fingerprint: 02a0fbc195c192
+    entries: []
+  design-basis.assumptions:
+    drafted: 2026-03-17T11:18:00.000Z
+    inputs:
+      - source: design-workshop-notes
+        title: Design workshop notes
+        fingerprint: 1fb30c4910c7c8
+    entries:
+      - kcm-shape-1-5
+  introduction.overview:
+    drafted: 2026-03-17T11:18:00.000Z
+    inputs: []
+    entries:
+      - kcm-shape-1-4
+  dependencies.dependencies-overview:
+    drafted: 2026-03-25T09:52:00.000Z
+    inputs:
+      - source: design-workshop-notes
+        title: Design workshop notes
+        fingerprint: 1fb30c4910c7c8
+    entries:
+      - kcm-shape-1-6
+      - kcm-shape-1-7
+      - kcm-shape-1-10
+      - kcm-shape-1-12
+      - kcm-shape-1-13
+      - kcm-shape-1-15
+entries:
+  - id: kcm-shape-1-1
+    at: 2026-03-17T09:41:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: artefact
+    artefact: soap-full
+    title: Full Solution on a Page
+    candidates:
+      - soap
+      - soap-full
+  - id: kcm-shape-1-2
+    at: 2026-03-17T09:52:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: answer
+    round: 1
+    card: c1
+    header: Problem
+    question: How long does a straightforward claim take today?
+    options:
+      - Median 12.4 working days, from the Client brief
+      - A different figure
+    recommendation:
+      - Median 12.4 working days, from the Client brief
+    why: "The Client brief gives the median and the five-day expectation on page 1. The screen shows where the time goes: the claim is keyed four times."
+    sources:
+      - client-brief, p. 1
+    answer:
+      - Median 12.4 working days, from the Client brief
+    followed: true
+    fields:
+      - background.problem
+  - id: kcm-shape-1-3
+    at: 2026-03-17T09:56:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: answer
+    round: 1
+    card: c2
+    header: Success criteria
+    question: Which targets does the business case commit to?
+    options:
+      - The four targets in the Client brief
+      - Only payment time and the re-key rate
+    recommendation:
+      - The four targets in the Client brief
+    why: They are the sponsor’s own targets, stated on page 2 of the Client brief.
+    sources:
+      - client-brief, p. 2
+    answer:
+      - The four targets in the Client brief
+    words: All four. The fraud referral rate and the audit trail are what Internal Audit will check first.
+    followed: true
+    fields:
+      - background.success-criteria
+  - id: kcm-shape-1-4
+    at: 2026-03-17T10:03:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: fact
+    words: Keep this an integration and process change first. The mainframe stays; people just stop keying into it.
+    fields:
+      - introduction.overview
+  - id: kcm-shape-1-5
+    at: 2026-03-17T10:20:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: answer
+    round: 2
+    card: c3
+    header: Assumptions
+    question: Can Mainframe Integration expose two CICS services in each monthly window?
+    options:
+      - Yes, two in each window
+      - Fewer than two
+    recommendation:
+      - Yes, two in each window
+    why: Derek Fong said so at the workshop, which is what makes the first two transactions ready for increment 1.
+    sources:
+      - design-workshop-notes
+    answer:
+      - Yes, two in each window
+    followed: true
+    fields:
+      - design-basis.assumptions
+  - id: kcm-shape-1-6
+    at: 2026-03-17T10:31:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: open-question
+    question: Does the BIBIT contract variation keep current transaction pricing for claims payment?
+    why: Treasury has not confirmed it, and it decides whether increment 3 stays within budget.
+    fields:
+      - dependencies.dependencies-overview
+  - id: kcm-shape-1-7
+    at: 2026-03-17T10:31:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: open-question
+    question: Can both the April and May mainframe windows be used, given the Finance year-end freeze?
+    why: Derek Fong has to book them; increment 1 needs both.
+    fields:
+      - dependencies.dependencies-overview
+  - id: kcm-shape-1-8
+    at: 2026-03-17T10:44:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: saved-content
+    field: team-and-estimates.estimates
+    choice: keep
+    fields:
+      - team-and-estimates.estimates
+  - id: kcm-shape-1-9
+    at: 2026-03-25T09:12:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: review-answered
+    review: 3f6a1c52-8d47-4b19-a0e3-6b2d9c71f504
+    reviewName: Kiwi Cover Mutual - Full Solution on a Page (reviewed).docx
+    keys:
+      - 3f6a1c52-8d47-4b19-a0e3-6b2d9c71f504:0
+    threads:
+      - id: "0"
+        author: Aroha Kingi
+        date: 2026-03-24T10:05:00Z
+        text: Where does the 12.4 days come from? Please say so in the document.
+        anchor: Median time to payment is 12.4 working days
+        replies: []
+    fields:
+      - background.problem
+    changedSinceRender:
+      background.problem: false
+    outcome: revise
+    words: It is the figure in the Client brief. Cite it.
+    stage: shape
+  - id: kcm-shape-1-10
+    at: 2026-03-25T09:20:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: review-answered
+    review: 3f6a1c52-8d47-4b19-a0e3-6b2d9c71f504
+    reviewName: Kiwi Cover Mutual - Full Solution on a Page (reviewed).docx
+    keys:
+      - 3f6a1c52-8d47-4b19-a0e3-6b2d9c71f504:2
+    threads:
+      - id: "2"
+        author: Wiremu Ellis
+        date: 2026-03-24T14:32:00Z
+        text: Records Management should give a date for the retention rules.
+        anchor: Records Management must confirm retention rules by 15 May 2026,
+        replies: []
+    changes:
+      - kind: insertion
+        author: Wiremu Ellis
+        date: 2026-03-24T14:33:00Z
+        text: by 15 May 2026,
+    fields:
+      - dependencies.dependencies-overview
+    changedSinceRender:
+      dependencies.dependencies-overview: false
+    outcome: accept
+    stage: shape
+  - id: kcm-shape-1-11
+    at: 2026-03-25T09:31:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: review-answered
+    review: 3f6a1c52-8d47-4b19-a0e3-6b2d9c71f504
+    reviewName: Kiwi Cover Mutual - Full Solution on a Page (reviewed).docx
+    keys:
+      - 3f6a1c52-8d47-4b19-a0e3-6b2d9c71f504:3
+    threads:
+      - id: "3"
+        author: Aroha Kingi
+        date: 2026-03-24T11:20:00Z
+        text: Is Treasury’s sign-off counted in the size for Payments? M looks small.
+        anchor: Reconciliation and Treasury sign-off add elapsed time
+        replies: []
+    fields:
+      - team-and-estimates.estimates
+    changedSinceRender:
+      team-and-estimates.estimates: false
+    outcome: keep
+    words: Sized on the Delivery Office T-shirt scale. Treasury’s sign-off adds elapsed time, not effort, so M stands.
+    stage: shape
+  - id: kcm-shape-1-12
+    at: 2026-03-25T09:40:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: open-question
+    question: "Review comment (Reviewer 2): when will the bank’s payment API sandbox be ready?"
+    why: A reviewer’s comment that could not be settled yet.
+    fields:
+      - dependencies.dependencies-overview
+  - id: kcm-shape-1-13
+    at: 2026-03-25T09:40:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: review-answered
+    review: 3f6a1c52-8d47-4b19-a0e3-6b2d9c71f504
+    reviewName: Kiwi Cover Mutual - Full Solution on a Page (reviewed).docx
+    keys:
+      - 3f6a1c52-8d47-4b19-a0e3-6b2d9c71f504:1
+    threads:
+      - id: "1"
+        author: Wiremu Ellis
+        date: 2026-03-24T14:30:00Z
+        text: Do we know when the bank’s payment API sandbox will be ready?
+        anchor: Treasury must complete the BIBIT contract variation for real-time claims payment
+        replies: []
+    fields:
+      - dependencies.dependencies-overview
+    changedSinceRender:
+      dependencies.dependencies-overview: false
+    outcome: cant-settle
+    stage: shape
+    openQuestion: "Review comment (Reviewer 2): when will the bank’s payment API sandbox be ready?"
+  - id: kcm-shape-1-14
+    at: 2026-03-25T09:44:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: returned-to-draft
+    module: background
+    fields:
+      - background.problem
+    note: Background and context was agreed and is back to draft. The change is to Background and context · Problem statement, because a reviewer’s comment was answered. Only a person marks a Module agreed, so it needs to be agreed again.
+  - id: kcm-shape-1-15
+    at: 2026-03-25T09:44:00.000Z
+    session: kcm-shape-1
+    who: p.natarajan
+    kind: returned-to-draft
+    module: dependencies
+    fields:
+      - dependencies.dependencies-overview
+    note: Dependencies was agreed and is back to draft. The change is to Dependencies · Dependencies, because a reviewer’s edit was accepted. Only a person marks a Module agreed, so it needs to be agreed again.

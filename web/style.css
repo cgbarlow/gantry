@@ -202,6 +202,52 @@ header {
 #stage-line { color: var(--text-muted); margin: 6px 0 0; font-size: 13px; }
 #stage-nav { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 #stage-nav button.stage-current { border-color: var(--line-strong); }
+#stage-nav button.stage-changed-since-approval { border-color: var(--warning, #b06a00); }
+.changed-since-approval-flag { margin-left: 4px; padding: 1px 4px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.changed-since-approval-notice { margin: 8px 0 0; font-size: 13px; }
+.changed-since-approval-line { margin: 6px 0 0; font-size: 13px; }
+.changed-since-approval-badge { border-color: var(--warning, #b06a00); }
+.merged-approval-panel { margin: 0 0 16px; padding: 12px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); }
+.merged-approval-notice { margin: 0 0 10px; font-size: 14px; }
+.merged-approval-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.merged-approval-reason { margin: 8px 0 0; }
+.changed-since-approval-panel { margin: 0 0 16px; padding: 12px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); }
+.changed-since-approval-panel h2 { margin: 0 0 8px; font-size: 16px; }
+.changed-approval-stage h3 { margin: 12px 0 8px; font-size: 14px; }
+.changed-approval-field { margin: 0 0 12px; }
+.changed-approval-field h4 { margin: 0 0 6px; font-size: 13px; }
+.changed-approval-versions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+.changed-approval-version h5 { margin: 0 0 4px; font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.changed-approval-text { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: inherit; font-size: 13px; padding: 8px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.changed-approval-note { margin: 0; font-size: 13px; color: var(--text-muted); }
+@media (max-width: 640px) { .changed-approval-versions { grid-template-columns: 1fr; } }
+.reapproval-history ul { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
+.rerender-earlier { margin: 8px 0 0; }
+.rerender-earlier-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.rerender-earlier-list li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; font-size: 13px; }
+
+/* #302: Reviewed copies — the dialog that brings them in, and the panel that lists their threads by Field. */
+.review-import-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 8px; }
+.review-import-list li { display: grid; gap: 2px; padding: 8px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); font-size: 13px; }
+.review-import-list li[data-ok='false'] { border-color: var(--stamp-error-bg); }
+.review-import-list li[data-ok='true'] { border-color: var(--stamp-agreed-bg); }
+.review-import-done { margin: 12px 0; font-size: 13px; font-weight: 600; }
+.review-copies-panel { margin: 0 0 16px; padding: 12px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.review-copies-panel h2 { margin: 0 0 8px; font-size: 16px; }
+.review-copy { margin: 0 0 16px; }
+.review-copy h3 { margin: 0; font-size: 14px; }
+.review-meta, .review-note { margin: 2px 0 8px; font-size: 13px; color: var(--text-muted); }
+.review-notice { margin: 0 0 8px; padding: 8px; font-size: 13px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.review-group { margin: 0 0 12px; padding-left: 10px; border-left: 3px solid var(--line); }
+.review-group h4 { margin: 0 0 6px; font-size: 13px; }
+.review-thread, .review-change { margin: 0 0 10px; font-size: 13px; }
+.review-anchor { margin: 0 0 4px; padding: 2px 8px; border-left: 2px solid var(--line-strong); color: var(--text-muted); white-space: pre-wrap; }
+.review-comment { margin: 0; }
+.review-text { margin: 2px 0 4px; white-space: pre-wrap; }
+.review-date { color: var(--text-muted); font-size: 12px; }
+.review-badge { display: inline-block; margin-left: 6px; padding: 0 6px; font-size: 11px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.review-replies { margin: 0 0 4px; padding-left: 18px; }
+.review-also { margin: 0; font-size: 12px; color: var(--text-muted); }
 
 /*
  * View-mode toolbar (#79) — a toolbar segmented control (Markdown / Split / Rendered) for the whole module-editor screen, ported from Variant A of web/prototypes/module-editor.prototype.html (#72).
@@ -371,6 +417,8 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .review-list li { display: flex; gap: 10px; justify-content: space-between; align-items: baseline; font-size: 13px; }
 .review-reviewer { overflow-wrap: anywhere; }
 .review-meta { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+/* #310: the Review comments panel reuses the name for a line of plain text (which Reviewed copy, how many comments, who from); it wraps, where the sign-off list's meta stays on one line. */
+.review-copy .review-meta { display: block; white-space: normal; overflow-wrap: anywhere; }
 .review-status { color: var(--text-muted); }
 .signoff-pr-ref { margin: 8px 0 0; font-size: 13px; }
 .signoff-actions { display: flex; align-items: center; gap: 8px; }
@@ -526,6 +574,21 @@ button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .instance-setting-add-marking { margin-bottom: 10px; }
 .instance-setting-default-select { max-width: 22em; }
 .defn-map-col-instance-settings { border-style: dashed; }
+.defn-map-col-interview { border-style: dashed; }
+.defn-interview-text { width: 100%; box-sizing: border-box; resize: vertical; }
+.defn-interview-readonly { margin: 0; white-space: pre-wrap; }
+/* #285: the read-only "Gantry's interview rules" view beside the Interview instructions editor. */
+.defn-interview-rules { margin-top: 16px; }
+.defn-interview-rules > summary { cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.defn-interview-rules-versions { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.defn-interview-rules-list { margin: 8px 0; padding-left: 22px; }
+.defn-interview-rules-list li { margin-bottom: 8px; }
+.defn-interview-rules-h { font-family: var(--font-display); font-weight: 600; font-size: 13px; margin: 14px 0 4px; }
+.defn-interview-rules-skills { margin: 4px 0; padding-left: 22px; }
+.defn-interview-rules-credit { margin: 6px 0; font-size: 12px; color: var(--text-muted); }
+.defn-interview-rules-more { margin-top: 8px; }
+.defn-interview-rules-more > summary { cursor: pointer; font-size: 13px; }
+.defn-interview-rules-more ul { padding-left: 22px; }
 /* #224: an Instance's own Logo, in the wizard and Instance Settings. */
 .instance-logo-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
 .instance-logo-preview { max-height: 40px; max-width: 200px; object-fit: contain; background: #fff; border: var(--hairline) solid var(--line); border-radius: var(--radius); padding: 2px; }
@@ -1244,6 +1307,22 @@ main[data-view-mode='visual'] .field-markdown .md-rendered img.asset-thumb {
 .modal-tabs button.active { color: var(--text); border-bottom: 2px solid var(--text); margin-bottom: -2px; }
 .modal-actions { margin-top: 16px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 
+/* ADR-0068 (#270) — the Field-by-Field dialog shown when a Save finds the stage changed meanwhile. */
+.modal[aria-label="Changes saved meanwhile"] { width: 760px; }
+.clash-list { display: flex; flex-direction: column; gap: 16px; }
+.clash { border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 12px; }
+.clash h4 { font-family: var(--font-display); font-size: 14px; margin: 0 0 8px; }
+.clash-versions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.clash-version { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; padding: 8px; border: 2px solid transparent; border-radius: var(--radius); }
+.clash-version.chosen { border-color: var(--text); }
+.clash-version h5 { margin: 0; font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.clash-text { margin: 0; align-self: stretch; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: inherit; font-size: 13px; }
+.clash-edit { display: block; width: 100%; box-sizing: border-box; min-height: 120px; margin-top: 8px; font: inherit; font-size: 13px; }
+.clash > .btn { margin-top: 8px; }
+@media (max-width: 640px) {
+  .clash-versions { grid-template-columns: 1fr; }
+}
+
 /* WI #359 — the Render dialog's docx/md toggle, sitting immediately left of the Render
    button in .modal-actions (a flex row, so DOM order here is visual order). */
 .render-format-toggle { display: flex; align-items: center; gap: 12px; margin: 0; padding: 0; border: 0; }
@@ -1773,7 +1852,7 @@ label.btn.disabled { opacity: 0.4; cursor: not-allowed; }
 .defn-filename-tokens { display: flex; flex-wrap: wrap; gap: 6px; }
 .defn-filename-token { font-family: var(--font-mono); }
 .defn-filename-problems { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
-.defn-document-control, .defn-satisfies-gate, .defn-cover-page, .defn-table-of-contents, .defn-diagram-captions { display: inline-flex; align-items: center; gap: 6px; }
+.defn-document-control, .defn-satisfies-gate, .defn-cover-page, .defn-table-of-contents, .defn-diagram-captions, .defn-source-appendix { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Drag and drop */
 .defn-drag-handle { cursor: grab; user-select: none; padding: 2px 6px; font-size: 14px; color: var(--text-muted); border: var(--hairline) solid transparent; border-radius: var(--radius); }
@@ -1863,6 +1942,13 @@ label.btn.disabled { opacity: 0.4; cursor: not-allowed; }
   border-radius: var(--radius);
 }
 .cm-visual .cm-vlink { text-decoration: underline; text-underline-offset: 2px; }
+/* #281: a citation of a Source document. A live one reads as a link that opens it; a removed or unknown one keeps its words, struck back and marked. */
+.cm-visual .cm-vsource { cursor: pointer; color: var(--accent, inherit); }
+.cm-visual .cm-vsource-removed, .cm-visual .cm-vsource-missing { text-decoration: line-through; color: var(--text-muted); }
+.cm-visual .cm-vsource-removed::after { content: ' (removed)'; }
+.cm-visual .cm-vsource-missing::after { content: ' (not found)'; }
+.source-citation.removed, .source-citation.missing { color: var(--text-muted); text-decoration: line-through; }
+.source-citation.removed::after, .source-citation.missing::after { text-decoration: none; }
 .cm-visual .cm-vquote { color: var(--text-muted); font-style: italic; }
 .cm-visual .cm-vcodeblock { font-family: var(--font-mono); font-size: 13px; background: var(--bg); }
 /* A horizontal rule off the caret's line (WI #376). */
@@ -2011,3 +2097,285 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .local-def-template-source { font: 13px/1.5 var(--font-mono); min-height: 160px; }
 .local-def-validation { margin: 20px 0; }
 .local-def-problems { padding-left: 20px; color: var(--text-error, #b3261e); }
+
+/*
+ * ---------- AI Providers (#277, ADR-0061) ----------
+ * The table and add/edit dialog on Global Settings. Reuses `.wizard-input`, `.field-label`, `.btn`, `.stamp`
+ * and `.modal` wholesale; only the table and the dialog's two-column rows are new.
+ */
+.ai-provider-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
+.ai-provider-table th { text-align: left; font-family: var(--font-display); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); padding: 6px 10px 6px 0; border-bottom: var(--border-strong) solid var(--line-strong); }
+.ai-provider-table td { padding: 9px 10px 9px 0; border-bottom: var(--hairline) solid var(--line); vertical-align: middle; }
+.ai-provider-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.ai-provider-none, .ai-provider-runs-on-label { color: var(--text-muted); }
+.ai-provider-default-stamp { margin-left: 4px; }
+.ai-provider-test-row td { border-bottom: var(--hairline) solid var(--line); padding-top: 0; font-size: 12px; }
+.ai-provider-test-ok { color: var(--text-muted); }
+.ai-provider-test-summary { margin: 4px 0; }
+.ai-provider-test-steps { margin: 2px 0 6px; padding-left: 18px; }
+.ai-provider-test-steps li[data-ok="false"] { color: var(--stamp-error-bg); }
+.ai-recovery-prompt { margin: 4px 0 8px; }
+.ai-recovery-prompt p { margin: 0 0 6px; }
+.ai-recovery-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ai-recovery-key { max-width: 280px; }
+.ai-provider-dialog { width: 600px; }
+.ai-provider-form { display: flex; flex-direction: column; gap: 4px; }
+.ai-provider-form .field-label { margin-top: 10px; }
+.ai-provider-form .workspace-field-hint { margin: 4px 0 0; font-size: 12px; color: var(--text-muted); }
+.ai-provider-row { display: flex; gap: 12px; }
+.ai-provider-row > div { flex: 1; min-width: 0; }
+.ai-provider-runs-on { border: 0; padding: 0; margin: 10px 0 0; }
+.ai-provider-advanced { margin-top: 12px; }
+.ai-provider-advanced > summary { cursor: pointer; font-family: var(--font-display); font-weight: 600; font-size: 12px; }
+.ai-provider-default { margin-top: 14px; }
+
+/* Key decisions (#284, ADR-0065): one card per decision, numbered once. */
+.field-decisions .decisions-style { font-size: 12px; margin: 0 0 8px; }
+.decision-card { margin: 0 0 12px; padding: 10px 12px; border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
+.decision-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
+.decision-number { font-family: var(--font-mono); font-size: 12px; font-weight: 600; padding: 2px 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.decision-title { flex: 1 1 220px; min-width: 0; font-family: var(--font-body, inherit); font-size: 13px; padding: 6px 8px; border-radius: var(--radius); border: var(--border-strong) solid var(--line-strong); background: var(--bg); color: var(--text); }
+.decision-actions { display: inline-flex; gap: 4px; }
+.decision-actions .btn, .decision-link .btn, .decision-links > .btn { margin: 0; }
+.decision-part { display: block; margin: 0 0 8px; }
+.decision-part-label { display: block; font-size: 12px; font-weight: 600; margin: 0 0 2px; }
+.decision-part textarea { width: 100%; box-sizing: border-box; resize: none; overflow: hidden; font-family: var(--font-body, inherit); font-size: 13px; line-height: 1.5; padding: 6px 8px; border-radius: var(--radius); border: var(--border-strong) solid var(--line-strong); background: var(--bg); color: var(--text); }
+.decision-links { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.decision-link { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.decision-link select { font-family: var(--font-body, inherit); font-size: 13px; padding: 5px 8px; border-radius: var(--radius); border: var(--border-strong) solid var(--line-strong); background: var(--bg); color: var(--text); max-width: 100%; }
+.decision-other-style { font-size: 12px; margin: 0 0 8px; }
+.decisions-problems { font-size: 12px; color: var(--warning, #b06a00); margin: 6px 0 8px; padding-left: 18px; }
+
+/* #279 — the Source documents panel under the editor toolbar: a collapsible strip with the upload control and one row per document. */
+.source-documents-wrap { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
+.source-documents { border-bottom: var(--hairline) solid var(--line); }
+.source-documents > summary { cursor: pointer; padding: 10px 0; font-family: var(--font-display); font-weight: 600; font-size: 13px; }
+.source-documents-count { color: var(--text-muted); font-weight: 400; }
+.source-documents-body { padding: 0 0 14px; }
+.source-documents-intro { margin: 0 0 10px; max-width: 760px; }
+.source-documents-warning { margin: 0 0 10px; padding: 6px 10px; border-left: 3px solid var(--stamp-draft-bg); font-size: 13px; }
+.source-documents-upload { margin-bottom: 6px; }
+.source-documents-message { min-height: 1.3em; margin: 6px 0; font-size: 13px; }
+.source-documents-message.error { color: var(--stamp-error-bg); }
+.source-documents-message.warn { color: var(--stamp-draft-bg); }
+.source-documents-message.info { color: var(--text-muted); }
+.source-documents-empty { margin: 6px 0; font-size: 13px; }
+.source-documents-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.source-documents-table th { text-align: left; font-family: var(--font-display); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); padding: 6px 10px 6px 0; border-bottom: var(--border-strong) solid var(--line-strong); }
+.source-documents-table td { padding: 8px 10px 8px 0; border-bottom: var(--hairline) solid var(--line); vertical-align: middle; }
+.source-documents-title-text { font-weight: 600; }
+.source-documents-file { color: var(--text-muted); word-break: break-all; }
+.source-documents-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.source-documents-confirm span { font-size: 12px; }
+.source-documents-rename { display: flex; gap: 6px; align-items: center; }
+.source-documents-rename input { flex: 1; min-width: 160px; }
+.source-documents-removed { margin-top: 10px; font-size: 13px; }
+.source-documents-removed > summary { cursor: pointer; color: var(--text-muted); }
+.source-documents-removed ul { margin: 6px 0 0; padding-left: 18px; }
+.source-documents-removed-title { text-decoration: line-through; }
+@media (max-width: 720px) {
+  .source-documents-wrap { padding: 0 16px; }
+  .source-documents-table thead { display: none; }
+  .source-documents-table tr { display: block; padding: 8px 0; border-bottom: var(--hairline) solid var(--line); }
+  .source-documents-table td { display: block; border: 0; padding: 2px 0; }
+  .source-documents-actions { justify-content: flex-start; }
+}
+
+/* ---------- The Interview page (#286, layout B of #243) ---------- */
+.interview-page { display: grid; grid-template-columns: 260px minmax(0, 1fr) 360px; height: 100vh; background: var(--bg); color: var(--text); }
+.interview-page .cite { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.interview-page .ai-mark { display: inline-block; font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); color: var(--text-muted); margin-left: 6px; vertical-align: middle; font-weight: 400; }
+.interview-page h3.side { font-family: var(--font-display); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin: 18px 0 6px; }
+.interview-rail { border-right: var(--border-strong) solid var(--line-strong); padding: 16px; overflow: auto; }
+.interview-instance { font-family: var(--font-display); font-weight: 600; margin-top: 10px; }
+.interview-rail .srcdocs { list-style: none; padding: 0; margin: 0; font-size: 12px; }
+.interview-rail .srcdocs li { padding: 4px 0; border-bottom: var(--hairline) solid var(--line); display: flex; justify-content: space-between; gap: 8px; }
+.interview-rail .srcdocs li { flex-wrap: wrap; }
+.interview-rail .srcdocs .srcdoc-title { overflow: hidden; text-overflow: ellipsis; }
+.interview-rail .srcdocs .srcdoc-visual { flex-basis: 100%; font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.interview-rail .inputs-log { list-style: none; padding: 0; margin: 0; font-size: 11px; }
+.interview-rail .inputs-log li { padding: 4px 0; border-bottom: var(--hairline) solid var(--line); }
+.interview-rail .inputs-log .inputs-field { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); display: block; }
+.interview-rail .inputs-log .inputs-read { display: block; overflow-wrap: anywhere; }
+.interview-rail .srcdocs .meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+.interview-rail .dropzone { display: block; border: 2px dashed var(--line-strong); border-radius: var(--radius); padding: 12px; text-align: center; font-size: 12px; color: var(--text-muted); margin-top: 8px; cursor: pointer; }
+.interview-rail .dropzone.disabled { opacity: .5; cursor: progress; }
+.interview-convo { display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.interview-head { display: flex; align-items: center; gap: 10px; padding: 10px 32px; border-bottom: var(--hairline) solid var(--line); font-size: 13px; flex-wrap: wrap; }
+.interview-head select { font: inherit; font-size: 12px; padding: 3px 6px; background: var(--bg-raised); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); max-width: 320px; }
+.interview-thread { flex: 1; overflow: auto; padding: 20px 32px; }
+.interview-thread .inner, .interview-composer .inner { max-width: 720px; margin: 0 auto; }
+.interview-composer { border-top: var(--border-strong) solid var(--line-strong); padding: 12px 32px; }
+.interview-composer .chatbox { display: flex; gap: 6px; }
+.interview-composer textarea { flex: 1; font: inherit; font-size: 13px; padding: 8px; min-height: 38px; resize: vertical; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); background: var(--bg-raised); color: var(--text); }
+.interview-page .msg { font-size: 13px; margin: 0 0 10px; padding: 8px 12px; border-radius: var(--radius); white-space: pre-wrap; overflow-wrap: anywhere; }
+.interview-page .msg.ai { background: var(--bg-raised); border: var(--hairline) solid var(--line); }
+.interview-page .msg.you { background: var(--text); color: var(--bg); margin-left: 15%; }
+.interview-page .msg.sys { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); padding: 2px 0; }
+.interview-page .caret::after { content: '▍'; animation: interview-blink 1s steps(1) infinite; }
+@keyframes interview-blink { 50% { opacity: 0; } }
+.interview-page .kick { max-width: 460px; }
+.interview-page .kick label { display: block; font-size: 12px; font-weight: 600; margin: 12px 0 4px; }
+.interview-page .kick select { width: 100%; font: inherit; font-size: 13px; padding: 6px; background: var(--bg-raised); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.interview-page .kick-intro { font-size: 13px; margin: 0 0 6px; }
+.interview-page .kick-row { margin: 6px 0; }
+.interview-page .kick-note, .interview-page .kick-sources { font-size: 12px; color: var(--text-muted); margin: 6px 0; }
+.interview-page .kick .btn.primary { margin-top: 12px; }
+.interview-page .warn { font-size: 12px; padding: 6px 10px; margin-top: 6px; border-left: 3px solid var(--stamp-error-bg); background: var(--bg-raised); }
+.interview-page .qcard { border: var(--border-strong) solid var(--line-strong); border-radius: var(--radius); background: var(--bg-raised); padding: 14px 16px; margin: 12px 0; }
+.interview-page .qcard .qchip { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.interview-page .qcard .qmeaning, .interview-page .qcard .qsignificance { font-size: 12px; color: var(--text-muted); margin: 0 0 8px; }
+.interview-page .qcard .qsignificance { padding-left: 18px; }
+.interview-page .qcard[data-card-kind="term"] .qchip, .interview-page .qcard[data-card-kind="decision"] .qchip { color: var(--text); font-weight: 600; }
+.interview-page .qcard .qhead { font-family: var(--font-display); font-weight: 600; font-size: 14px; margin: 0 0 6px; }
+.interview-page .round-actions { display: flex; gap: 8px; align-items: center; }
+/* #287: rounds of question cards, option tiles, "Other", the saved-content card and Finish with your recommendations. */
+.interview-page .round { margin: 12px 0 18px; }
+.interview-page .round-head { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin: 0 0 6px; }
+.interview-page .round-note { font-size: 12px; color: var(--text-muted); margin: 0 0 8px; }
+.interview-page .round .qcard { margin: 0 0 12px; }
+.interview-page .qcard .opts-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
+.interview-page .qcard label.opt { display: flex; gap: 8px; align-items: flex-start; padding: 7px 8px; border: var(--hairline) solid var(--line); border-radius: var(--radius); cursor: pointer; font-size: 13px; background: var(--bg); margin: 0; }
+.interview-page .qcard label.opt:hover { border-color: var(--line-strong); }
+.interview-page .qcard label.opt.chosen { border-color: var(--text); box-shadow: inset 3px 0 0 var(--text); }
+.interview-page .qcard label.opt input[type="radio"], .interview-page .qcard label.opt input[type="checkbox"] { margin-top: 3px; }
+.interview-page .qcard .olabel { font-weight: 600; }
+.interview-page .qcard .odesc { display: block; color: var(--text-muted); font-size: 12px; }
+.interview-page .qcard .rec { font-family: var(--font-mono); font-size: 10px; background: var(--text); color: var(--bg); padding: 0 5px; border-radius: var(--radius); margin-left: 6px; }
+.interview-page .qcard .why { font-size: 12px; margin: 8px 0 0; padding: 6px 10px; border-left: var(--border-strong) solid var(--line-strong); background: var(--bg); }
+.interview-page .qcard .other-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 6px 8px; margin-top: 4px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+.interview-page .change-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin: 0 0 10px; }
+.interview-page .change-compare .value { padding: 8px 10px; background: var(--bg); border: var(--hairline) solid var(--line); border-radius: var(--radius); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.interview-page .change-compare .value.ai { box-shadow: inset 3px 0 0 var(--stamp-draft-bg); }
+/* #290: resume recap, the two-sessions card, the clash cards of a Save and the Paused card. */
+.interview-page .resume-recap { font-size: 13px; margin: 8px 0; padding: 8px 12px; border-left: var(--border-strong) solid var(--line-strong); background: var(--bg-raised); }
+.interview-page .session-others { margin: 6px 0; padding-left: 18px; font-size: 13px; }
+.interview-page .clash-text { margin: 0; font: inherit; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.interview-page .clash-round .qcard { border-color: var(--stamp-error-bg); }
+.interview-page .round-actions .round-page { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.interview-page .composer-actions { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; flex-wrap: wrap; }
+.interview-page .mode-chip { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); color: var(--text-muted); }
+.interview-preview .field-done { display: block; font-family: var(--font-mono); font-size: 10px; margin-top: 3px; color: var(--text-muted); }
+.interview-preview .field-done.is-done { color: var(--stamp-agreed-bg); }
+.interview-page .gate-ok { font-family: var(--font-mono); font-size: 11px; color: var(--stamp-agreed-bg); }
+.interview-preview { border-left: var(--border-strong) solid var(--line-strong); padding: 16px; overflow: auto; background: var(--bg-raised); }
+.interview-preview .preview-chip { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.interview-preview h4 { font-family: var(--font-display); font-size: 13px; margin: 14px 0 6px; }
+.interview-preview .field-proto { margin: 0 0 14px; }
+.interview-preview .field-inputs { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin: 4px 0 0; overflow-wrap: anywhere; }
+.interview-preview .field-label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.interview-preview .field-words { font-family: var(--font-mono); font-size: 10px; font-weight: 400; color: var(--text-muted); margin-left: 6px; }
+.interview-preview .value { min-height: 30px; padding: 10px 12px; background: var(--bg); border: var(--hairline) solid var(--line); border-radius: var(--radius); white-space: pre-wrap; font-size: 12px; overflow-wrap: anywhere; }
+.interview-preview .value.empty { color: var(--text-muted); font-style: italic; }
+.interview-preview .value.ai { box-shadow: inset 3px 0 0 var(--stamp-draft-bg); }
+.interview-preview .value .interview-value-list { margin: 0; padding-left: 18px; }
+.interview-preview .value .cite::before { content: '📄 '; }
+.interview-preview .interview-warnings { list-style: none; margin: 4px 0 0; padding: 0; }
+.interview-preview .gate-line { font-family: var(--font-mono); font-size: 11px; margin-top: 16px; color: var(--text-muted); }
+.interview-preview .drafting { margin-left: 8px; color: var(--text); }
+/* #289: a drafted Field is edited in place in the preview; the editor flags Modules that hold unsaved AI drafts. */
+.interview-preview .value.hand-editable { cursor: text; }
+.interview-preview .value.hand-editable:hover { border-color: var(--line-strong); }
+.interview-preview .value.hand-edited { box-shadow: inset 3px 0 0 var(--stamp-agreed-bg); }
+.interview-page .hand-mark { color: var(--text); }
+.interview-page .drafting-mark { font-style: italic; }
+.interview-preview .hand-edit-open { margin-left: 8px; padding: 0 6px; font-size: 10px; }
+.interview-preview .hand-edit-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 8px 10px; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); resize: vertical; }
+.interview-preview .hand-edit select, .interview-preview .hand-edit input[type=date] { font: inherit; font-size: 12px; padding: 4px 6px; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.interview-preview .hand-edit .opt-inline { display: block; font-size: 12px; margin: 2px 0; }
+.interview-preview .hand-edit-note { font-size: 11px; color: var(--text-muted); margin: 4px 0 0; }
+.interview-preview .hand-edit-actions { display: flex; gap: 8px; margin-top: 6px; }
+.unsaved-drafts-banner { margin: 0 0 12px; padding: 8px 12px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); font-size: 13px; }
+
+@media (max-width: 1000px) {
+  .interview-page { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .interview-rail, .interview-preview { border: 0; border-bottom: var(--border-strong) solid var(--line-strong); }
+  .interview-thread { padding: 16px; max-height: 70vh; }
+  .interview-head, .interview-composer { padding-left: 16px; padding-right: 16px; }
+}
+
+/* #288: the decisions log. The editor's read-only panel, and the count and the restart control in the Interview rail. */
+.decisions-log-panel { margin: 0 0 16px; padding: 12px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.decisions-log-panel h2 { margin: 0 0 4px; font-size: 16px; }
+.decisions-log-panel h3 { margin: 12px 0 6px; font-size: 13px; }
+.decisions-log-panel .dl-stage { font-weight: 400; color: var(--text-muted); }
+.decisions-log-panel .dl-count, .interview-rail .dl-count { display: inline-block; min-width: 18px; padding: 0 6px; font-family: var(--font-mono); font-size: 11px; text-align: center; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.decisions-log-panel .dl-note { margin: 2px 0 8px; font-size: 13px; color: var(--text-muted); }
+.decisions-log-panel .dl-list, .decisions-log-panel .dl-open ul { list-style: none; margin: 0 0 8px; padding: 0; font-size: 13px; }
+.dl-entry { display: grid; grid-template-columns: 110px 1fr; gap: 2px 10px; padding: 6px 0; border-bottom: var(--hairline) solid var(--line); }
+.dl-entry .dl-kind { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); padding-top: 2px; }
+.dl-entry .dl-text { overflow-wrap: anywhere; }
+.dl-entry .dl-meta { grid-column: 2; font-size: 11px; color: var(--text-muted); }
+.dl-entry.old .dl-text { color: var(--text-muted); text-decoration: line-through; text-decoration-color: var(--line-strong); }
+.decisions-log-panel .dl-open { margin: 0 0 8px; padding: 8px 10px; border: var(--hairline) solid var(--warning, #b06a00); border-left-width: 4px; border-radius: var(--radius); }
+.decisions-log-panel .dl-open h3 { margin-top: 0; color: var(--warning, #b06a00); }
+.dl-entry.open .dl-kind { color: var(--warning, #b06a00); font-weight: 600; }
+.interview-rail .dl-summary { font-size: 12px; margin: 0 0 6px; }
+.interview-rail .dl-summary .dl-open-count { color: var(--warning, #b06a00); font-weight: 600; }
+.interview-rail .dl-restart { margin-top: 8px; }
+
+/* ---------- The run plan and "Run until" (#293) ---------- */
+.interview-rail .runplan { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+.interview-rail .runplan li { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: var(--hairline) solid var(--line); }
+.interview-rail .runplan .dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line-strong); flex-shrink: 0; }
+.interview-rail .runplan .rp-drafting .dot { background: var(--text); border-color: var(--text); }
+.interview-rail .runplan .rp-awaiting-confirmation .dot { background: var(--stamp-draft-bg); border-color: var(--stamp-draft-bg); }
+.interview-rail .runplan .rp-paused .dot { background: var(--stamp-draft-bg); border-color: var(--stamp-draft-bg); }
+.interview-rail .runplan .rp-done .dot { background: var(--stamp-agreed-bg); border-color: var(--stamp-agreed-bg); }
+.interview-rail .runplan .rp-beyond { color: var(--text-muted); text-decoration: line-through; }
+.interview-rail .runplan .rp-target .rp-title { font-weight: 600; }
+.interview-rail .runplan li:has(.rp-tokens) { flex-wrap: wrap; }
+.interview-rail .runplan .rp-tokens { order: 3; flex-basis: 100%; margin-left: 18px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); cursor: help; }
+.interview-rail .rail-tokens dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; margin: 0; font-size: 13px; }
+.interview-rail .rail-tokens dt { color: var(--text-muted); }
+.interview-rail .rail-tokens dd { margin: 0; font-family: var(--font-mono); font-size: 12px; text-align: right; cursor: help; }
+.interview-rail .runplan .rp-note { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-align: right; }
+/* Remote workspaces (#295): a Stage waiting for its Pull Request to be approved, or queued behind an earlier one, and the row you click to Check status. */
+.interview-rail .runplan li { flex-wrap: wrap; }
+.interview-rail .runplan .rp-awaiting-approval .dot { background: var(--stamp-review-bg); border-color: var(--stamp-review-bg); }
+.interview-rail .runplan .rp-approval-queued .dot { background: transparent; border-style: dashed; border-color: var(--stamp-review-bg); }
+.interview-rail .runplan .rp-checkable { cursor: pointer; }
+.interview-rail .runplan .rp-checkable:hover, .interview-rail .runplan .rp-checkable:focus-visible { background: var(--surface-hover, rgba(127, 127, 127, 0.12)); outline: none; }
+.interview-rail .runplan .rp-pr { flex-basis: 100%; padding-left: 18px; font-size: 11px; }
+.interview-page .stage-end.awaiting { border-color: var(--stamp-review-bg); }
+.interview-page .qcard .btn .rec { background: transparent; color: inherit; border: var(--hairline) solid currentColor; }
+.interview-page .kick-resume { padding: 10px 12px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); margin: 0 0 12px; }
+
+/* #297: Out of date Fields and Source document marks */
+.stamp.new { background: var(--stamp-draft-bg); color: var(--stamp-draft-fg); margin-left: 6px; }
+.source-documents .stamp.review[data-testid="source-replaced-by"] { margin-left: 6px; text-transform: none; letter-spacing: 0.02em; }
+.source-documents .stamp.new { text-transform: none; letter-spacing: 0.02em; }
+.source-replaces { font: inherit; font-size: 12px; padding: 4px 6px; margin-left: 8px; max-width: 100%; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.interview-rail .source-replaces { margin: 6px 0 0; width: 100%; box-sizing: border-box; }
+.interview-rail .srcdocs .stamp { flex-basis: auto; font-size: 9px; }
+.out-of-date-banner { margin: 0 0 16px; padding: 10px 12px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); font-size: 13px; }
+.out-of-date-banner h2 { margin: 0 0 6px; font-size: 14px; }
+.out-of-date-banner ul { margin: 0; padding: 0; list-style: none; }
+.out-of-date-banner li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 3px 0; }
+.out-of-date-banner .ood-fields { color: var(--text-muted); font-size: 12px; }
+.out-of-date-mark { margin: 12px 0 2px; padding: 3px 8px; font-size: 12px; border-left: 3px solid var(--warning, #b06a00); background: transparent; color: var(--text); }
+.interview-page .reapproval-note { border-left: 3px solid var(--warning, #b06a00); padding-left: 8px; }
+.interview-rail .runplan .rp-changed { text-transform: uppercase; letter-spacing: 0.02em; }
+.interview-rail .runplan .rp-ood { font-family: var(--font-mono); font-size: 10px; padding: 0 5px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); white-space: nowrap; }
+.interview-preview .field-out-of-date { font-size: 11px; color: var(--text); border-left: 3px solid var(--warning, #b06a00); padding-left: 6px; margin: 2px 0; }
+/* #298: Bring up to date */
+.interview-preview .ood-mark { border-color: var(--warning, #b06a00); }
+.update-current { margin: 8px 0; }
+.update-current .value { font-size: 13px; max-height: 9em; overflow: auto; }
+.update-returned { margin: 6px 0; padding-left: 18px; font-size: 13px; }
+
+/* #303: review comments as cards on the Interview page. */
+.review-context { margin: 8px 0; font-size: 13px; }
+.review-context .review-side { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid var(--line-strong); }
+.review-context .review-copy-name { margin: 0 0 6px; font-size: 12px; color: var(--text-muted); }
+.review-context ins { text-decoration: underline; }
+.review-context del { text-decoration: line-through; }
+.review-changes ul { margin: 2px 0 4px; padding-left: 18px; }
+.review-inputs { display: grid; gap: 6px; margin: 8px 0; }
+.review-inputs label { display: grid; gap: 2px; font-size: 12px; color: var(--text-muted); }
+.review-inputs textarea, .review-inputs select { font: inherit; font-size: 13px; }
+.interview-review .review-copies { margin: 6px 0; padding-left: 16px; font-size: 12px; }
+.interview-review .review-resolved { margin: 6px 0; font-size: 12px; }
+.interview-review .review-resolved ul { margin: 4px 0; padding-left: 16px; }
+.kick-review-join { display: flex; gap: 6px; align-items: flex-start; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { loadDefinitionChangelog } from '../lib/definition.js'
 import { createInstance } from '../lib/instance.js'
 import { renderArtefact } from '../lib/render.js'
+import { stripFieldTags } from '../lib/wordFieldTags.js'
 import { bodyParagraphs, docxPart } from './helpers/wordDocx.js'
 import { classificationField, coverClassificationStyle, headerVisibleText, paragraphStyleFormat, sectionHeaders } from './helpers/wordHeaders.js'
 
@@ -118,7 +119,7 @@ describe('design v3 prints the classification in the page header of every page (
       createInstance('design', 'claims-portal', { instancesDir, version: 3 })
       const { markdown, docxMarkdown } = renderArtefact('claims-portal', 'soap', { instancesDir, dryRun: true })
       assert.doesNotMatch(markdown, /Cover Classification/, 'the .md keeps the classification off the cover')
-      assert.ok(docxMarkdown.startsWith('::: {custom-style="Cover Classification"}\n\\ \n:::\n\n::: {custom-style="Title"}'), docxMarkdown.slice(0, 200))
+      assert.ok(stripFieldTags(docxMarkdown).startsWith('::: {custom-style="Cover Classification"}\n\\ \n:::\n\n::: {custom-style="Title"}'), docxMarkdown.slice(0, 200))
 
       const { docxBytes } = renderArtefact('claims-portal', 'soap', { instancesDir, deliverToClient: true })
       const [first, second] = bodyParagraphs(docxPart(docxBytes, 'word/document.xml'))
@@ -135,7 +136,7 @@ describe('design v3 prints the classification in the page header of every page (
       createInstance('design', 'claims-portal', { instancesDir, version: 2 })
       const { markdown, docxMarkdown } = renderArtefact('claims-portal', 'soap', { instancesDir, dryRun: true })
       assert.doesNotMatch(docxMarkdown, /Cover Classification/, 'design v2 has no cover')
-      assert.equal(docxMarkdown, markdown)
+      assert.equal(stripFieldTags(docxMarkdown), markdown)
     })
 
     // A scratch copy of design v3 that drops one of the two at a time.
@@ -207,11 +208,11 @@ describe('design v3 shows the classification only in the page header, not above 
   })
 })
 
-test('the v3 CHANGELOG records the header classification under v3, and v3 stays a draft (#207)', () => {
+test('the v3 CHANGELOG records the header classification under v3, and v3 is published (#207, #308)', () => {
   const changelog = loadDefinitionChangelog('design', 3)
   const v3Section = changelog.slice(0, changelog.indexOf('\n## v2'))
   assert.match(v3Section, /^### Classification in the page header \(#207\)$/m)
-  assert.match(v3Section, /\*\*Status: draft\b/)
+  assert.match(v3Section, /\*\*Status: published\b/)
 })
 
 // The SOAP's cover switch (the first in the file), and the Classification declaration (#220).

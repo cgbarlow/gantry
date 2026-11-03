@@ -3,14 +3,15 @@
 # Description -> Architectural Goals -> Architectural Constraints -> Solution
 # Standards. `logical-components` is last because the reference renders it as its
 # own top-level section ("Logical Components View", §9) after "Open Issues", not
-# inside the architectural view.
+# inside the architectural view. v3 (#308): the Design Decisions are the `key-decisions`
+# standard module, which the SAD prints in the same place, so this module has no field for them.
 
 id: architecture
 title: Architecture
 purpose: >
   Describe the solution's structure in enough detail to build from — components,
-  layers, and the design decisions behind them. Explain what was chosen and why, and
-  how the parts fit together.
+  layers, and how the parts fit together. The decisions behind them are recorded in the
+  Key decisions module.
 
 fields:
   - id: business-context
@@ -52,32 +53,6 @@ fields:
       the people to contact about the running system belong in
       `support-and-operations.stakeholders`.
 
-  - id: design-decisions
-    title: Design decisions
-    type: markdown
-    target-words: { small: 95, medium: 185, large: 310 }
-    required: true
-    guidance: >
-      The decisions that shaped this architecture and why — not just what
-      was decided, but what else was on the table. Deepen the
-      `solution-definition.high-level-solution-overview` sketch to build-ready
-      depth rather than starting over.
-
-      Write them as a table with three columns, `| AD | Decision | ADR |`,
-      one row per decision: `| AD01 | <the decision and why> | ADRYYY |`, or
-      the same row with the ADR cell left blank. Every decision gets an
-      Architecture Decision id (AD01, AD02, …). Fill the ADR column only for
-      a decision that needs governance endorsement, using the placeholder
-      `ADRYYY` until the ADR is registered and has its number.
-
-      A decision is an ADR candidate only where at least one of these holds:
-      enterprise reuse exists; a new platform or product is introduced; an
-      architecture precedent is created; or governance endorsement is
-      explicitly required. Most decisions meet none of them and stay ADs.
-
-      Don't assume ARB endorsement is needed. A decision is not an ADR, and
-      an ADR is not an ARB item.
-
   - id: architectural-risks
     title: Architectural risks
     type: markdown
@@ -104,7 +79,7 @@ fields:
       `solution-definition` `high-level-solution-overview` / `process-flow`
       sketch — the original stays at `modules/solution-definition.md`.
 
-      Use the glossary's preferred terms (`glossary.terms-and-definitions`)
+      Use the glossary's preferred terms (`glossary.terms`)
       consistently in headings, tables, diagrams and prose.
 
       Lay out each diagram in this order: one introductory sentence ("The

@@ -36,9 +36,12 @@ import { parseLocalModuleFile, parseInstanceYaml } from './localInstanceFiles.js
 import { isMultiValuedField } from './fieldShape.js'
 import { readOnlyModuleProblems } from './readOnlyModules.js'
 import { diagramCaptionsProblem } from './diagramCaptions.js'
+import { sourceAppendixProblem } from './sourceCitations.js'
 import { artefactFrontMatterProblems } from './artefactFrontMatter.js'
 import { targetWordsProblem } from './targetSize.js'
 import { instanceSettingsDeclarationProblems } from './instanceSettings.js'
+import { modulesWithStandard, standardModuleProblems, keyDecisionWarnings } from './standardModules.js'
+import { interviewInstructionsProblems } from './interviewInstructions.js'
 
 // ---------------------------------------------------------------------------
 // definition/module lookup — the projection's `modules` is a plain array;
@@ -47,7 +50,8 @@ import { instanceSettingsDeclarationProblems } from './instanceSettings.js'
 // ---------------------------------------------------------------------------
 
 function moduleMap(structure) {
-  return new Map((structure.modules ?? []).map((m) => [m.id, m]))
+  // #283 (ADR-0065): a mounted standard module is looked up like any other Module.
+  return new Map(modulesWithStandard(structure.modules, structure.standardModules).map((m) => [m.id, m]))
 }
 
 /** Verbatim port of `lib/definition.js`'s `splitArtefactRequirement`. */
@@ -143,7 +147,7 @@ function buildModuleStatus(modulesById, stage, moduleId, exists, parsedFields) {
     fields,
     outstanding,
     complete: exists && outstanding.length === 0,
-    warnings: [...selectOffListWarnings(moduleSpec, exists, parsedFields), ...dateFormatWarnings(moduleSpec, exists, parsedFields)],
+    warnings: [...selectOffListWarnings(moduleSpec, exists, parsedFields), ...dateFormatWarnings(moduleSpec, exists, parsedFields), ...keyDecisionWarnings(moduleSpec, exists, parsedFields)],
   }
 }
 
@@ -503,6 +507,8 @@ export function findLocalDefinitionProblems(structure) {
   const problems = []
   const modulesById = moduleMap(structure)
   const availableModuleIds = new Set(modulesById.keys())
+  // #283: shared with lib/definition.js rather than ported — see web/lib/standardModules.js.
+  problems.push(...standardModuleProblems(structure.standardModules, (structure.modules ?? []).map((m) => m.id)))
 
   const stages = structure.stages ?? []
   const artefacts = structure.artefacts ?? []
@@ -593,6 +599,9 @@ export function findLocalDefinitionProblems(structure) {
     // #195: shared with lib/definition.js rather than ported — see web/lib/diagramCaptions.js.
     const captionsProblem = diagramCaptionsProblem(artefact.id, artefact.diagramCaptions)
     if (captionsProblem) problems.push(captionsProblem)
+    // #281: shared with lib/definition.js rather than ported — see web/lib/sourceCitations.js.
+    const appendixProblem = sourceAppendixProblem(artefact.id, artefact.sourceAppendix)
+    if (appendixProblem) problems.push(appendixProblem)
     // #194: shared with lib/definition.js rather than ported — see web/lib/artefactFrontMatter.js.
     problems.push(...artefactFrontMatterProblems(artefact, findFilenameField))
   }
@@ -602,6 +611,8 @@ export function findLocalDefinitionProblems(structure) {
   problems.push(...readOnlyModuleProblems(stages))
   // #220: shared with lib/definition.js rather than ported — see web/lib/instanceSettings.js.
   problems.push(...instanceSettingsDeclarationProblems(structure.instanceSettings))
+  // #282: shared with lib/definition.js rather than ported — see web/lib/interviewInstructions.js.
+  problems.push(...interviewInstructionsProblems({ interview: structure.interview, stages, modules: [...modulesById.values()] }))
 
   return problems
 }

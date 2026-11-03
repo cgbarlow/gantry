@@ -10,6 +10,7 @@ const GUIDE_SECTIONS = [
   { id: 'modules-fields', label: 'Modules & Fields' },
   { id: 'artefacts-rendering', label: 'Artefacts & Rendering' },
   { id: 'approval-workflow', label: 'Approval workflow' },
+  { id: 'the-ai-interview', label: 'The AI interview' },
   { id: 'settings', label: 'Settings' },
   { id: 'definition-reference-guide', label: 'Definition Reference Guide' },
 ]

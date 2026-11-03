@@ -345,3 +345,106 @@ test('createBranch points the new branch at the current tip of "from", and a wri
     assert.equal(await client.fileExists('branch-only.md', 'main'), false)
   })
 })
+
+// ---------- #263: binary Instance files up to GitHub's 100 MB cap ----------
+
+// 1.5 MB of non-text bytes, comfortably past the 1 MB line where the Contents API stops returning a
+// file's content inline. Every byte value occurs, so a UTF-8 detour anywhere would corrupt it.
+function bigBinary(seed = 7, size = 1_500_000) {
+  const bytes = Buffer.alloc(size)
+  for (let i = 0; i < size; i++) bytes[i] = (i * 31 + seed + (i >> 8)) & 0xff
+  return bytes
+}
+
+function githubTestClient(baseUrl) {
+  return createGitHubClient({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, pat: GITHUB_VALID_PAT, baseUrl })
+}
+
+test('a binary file over 1 MB reads back byte for byte through getFileBytes', async () => {
+  const bytes = bigBinary()
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT }, async (baseUrl) => {
+    const client = githubTestClient(baseUrl)
+    await client.writeFile('gantry-workspace/demo/source/big.pdf', bytes.toString('base64'), { contentType: 'base64encoded' })
+    const readBack = await client.getFileBytes('gantry-workspace/demo/source/big.pdf')
+    assert.equal(readBack.length, bytes.length)
+    assert.ok(readBack.equals(bytes), 'the bytes read back differ from the bytes written')
+  })
+})
+
+test('a file over 1 MB seeded in the repo reads back through getFileContent as its full text', async () => {
+  const text = 'line of text\n'.repeat(100_000)
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'notes/big.md': text } },
+    async (baseUrl) => {
+      assert.equal(await githubTestClient(baseUrl).getFileContent('notes/big.md'), text)
+    }
+  )
+})
+
+test('a binary file over 1 MB can be overwritten, reporting an edit, and the new bytes read back', async () => {
+  const first = bigBinary(1)
+  const second = bigBinary(2, 1_200_000)
+  await withFakeGitHubServer({ owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT }, async (baseUrl) => {
+    const client = githubTestClient(baseUrl)
+    const created = await client.writeFile('source/big.bin', first.toString('base64'), { contentType: 'base64encoded' })
+    assert.equal(created.changeType, 'add')
+    const overwritten = await client.writeFile('source/big.bin', second.toString('base64'), { contentType: 'base64encoded' })
+    assert.equal(overwritten.changeType, 'edit')
+    assert.ok((await client.getFileBytes('source/big.bin')).equals(second))
+  })
+})
+
+test('a small file still reads in one request, with no second raw-media-type request', async () => {
+  const contentLog = []
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'small.md': 'hello\n' }, contentLog },
+    async (baseUrl) => {
+      assert.equal(await githubTestClient(baseUrl).getFileContent('small.md'), 'hello\n')
+      assert.deepEqual(contentLog, [{ path: 'small.md', via: 'inline' }])
+    }
+  )
+})
+
+test('fileExists never downloads the file, however large', async () => {
+  const contentLog = []
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'source/big.bin': bigBinary(), 'source/small.md': 'x\n', 'top.md': 'y\n' }, contentLog },
+    async (baseUrl) => {
+      const client = githubTestClient(baseUrl)
+      assert.equal(await client.fileExists('source/big.bin'), true)
+      assert.equal(await client.fileExists('source/small.md'), true)
+      assert.equal(await client.fileExists('top.md'), true)
+      assert.equal(await client.fileExists('source/missing.bin'), false)
+      assert.equal(await client.fileExists('nowhere/missing.bin'), false)
+      assert.deepEqual(contentLog, [], 'no file content may be served to answer an existence check')
+    }
+  )
+})
+
+test('fileExists is false for a folder path (a folder is not a file)', async () => {
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'source/a.md': 'x\n' } },
+    async (baseUrl) => {
+      assert.equal(await githubTestClient(baseUrl).fileExists('source'), false)
+    }
+  )
+})
+
+test('deleteFile removes a large binary as one commit on the named branch, leaving main alone', async () => {
+  const bytes = bigBinary()
+  await withFakeGitHubServer(
+    { owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, validPat: GITHUB_VALID_PAT, files: { 'keep.md': 'k\n' }, branchFiles: { 'stage-branch': { 'keep.md': 'k\n' } } },
+    async (baseUrl) => {
+      const client = githubTestClient(baseUrl)
+      await client.writeFile('source/big.bin', bytes.toString('base64'), { contentType: 'base64encoded', branch: 'stage-branch' })
+      await client.writeFile('source/big.bin', bytes.toString('base64'), { contentType: 'base64encoded' })
+      const before = await client.getBranchObjectId('stage-branch')
+      const result = await client.deleteFile('source/big.bin', { branch: 'stage-branch' })
+      assert.equal(result.changeType, 'delete')
+      assert.notEqual(await client.getBranchObjectId('stage-branch'), before, 'the delete is a commit on the stage branch')
+      assert.equal(await client.fileExists('source/big.bin', 'stage-branch'), false)
+      assert.equal(await client.fileExists('source/big.bin', 'main'), true)
+      assert.equal(await client.fileExists('keep.md', 'stage-branch'), true)
+    }
+  )
+})

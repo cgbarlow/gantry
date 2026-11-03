@@ -329,3 +329,47 @@ test('renderArtefact against a GitHub-backed instance with an empty assets folde
     })
   })
 })
+
+// ---------- #263: an asset over GitHub's 1 MB inline limit ----------
+
+// 1.5 MB of non-text bytes under a .png name. Not a decodable image, but upload and display only move
+// bytes: the point is that none is lost once the Contents API stops returning the file inline.
+function bigPngBytes(seed, size = 1_500_000) {
+  const bytes = Buffer.alloc(size)
+  for (let i = 0; i < size; i++) bytes[i] = (i * 31 + seed + (i >> 8)) & 0xff
+  return bytes
+}
+
+test('an asset over 1 MB uploads, displays byte for byte, and can be uploaded again over itself', async () => {
+  const slug = 'github-assets-large'
+  const first = bigPngBytes(1)
+  const second = bigPngBytes(2, 1_300_000)
+  await withScratchGitHubServer(
+    async (ctx) => {
+      registerGitHubInstance(slug, ctx)
+      const auth = basicAuthHeader(GITHUB_VALID_PAT)
+      const upload = (bytes) =>
+        fetch(`${ctx.gantryBase}/api/instance/assets?slug=${slug}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: auth },
+          body: JSON.stringify({ filename: 'large.png', dataBase64: bytes.toString('base64'), name: 'Large' }),
+        })
+      const display = async () => {
+        const res = await fetch(`${ctx.gantryBase}/api/instance/assets/large.png/file?slug=${slug}`, { headers: { Authorization: auth } })
+        assert.equal(res.status, 200)
+        assert.equal(res.headers.get('content-type'), 'image/png')
+        return Buffer.from(await res.arrayBuffer())
+      }
+
+      assert.equal((await upload(first)).status, 201)
+      assert.ok((await display()).equals(first), 'the displayed bytes differ from the uploaded bytes')
+
+      assert.equal((await upload(second)).status, 201)
+      assert.ok((await display()).equals(second), 'the overwritten asset does not read back as the new bytes')
+
+      const list = await (await fetch(`${ctx.gantryBase}/api/instance/assets?slug=${slug}`, { headers: { Authorization: auth } })).json()
+      assert.ok(list.find((a) => a.filename === 'large.png'))
+    },
+    { fakeServerOptions: { files: seedFiles(slug) } }
+  )
+})

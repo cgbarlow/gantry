@@ -1012,8 +1012,9 @@ test('New definition: Blank creates and selects an empty draft', async () => {
       await page.waitForFunction(() => document.querySelector('.defn-switcher .defname')?.textContent === 'Brand New Def', { timeout: 10_000 })
       await page.waitForSelector('.defn-outline', { timeout: 10_000 })
       // #221: a draft always lists Classification under Instance settings, so its author can declare
-      // markings; it is the only node a blank definition starts with.
-      assert.deepEqual(await page.locator('.defn-outline-node').allTextContents(), ['Classification'], 'a blank definition should start with no elements')
+      // markings; #282: and the Definition's Interview instructions, so its author can write them.
+      // They are the only nodes a blank definition starts with.
+      assert.deepEqual(await page.locator('.defn-outline-node').allTextContents(), ['Classification', 'Interview instructions'], 'a blank definition should start with no elements')
     })
   })
 })

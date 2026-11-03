@@ -46,6 +46,7 @@ test('User Guide: loads markdown content, ordered navigation, and definition-bac
         'Modules & Fields',
         'Artefacts & Rendering',
         'Approval workflow',
+        'The AI interview',
         'Settings',
         'Definition Reference Guide',
       ])
@@ -56,6 +57,7 @@ test('User Guide: loads markdown content, ordered navigation, and definition-bac
         'Modules & Fields',
         'Artefacts & Rendering',
         'Approval workflow',
+        'The AI interview',
         'Settings',
         'Definition Reference Guide',
       ])
@@ -69,6 +71,7 @@ test('User Guide: loads markdown content, ordered navigation, and definition-bac
         'modules-fields',
         'artefacts-rendering',
         'approval-workflow',
+        'the-ai-interview',
         'settings',
         'definition-reference-guide',
       ])

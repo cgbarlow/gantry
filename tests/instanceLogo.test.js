@@ -28,6 +28,7 @@ import { renderInstanceYaml, withStoredInstanceLogo } from '../web/lib/localInst
 import { sectionHeaders } from './helpers/wordHeaders.js'
 import { jpegImage, pngImage } from './helpers/logoImages.js'
 import { withRunningServer, withRunningServerForProvider, withScratchInstances, basicAuthHeader } from './helpers/lifecycle.js'
+import { markDesignV3Draft } from './helpers/designDraft.js'
 
 // #224 (spec #223, ADR-0058 and ADR-0059 amendments for #224): an Instance can have its own header
 // logo, chosen in the "+ New Workspace" wizard and changed in Instance Settings. It overrides the
@@ -85,6 +86,7 @@ async function withDesignExample(fn) {
   const instancesDir = join(root, 'instances')
   try {
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
+    markDesignV3Draft(definitionsDir)
     cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'kiwi-cover-mutual'), { recursive: true })
     rmSync(join(instancesDir, 'kiwi-cover-mutual', 'out'), { recursive: true, force: true })
     return await fn({ definitionsDir, instancesDir, slug: 'kiwi-cover-mutual' })

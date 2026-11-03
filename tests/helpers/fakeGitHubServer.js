@@ -78,6 +78,14 @@ export function createFakeGitHubServer({
   subIssuesEnabled = true,
   mergeRefusal = null,
   viewerPermissions = { admin: false, maintain: false, push: true, triage: true, pull: true },
+  // #263: real GitHub's Contents API only returns a file's base64 `content` inline up to 1 MB; above
+  // that (to its 100 MB cap) `content` is empty with `encoding: "none"`, and the bytes come from a
+  // second request using the raw media type. `inlineContentLimit` is that 1 MB threshold, overridable
+  // so a test can exercise the large-file path without allocating megabytes it does not need.
+  inlineContentLimit = 1_000_000,
+  // #263: when an array, every request that actually serves a file's bytes (inline or raw) appends
+  // `{ path, via }` to it — how a test proves a "does it exist" check never downloaded the content.
+  contentLog,
 } = {}) {
   const issues = new Map() // number -> issue object
   const issueIdToNumber = new Map() // internal id -> number
@@ -146,6 +154,10 @@ export function createFakeGitHubServer({
   const pulls = new Map() // number -> { number, head, base, title, body, state, merged, requested_reviewers }
   let pullCounter = 0
   const reviews = new Map() // number -> [{ id, user, state, submitted_at }]
+  // #299: the comments on a pull request, as the Owner writes them on the Provider: the conversation (`issues/:n/comments`) and the inline comments on the diff (`pulls/:n/comments`).
+  const conversationComments = new Map() // number -> [{ id, user, body, created_at, html_url }]
+  const inlineComments = new Map() // number -> [{ id, user, body, path, line, created_at, html_url, in_reply_to_id }]
+  let commentCounter = 0
 
   async function readJsonBody(req) {
     let raw = ''
@@ -217,7 +229,10 @@ export function createFakeGitHubServer({
     // single file (object response) and a folder listing (array response), exactly like the real API.
     if (req.method === 'GET' && pathname.startsWith(`${repoBasePath}/contents`)) {
       const branchName = url.searchParams.get('ref') ?? 'main'
-      const store = branches.get(branchName) ?? new Map()
+      // `ref` may be a commit id as well as a branch name, as on the real API (#273: reading a stage's
+      // content as it stood at its approval). A commit's tree is the immutable file set it was made with.
+      const commitTree = commits.get(branchName)?.treeSha
+      const store = branches.get(branchName) ?? (commitTree ? trees.get(commitTree) : undefined) ?? new Map()
       const scopePath = pathname.slice(`${repoBasePath}/contents`.length).replace(/^\/+/, '')
       const normalizedScope = scopePath === '' ? '' : scopePath.replace(/\/+$/, '')
 
@@ -226,13 +241,21 @@ export function createFakeGitHubServer({
       // assuming it's UTF-8 text first, is what makes this byte-accurate for a binary file.
       if (store.has(`/${normalizedScope}`)) {
         const content = store.get(`/${normalizedScope}`)
-        return json(200, {
-          type: 'file',
-          name: normalizedScope.split('/').pop(),
-          path: normalizedScope,
-          content: content.toString('base64'),
-          encoding: 'base64',
-        })
+        const meta = { type: 'file', name: normalizedScope.split('/').pop(), path: normalizedScope, size: content.length, sha: `blob-of-${normalizedScope}` }
+        if (content.length > 100 * 1024 * 1024) {
+          return json(403, { message: 'This API returns blobs up to 1 MB in size. The requested blob is too large to fetch via the API (fake: over 100 MB).' })
+        }
+        if ((req.headers['accept'] ?? '').includes('application/vnd.github.raw')) {
+          contentLog?.push({ path: normalizedScope, via: 'raw' })
+          res.writeHead(200, { 'Content-Type': 'application/vnd.github.raw+json' })
+          res.end(content)
+          return
+        }
+        if (content.length > inlineContentLimit) {
+          return json(200, { ...meta, content: '', encoding: 'none' })
+        }
+        contentLog?.push({ path: normalizedScope, via: 'inline' })
+        return json(200, { ...meta, content: content.toString('base64'), encoding: 'base64' })
       }
 
       // Otherwise, treat it as a folder listing — derive immediate children from stored paths, the
@@ -292,7 +315,7 @@ export function createFakeGitHubServer({
     if (req.method === 'GET' && commitMatch) {
       const commit = commits.get(commitMatch[1])
       if (!commit) return json(404, { message: `No fake commit "${commitMatch[1]}"` })
-      return json(200, { sha: commitMatch[1], tree: { sha: commit.treeSha } })
+      return json(200, { sha: commitMatch[1], tree: { sha: commit.treeSha }, author: commit.author, committer: commit.committer })
     }
 
     // POST /repos/:owner/:repo/git/blobs — stores one file's content, keyed by a fake blob sha.
@@ -454,6 +477,18 @@ export function createFakeGitHubServer({
       return json(200, issue)
     }
 
+    // POST /repos/:owner/:repo/issues/:number/comments — adds a comment (#275's re-approval note on a linked
+    // work item). Kept on the issue as `comments`, so a test reads back what was said.
+    const issueCommentsMatch = pathname.match(new RegExp(`^${repoBasePath}/issues/(\\d+)/comments$`))
+    // (#299: a pull request is an issue too on real GitHub; here a number that is not a fake issue falls through to the pull request comments below.)
+    if (req.method === 'POST' && issueCommentsMatch && issues.has(Number(issueCommentsMatch[1]))) {
+      const issue = issues.get(Number(issueCommentsMatch[1]))
+      if (!issue) return json(404, { message: `No fake issue #${issueCommentsMatch[1]}` })
+      const body = await readJsonBody(req)
+      issue.comments = [...(issue.comments ?? []), { id: (issue.comments?.length ?? 0) + 1, body: body.body }]
+      return json(201, issue.comments.at(-1))
+    }
+
     // POST /repos/:owner/:repo/issues/:number/sub_issues — attaches an existing issue (by its internal
     // `id`, per real GitHub's own contract) as a sub-issue of :number. 404s outright when
     // `subIssuesEnabled` is false, simulating a repository (or GitHub Enterprise Server version)
@@ -515,6 +550,14 @@ export function createFakeGitHubServer({
       if (!pr) return json(404, { message: `No fake pull request #${pullMatch[1]}` })
       return json(200, pr)
     }
+    // #299: the Owner closes a pull request without merging it (their rejection of a Stage); only `state` is taken.
+    if (req.method === 'PATCH' && pullMatch) {
+      const pr = pulls.get(Number(pullMatch[1]))
+      if (!pr) return json(404, { message: `No fake pull request #${pullMatch[1]}` })
+      const body = await readJsonBody(req)
+      if (body.state) pr.state = body.state
+      return json(200, pr)
+    }
 
     const requestedReviewersMatch = pathname.match(new RegExp(`^${repoBasePath}/pulls/(\\d+)/requested_reviewers$`))
     if (req.method === 'POST' && requestedReviewersMatch) {
@@ -537,9 +580,33 @@ export function createFakeGitHubServer({
       if (!pulls.has(number)) return json(404, { message: `No fake pull request #${number}` })
       const body = await readJsonBody(req)
       const state = { APPROVE: 'APPROVED', REQUEST_CHANGES: 'CHANGES_REQUESTED', COMMENT: 'COMMENTED' }[body.event] ?? 'COMMENTED'
-      const review = { id: (reviews.get(number)?.length ?? 0) + 1, user: { login: 'fake-reviewer' }, state, submitted_at: new Date().toISOString() }
+      const review = { id: (reviews.get(number)?.length ?? 0) + 1, user: { login: body.login ?? 'fake-reviewer' }, state, submitted_at: new Date().toISOString(), ...(body.body ? { body: body.body } : {}) }
       reviews.set(number, [...(reviews.get(number) ?? []), review])
       return json(200, review)
+    }
+
+    // #299: the comments on a pull request (read by lib/githubPullRequestsClient.js's getPullRequestComments). The Owner writes them with POST
+    // (`login` names who); a test reads them back with GET to prove gantry wrote none.
+    const commentsMatch = pathname.match(new RegExp(`^${repoBasePath}/(issues|pulls)/(\\d+)/comments$`))
+    if (commentsMatch) {
+      const number = Number(commentsMatch[2])
+      const store = commentsMatch[1] === 'issues' ? conversationComments : inlineComments
+      if (!pulls.has(number)) return json(404, { message: `No fake pull request #${number}` })
+      if (req.method === 'GET') return json(200, store.get(number) ?? [])
+      if (req.method === 'POST') {
+        const body = await readJsonBody(req)
+        const id = ++commentCounter
+        const comment = {
+          id,
+          user: { login: body.login ?? 'fake-reviewer' },
+          body: body.body ?? '',
+          created_at: new Date(Date.now() + id).toISOString(),
+          html_url: `https://github.example/${owner}/${repository}/pull/${number}#discussion_r${id}`,
+          ...(commentsMatch[1] === 'pulls' ? { path: body.path ?? 'modules/m1.md', line: body.line ?? 1, in_reply_to_id: body.in_reply_to_id } : {}),
+        }
+        store.set(number, [...(store.get(number) ?? []), comment])
+        return json(201, comment)
+      }
     }
 
     // GET /repos/:owner/:repo/pulls/:number/commits — #13's getPullRequestCommits. This fake's git
@@ -595,6 +662,7 @@ export function createFakeGitHubServer({
       pr.merged = true
       pr.state = 'closed'
       pr.merge_commit_sha = mergeSha
+      pr.merged_at = date
       return json(200, { sha: mergeSha, merged: true, message: 'Pull Request successfully merged' })
     }
 
@@ -604,7 +672,7 @@ export function createFakeGitHubServer({
 
 /** Starts a `createFakeGitHubServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/helpers/fakeAzureDevOpsServer.js`'s own `withFakeAzureDevOpsServer` shape. */
 export function withFakeGitHubServer(
-  { owner, repository, validPat, files, branchFiles, repoExists, ownerType, collaborators, orgMembers, permissions, subIssuesEnabled, mergeRefusal, viewerPermissions },
+  { owner, repository, validPat, files, branchFiles, repoExists, ownerType, collaborators, orgMembers, permissions, subIssuesEnabled, mergeRefusal, viewerPermissions, inlineContentLimit, contentLog },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -622,7 +690,14 @@ export function withFakeGitHubServer(
       subIssuesEnabled,
       mergeRefusal,
       viewerPermissions,
+      inlineContentLimit,
+      contentLog,
     })
+    // #72: never close an idle keep-alive connection from this side. The gantry server under test
+    // calls this fake from the same process through fetch(), which pools sockets; on a starved CPU
+    // the default 5s idle timer fires before the client notices, and the next request reuses a
+    // socket that has just been closed (ECONNRESET / "other side closed" -> a spurious 500).
+    server.keepAliveTimeout = 0
     server.listen(0, async () => {
       const { port } = server.address()
       try {

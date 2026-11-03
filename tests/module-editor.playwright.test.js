@@ -556,12 +556,12 @@ test('artefact selector filters Shape and Detailed Design fields, persists per s
         await page.waitForSelector('.module', { timeout: 10_000 })
         await artefactTrigger().waitFor({ state: 'visible', timeout: 5_000 })
         assert.equal(await artefactShown(), 'Solution Architecture Document')
-        assert.equal(await page.locator('.field label', { hasText: 'Design decisions' }).count(), 1)
-        // design v2 wires `support-and-operations.operational-accounts-and-licenses?` into the SAD too (optional), so it shows for both artefacts; `Design decisions` is the SAD-only discriminator. The example is on design v3, which spells the title "licences" (#233).
+        assert.equal(await page.locator('[data-testid="key-decisions-field"]').count(), 1)
+        // design v2 wires `support-and-operations.operational-accounts-and-licenses?` into the SAD too (optional), so it shows for both artefacts; the Key decisions field (design v3's replacement for `Design decisions`, #308) is the SAD-only discriminator. The example is on design v3, which spells the title "licences" (#233).
         assert.equal(await page.locator('.field label', { hasText: 'Operational accounts and licences' }).count(), 1)
 
         await chooseArtefact('Solution Support Architecture Document')
-        assert.equal(await page.locator('.field label', { hasText: 'Design decisions' }).count(), 0)
+        assert.equal(await page.locator('[data-testid="key-decisions-field"]').count(), 0)
         assert.equal(await page.locator('.field label', { hasText: 'Operational accounts and licences' }).count(), 1)
         assert.equal(await page.locator('.field label', { hasText: 'Network and infrastructure' }).count(), 0)
         assert.equal(await page.locator('.field label', { hasText: 'Availability and continuity *' }).count(), 1)

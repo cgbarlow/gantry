@@ -11,6 +11,7 @@ import { addLibraryRepo } from '../lib/librarySettings.js'
 import { libraryRepoDefinitionsDir } from '../lib/libraryCache.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { pngImage } from './helpers/logoImages.js'
+import { markDesignV3Draft } from './helpers/designDraft.js'
 
 // #222 (docs/adr/0059): the Definitions page's Logo control over HTTP —
 // GET /api/definitions/:id/versions/:n/logo (the current logo and which reference documents have
@@ -26,6 +27,7 @@ async function withDesign(fn) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-logo-api-instances-'))
   try {
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
+    markDesignV3Draft(definitionsDir)
     await withRunningServer({ definitionsDir, instancesDir }, (base) => fn(base, definitionsDir))
   } finally {
     rmSync(definitionsDir, { recursive: true, force: true })
@@ -147,7 +149,7 @@ test('a workspace-homed draft is replaced in its own folder; a library repo\'s D
     const workspaceTemplates = join(serverWorkspaceDefinitionsDir(instancesDir, 'acme'), 'acme-design', '1', 'templates')
     cpSync('definitions/design/3', join(serverWorkspaceDefinitionsDir(instancesDir, 'acme'), 'acme-design', '1'), { recursive: true })
     const workspaceYaml = join(serverWorkspaceDefinitionsDir(instancesDir, 'acme'), 'acme-design', '1', 'definition.yaml')
-    writeFileSync(workspaceYaml, readFileSync(workspaceYaml, 'utf8').replace(/^id: .*$/m, 'id: acme-design').replace(/^version: .*$/m, 'version: 1'))
+    writeFileSync(workspaceYaml, readFileSync(workspaceYaml, 'utf8').replace(/^id: .*$/m, 'id: acme-design').replace(/^version: .*$/m, 'version: 1').replace(/^status: .*$/m, 'status: draft'))
 
     const repo = addLibraryRepo({ provider: 'github', location: { owner: 'octocat', repository: 'widgets' } }, { instancesDir })
     const repoTemplates = join(libraryRepoDefinitionsDir(instancesDir, repo.id), 'repo-design', '1', 'templates')

@@ -10,9 +10,9 @@ Start at the **Workspaces** landing page. It shows the instances that Gantry kno
 
 ![Workspaces landing page showing grouped instances, search filter and creation controls](/user-guide-images/workspaces-landing.png)
 
-Choose **+ New Workspace** to begin. By default this takes you straight into the **Local** flow — see **Local workspaces** below — with no remote-provider step at all. Turn on **Advanced mode** in **Settings** first if you need a Server-hosted Workspace instead; that adds a **Workspace location** choice, **Server-hosted** or **Local**, to the top of the wizard. With **Server-hosted** chosen, you can pick a workspace already registered with this Gantry server, or register a new one. Registering a new one starts by picking its **Provider** — see **Choosing a Provider** below — which decides which location fields come next (Organization/Project/Repository for Azure DevOps, Owner/Repository for GitHub) and which work-item fields the final step offers. Provide the location, the Workspace Owner, and a Personal Access Token that proves you can actually reach that repository — Gantry checks it before registering anything, and the PAT you typed becomes that workspace's own PAT once registration succeeds.
+Choose **+ New Workspace** to begin. By default this takes you straight into the **Local** flow — see **Local workspaces** below — with no remote-provider step at all. Turn on **Advanced mode** in **Settings** first if you need a Server-hosted Workspace instead; that adds a **Workspace location** choice, **Server-hosted** or **Local**, to the top of the wizard. With **Server-hosted** chosen, you pick one of three: **An existing workspace** already registered with this Gantry server, a **New remote workspace** on a Provider, or a **New server workspace** kept on the Gantry server's own disk or in a Blob container (see **Server workspaces** below). Registering a new remote workspace starts by picking its **Provider** — see **Choosing a Provider** below — which decides which location fields come next (Organization/Project/Repository for Azure DevOps, Owner/Repository for GitHub) and which work-item fields the final step offers. Provide the location, the Workspace Owner, and a Personal Access Token that proves you can actually reach that repository — Gantry checks it before registering anything, and the PAT you typed becomes that workspace's own PAT once registration succeeds.
 
-Next choose a Definition, such as `design`, then provide the Instance's name, directory and initial Assignee. The directory defaults from the name, but you can change it. If the Workspace's Provider tracks work items, the final step can link the Instance to a parent work item (a GitHub workspace's version of this step has no work-item-type field, since GitHub issues are untyped). A Local-workspace Instance (or a legacy local Instance) skips that step entirely — neither has a Provider.
+Next choose a Definition, such as `design`, then provide the Instance's name, directory and initial Assignee. The directory defaults from the name, but you can change it. If the Workspace's Provider tracks work items, the final step can link the Instance to a parent work item (a GitHub workspace's version of this step has no work-item-type field, since GitHub issues are untyped). An Instance in a Local workspace or a server workspace skips that step entirely — neither has a Provider.
 
 ### Choosing a Provider
 
@@ -44,17 +44,35 @@ After creation, open the Instance from the landing page. Its header identifies t
 
 ## Workspaces & Instances
 
-A **Workspace** is where an Instance's data lives — shared storage for one or more Instances — and comes in two kinds: **Server-hosted**, either a repository on a **Provider** (Azure DevOps, GitHub or GitLab — see **Choosing a Provider** above) or a directory on the Gantry server itself, both registered with Gantry, or **Local**, a folder on your own machine picked in the browser (see **Local workspaces** below). For example, a team can keep several `design` initiatives in separate directories in one Server-hosted Workspace while retaining one repository history and access boundary.
+A **Workspace** is where an Instance's data lives — shared storage for one or more Instances — and comes in three kinds: a **remote** workspace, a repository on a **Provider** (Azure DevOps, GitHub or GitLab — see **Choosing a Provider** above); a **server** workspace, a folder on the Gantry server itself (see **Server workspaces** below); or a **local** workspace, a folder on your own machine picked in the browser (see **Local workspaces** below). Remote and server workspaces are both **Server-hosted**: the Gantry server holds them. For example, a team can keep several `design` initiatives in separate directories in one Server-hosted Workspace while retaining one repository history and access boundary.
 
 An **Instance** is one run of a Definition against one initiative. It has its own module files, current Stage and Assignee. A `design` Instance might represent one system change; another `design` Instance can represent a different change in the same Workspace.
 
-Instances can live in one of three places:
+An Instance lives in a workspace, so it lives in one of three kinds of place:
 
-- A **local Instance** stores its files in the Gantry server's own `instances/` directory. It is useful for individual work or offline authoring.
-- A **Workspace-backed Instance** stores its `instance.yaml` and modules inside a Server-hosted Workspace's repository on its Provider, under `gantry-workspace/<instance-slug>/`. Its changes are made on a Stage branch and reviewed through a Pull Request (a **Merge Request** on GitLab) on that Provider — Azure DevOps, GitHub or GitLab. The mechanics are the same either way; where they differ (how sign-off and review appear, and what a linked work item looks like) is called out in **Approval workflow** below.
-- A **Local-workspace Instance** stores its files the same way, under `gantry-workspace/<instance-slug>/`, but inside a Local workspace's folder on your own machine rather than a Provider's repository — see **Local workspaces** below. It is a different thing from the local Instance above, even though both get called "local" in everyday speech: one lives on the machine running the Gantry server, the other lives on yours, and the server never sees it.
+- A **remote** workspace's Instance stores its `instance.yaml` and modules inside a repository on a **Provider**, under `gantry-workspace/<instance-slug>/`. Its changes are made on a Stage branch and reviewed through a Pull Request (a **Merge Request** on GitLab) on that Provider — Azure DevOps, GitHub or GitLab. The mechanics are the same either way; where they differ (how sign-off and review appear, and what a linked work item looks like) is called out in **Approval workflow** below.
+- A **server** workspace's Instance stores its files in a folder on the Gantry server's own disk, or in an Azure Blob container its operator has set up, with no Provider at all — see **Server workspaces** below. It is useful for individual work, and for a team that wants one shared place on the server without a repository.
+- A **local** workspace's Instance stores its files the same way, under `gantry-workspace/<instance-slug>/`, but inside a folder on your own machine rather than on the server — see **Local workspaces** below. The server never sees it.
 
-The storage choice changes how stage advancement and ticketing work, but not what a Module or Field means. All three kinds of Instance use the same Definition and the same authoring experience.
+"Server" and "local" are easy to mix up because both skip the Provider: a server workspace lives on the machine running Gantry and is shared by everyone who uses that server, while a local workspace lives on yours alone.
+
+The kind changes how stage advancement and ticketing work, but not what a Module or Field means. All three kinds of Instance use the same Definition and the same authoring experience.
+
+### Server workspaces
+
+A **server workspace** is a folder, kept by the Gantry server, that holds one or more Instances. It is kept either on the server's own disk or in an Azure **Blob container** that the server's operator has set up for it. Nothing is registered with a Provider, so there is no repository to create, no Personal Access Token to paste and no work item to link.
+
+To create one on the server's disk, turn on **Advanced mode** in **Settings**, choose **+ New Workspace**, keep **Server-hosted** selected and choose **New server workspace**. Give it a **Name** and choose where to keep it under **Store in**: **Server disk** (which stays behind Advanced mode, along with the Provider options) or, when your operator has set one up, **Blob container: <name>**. Click **Create workspace** and the wizard carries straight on to the Instance step inside it, where you pick a Definition and name the first Instance. The workspace then appears on the Workspaces landing page, and an empty one shows there too, with a **+ New Instance** button, so you can add Instances later without going back through the wizard. A workspace's name must be different from every other server workspace's.
+
+**Store in a Blob container.** When your operator has declared a Blob container (see the README's **Blob containers** section), the wizard asks **Store in** even with Advanced mode off: **A folder on my computer (Local)**, the usual Local workspace, or **Blob container: <name>**. Pick the container, name the workspace and click **Create workspace**. The workspace is kept in a folder of that container rather than on the Gantry server, so it survives the server being redeployed, and every Gantry server that shares the container shows the same workspace with the same short references (`w2i3`). Several people on different servers can work in it. If two of you save the same Stage at the same moment, the second is asked to settle the Fields you both changed, as it is anywhere else (see **When someone else has saved the stage meanwhile** below). A container you can't reach right now is listed but can't be chosen, and says why.
+
+A Save to a workspace in a Blob container is all-or-nothing: the Stage ends up with every Module you saved or none of them. If the server saving it stops part-way, the Stage goes back to how it was before that Save, as soon as the next person opens or saves it (it can take up to half a minute for the stopped server's hold on the Instance to run out, and a Save made in that time simply waits for it). Nothing you or a colleague saved earlier is touched.
+
+**When a Blob container is unavailable.** If the container can't be reached (the credential was rejected, the container was deleted, or it didn't answer), the workspaces kept in it show on the Workspaces landing page as **Unavailable**, with the reason. Their Instances can't be opened or saved until the container is back, and nothing in them is lost. Your other workspaces carry on as normal, and the unavailable ones return on their own when the container does.
+
+A server workspace has no branches, Pull Requests or approvals. Changes you save go straight into the Instance's files, with no review step, and nothing checks who may approve them. It advances like a Local workspace: once the current Stage's gate passes, use **Advance to next stage** to move it on yourself. See **Approval workflow** below.  Rendering a document downloads it to your browser; nothing is written back into the workspace.
+
+The folder uses the same layout as a Local workspace, a `workspace.json` marker plus one subfolder per Instance, so an operator can copy a folder between the server and a Local workspace unchanged. The same holds for a Blob container: an operator copies a workspace folder in or out with Azure's tools, and a folder copied in is found as a new workspace with a new id and new short references. Gantry's own bundled **Examples** workspace is a server workspace too, and has no **+ New Instance** button because it ships with Gantry.
 
 ### Local workspaces
 
@@ -66,7 +84,7 @@ By default the wizard skips the Workspace-location question altogether and takes
 
 Editing and saving modules works entirely offline — every change goes straight to the folder through the browser, with no server involved. Checking the gate and rendering an artefact both still need the Gantry server (rendering a `.docx` in particular happens there); if the server isn't reachable, those actions say so rather than failing silently. A rendered artefact is written straight into the folder's own `out/`, the same way a Workspace-backed Instance writes into its Provider's repository.
 
-A Local-workspace Instance has no ticketing at all — no linked work item, no Review or Sign-off, no Stage branch or Pull Request. It advances the same way a local Instance does: once the current Stage's gate passes, use **Advance to next stage** to move it on yourself. See **Approval workflow** below.
+A Local-workspace Instance has no ticketing at all — no linked work item, no Review or Sign-off, no Stage branch or Pull Request. It advances the same way a server workspace's Instance does: once the current Stage's gate passes, use **Advance to next stage** to move it on yourself. See **Approval workflow** below.
 
 ### Numeric references
 
@@ -127,6 +145,87 @@ Every rendered document shows a logo in its page header: the Definition's logo (
 
 The logo is stored with the instance, in its `assets/` folder as `instance-logo.png` (or `.jpeg`), and `instance.yaml` names it as `logo:`. So a render of a given commit always shows the same logo, wherever and however it is rendered. At render time Gantry gives Word's converter a copy of the artefact's reference document with the header logo swapped, fitted at its own proportions in the space the Definition's logo takes up; the Definition's own reference documents never change. Anything that isn't a PNG or JPEG is refused. A Definition whose reference documents have no picture in their page header has no logo to replace, so it offers no **Logo** in the wizard or in Instance Settings.
 
+### Source documents
+
+A **Source document** is a file you add to an Instance as the evidence its content is drawn from: a client brief, requirements, meeting notes, an existing architecture, a spreadsheet, a screenshot. It is kept with the Instance and cited by name wherever a figure or decision came from it. You can add them before you connect any AI Provider. They are not images: the images you put into a field (see **Adding images** below) are things the content *displays*, a Source document is material it is *drawn from*, and the two are stored and managed separately. Removing one never affects the other.
+
+In the Instance editor, under the toolbar, open **Source documents** to see the list and add to it. This is available on **Local** workspaces, on **Server-hosted** workspaces (whether they live on the Gantry server's disk or in a Blob container) and on **Azure DevOps** and **GitHub** workspaces. GitLab and Atlassian workspaces will have it when saving their modules is supported.
+
+- **Upload documents.** Choose one or more files. Gantry takes Word (`.docx`), PowerPoint (`.pptx`), spreadsheets (`.xlsx`, `.csv`, `.tsv`), PDFs, Markdown and text files, and images (`.png`, `.jpg`, `.gif`, `.webp`). The older `.doc`, `.ppt` and `.xls` formats aren't read: save them in the newer format first. An upload is always a new document with its own place in the list, even if it is named like one already there, so "Client brief v3" sits alongside "Client brief v2" until someone removes the older one.
+- **A document can be at most 25 MB.** A bigger file is refused with a message naming the limit, both in the browser and again on the server. Once an Instance's documents add up to more than about 100 MB, the panel shows a warning (it is a warning, not a refusal): remove the ones you no longer need.
+- **This replaces…** is a picker beside the upload button. Choose an older document in it before you upload and the new one is recorded as replacing it ("Client brief v3 replaces v2"). The older document is never edited or removed: it stays in the list, still citable, marked **replaced by Client brief v3**, and the link is kept in the manifest. Pick one file at a time when you use it. Leave the picker on its first choice for an ordinary upload. See **Keeping drafts up to date when a document changes** below.
+- **Gantry reads the text when you add a document.** The reading happens in your browser, using files that come with Gantry, so nothing is fetched from the internet and the document never leaves your machine to be read. Word and PowerPoint (speaker notes included) become Markdown, a spreadsheet becomes one table per sheet (at most 1,000 rows each), and a PDF becomes its text, page by page. The text is stored next to the original, in the Instance's `sources/.text/` folder. A picture, and a scanned PDF with no text in it, get no text; the list says **NO TEXT** for them. **TEXT READ** means there is text.
+- **Download all (.zip)** saves every document in the list, as it was uploaded, in one zip, named for the Instance. It is how you take a set of evidence to another Instance: upload the files there. The text Gantry read is not in the zip, because it reads each file again when you upload it. It is shown when the list has at least one document, and it works on every kind of workspace.
+- **Rename** changes only the title shown in the list. The document keeps the id it was given when it was added, and the name of its stored file never changes, so a citation that names it stays valid. **Download** gives you the original file back.
+- **Extract text again** reads the original once more and replaces the stored text. Use it after Gantry has been upgraded or if a read failed. If the new read fails, the text already kept is left alone.
+- **Remove** deletes the file and its text. The document stays in the list under **Removed**, with who removed it and when, so anything that mentions it still shows its title.
+- **Copy citation** puts a ready-made citation of the document on your clipboard (if the browser won't let Gantry use the clipboard, the message shows it for you to copy). See **Citing a Source document** below.
+- **Use as image** copies a picture (a PNG or JPEG) into the Instance's images as a new image. See **Use as image** below.
+- **Read visually** (on a PDF only) tells the AI to look at the PDF itself instead of reading its text. Use it for a PDF whose diagrams or layout matter, where text extraction jumbles the labels. The list then shows **READ VISUALLY**, and the button becomes **Read as text**. It only has an effect with an AI Provider that takes PDFs; see **How the AI reads your Source documents** below. On an Azure DevOps or GitHub workspace the change is one commit on the current Stage's branch, like the others.
+
+Behind the panel, each Instance keeps a `sources/` folder next to `modules/` and `assets/`, with a `sources/manifest.yaml` that records for every document its id (made from the filename, unique, and fixed for good), stored filename, title, who added it and when, its size, its text file if it has one, `readVisually: true` while a PDF is marked Read visually, `replaces` (the id of the older document it supersedes) on a document uploaded with **This replaces…**, `textChangedAt` (when its text was last read again and actually came out different), and who removed it and when. Filenames are cleaned to be safe as a path, with `-2` added if the name is taken. In a Local workspace this is all inside the folder you picked, so it is yours to back up like the rest; on a Server-hosted workspace it is in the Instance's folder on the server. A Local workspace sends no document and no extracted text to the Gantry server, not even when you render a document; the one thing a render may send is the title, filename and dates of a document the content cites (see **The Sources appendix** below).
+
+#### Source documents on Azure DevOps and GitHub workspaces
+
+On an Azure DevOps or GitHub workspace the documents are committed to the repository, with these differences from the other kinds:
+
+- **Every change is one commit, made straight away.** Adding a document (the original, its extracted text and the manifest), renaming one, **Extract text again** and **Remove** each make exactly one commit, as soon as you do them. They are not held back for the stage **Save**, and **Save** never includes them. You need write access to the repository, as for any save; without it the panel is read-only.
+- **The commit goes on the current Stage's branch**, as images (Assets) do, and the branch is started if it hasn't begun. A refused upload (too big, empty, the wrong type) makes no commit and starts no branch. A later Stage's branch is cut from the earlier Stage's branch, so it carries the documents added on the earlier Stage; they reach `main` when that Stage's Pull Request is merged.
+- **Later reads use what was committed.** The list, the download and the stored text come from the branch, so the text Gantry read when you added a document is what the AI will use; it is not read out of the original again.
+- **Two people at once are both kept.** If a colleague commits to the same branch between your reading the list and your commit landing, Gantry applies your change again on top of theirs rather than overwriting it.
+- **The size limits are the same** (25 MB a document, a warning past about 100 MB in all). The Provider's own limit for a file is 100 MB, so the 25 MB limit is Gantry's. A 25 MB upload is sent as one request, so a slow connection to your Provider can make it take a while.
+
+#### Citing a Source document
+
+Wherever a figure or decision in a field came from a Source document, cite it. A citation is an ordinary Markdown link whose address is `source:` and the document's id (the id is in `sources/manifest.yaml`, and **Copy citation** writes the whole link for you):
+
+```
+Median time to payment is 12.4 working days [Client brief, p. 4](source:client-brief).
+```
+
+The words in the square brackets are yours, so you can point at a page or a section. Only a link counts as a citation: a picture (`![…](source:…)`) doesn't, and neither does anything inside a code block.
+
+- **In the editor,** a citation of a document is a link. Click it (in Visual or Split view) and the document opens: a PDF, a picture or a text file in a new tab, a Word, PowerPoint or spreadsheet file, which a browser can't show, is saved to your machine. A citation of a document that has since been **removed** keeps its words, struck back and marked "(removed)", and doesn't link anywhere because the file is gone. A citation of an id the Instance has no document for is marked "(not found)". On workspaces that don't keep Source documents yet (GitLab and Atlassian), a citation is left as the words you wrote.
+- **In Word,** the document prints a citation as plain text in brackets, `(Client brief, p. 4)`, with no hyperlink, because the people who read a Word document usually have no access to the repository. If the link's words are empty, Word prints the document's title. The exported `.md` keeps the link as you wrote it.
+- **Renaming a document** changes the title in the list but not the words already written in a citation: they are yours.
+
+#### The Sources appendix
+
+A Definition can opt an Artefact in to ending with a list of the Source documents it cites. On the Definitions page, tick **Sources appendix** on the Artefact (it is `source-appendix: true` in `definition.yaml`; on a published version it is shown read-only). The rendered document, in Word and in the exported `.md`, then ends with a **Sources** section: a table of **only the documents that Artefact cites**, in the order they are first cited, each with its title, its original filename and the date it was added. A removed document is still listed, marked "(removed)". Documents the Instance holds but the Artefact never cites are not listed, and an Artefact that cites nothing has no Sources section at all. With the setting off, which is the default (no bundled Definition turns it on), there is no list. A Definition author can only give it `true` or `false`: any other value is reported by `gantry validate` and when you save or publish the Definition, and the list is left out until it is fixed.
+
+On a Local workspace, a render sends the Gantry server only the title, filename and dates of the documents the content cites, so the server can print them. It never sends a document or its text, and sends nothing at all when the content cites no document.
+
+#### Keeping drafts up to date when a document changes
+
+A Field that was written from a Source document can go stale when that document changes. Gantry watches for three kinds of change, and flags the Fields that drew on the document as **Out of date** straight away:
+
+- **Removed.** The document was removed.
+- **Replaced.** A newer document was uploaded with **This replaces…** pointing at it.
+- **Read again with different text.** **Extract text again** gave a text that is not the same as the one kept. Reading a document again and getting exactly the same text changes nothing and flags nothing.
+
+A Field is flagged when either of these is true:
+
+- the Stage's decisions log says the AI drafted it from that document (see **The decisions log**), or
+- its content cites the document with `source:<id>`, whoever wrote it, so hand-written content is covered too.
+
+A Field the AI drafted from another Field is flagged as well once that Field no longer says what the draft saw: for example when the Save check took a colleague's different wording of it because only they had changed it.
+
+A new document that replaces nothing flags no Field. It is marked **New since last interview**, in the list and in the Interview page's rail, until the next AI interview saves; the next interview reads it against what is already saved. Nothing is marked until an interview has run.
+
+You see the flags in three places:
+
+- **A banner** at the top of the editor, one line per change: *4 Fields drew on Client brief, now replaced by Client brief v3: Bring up to date*, naming the Fields. **Bring up to date** opens the Interview page on just those Fields (see **Bringing drafts up to date**); on a workspace that doesn't have the AI interview (GitLab, Atlassian), the banner says so and still shows the flags.
+- **A mark on each Field**: *Out of date: Client brief was replaced by Client brief v3*.
+- **A mark on each run-plan row** on the Interview page, such as *3 Out of date*, for every Stage with flagged Fields (a Field that only cites the document is counted on each Stage that shows its Module).
+
+Gantry looks when you open the Instance and again after every change to the Source documents and after every Save. It never polls. A flag is worked out from the manifest, the decisions logs and the saved content each time, so nothing extra is stored and it works the same on every kind of workspace.
+
+A flag goes when the Field is drafted again after the change, when you have answered its card in **Bring up to date** (keep, redraft, re-cite or redraft without it) and saved the round, or when the citation is edited away. Gantry only flags: it never changes your content by itself, and only your answer clears a flag. **Bring up to date** walks you through the flagged Fields with a card each (see **Bringing drafts up to date** under **The AI interview**), and the next interview starts with it when flags are waiting.
+
+#### Use as image
+
+**Use as image** (a PNG or JPEG in the list) copies the picture into the Instance's images, so a field can show it as a figure. The panel then tells you how to refer to it: `![Whiteboard](asset:…)` on a Server-hosted workspace, or `![Whiteboard](assets/Whiteboard.png)` on a Local, Azure DevOps or GitHub workspace, where the copy's file name is made safe to type (no spaces) and `-2` is added if an image of that name exists. On an Azure DevOps or GitHub workspace the copy is one commit on the current Stage's branch, made straight away like the other changes to Source documents. Use the Image dialog's **Choose existing** tab to insert it. The image is a new one of its own: it is not linked back to the Source document, so removing, renaming or replacing either never changes the other. Pictures of other types (`.gif`, `.webp`) can stay as evidence but can't be used as images.
+
 ### Definition versions and the Definitions page
 
 Definitions are versioned. The first version of a definition is published and is the default for new instances; newer versions start as `draft`. Each version has its own `definition.yaml`, module specs, templates and `CHANGELOG.md`. Only the latest published version is used when no explicit version is requested; draft versions are opt-in via the wizard's version picker.
@@ -137,9 +236,34 @@ The **Definitions** page — linked from the Workspaces page header — is a fir
 
 Click any stage, artefact or module to focus it in the centre pane. A module's fields are compact rows — click one to expand it, edit it, and collapse it again; only one field is expanded at a time. On a published version everything is read-only, with a **View template source** button to inspect each artefact's `.md.tmpl`; on a `draft` version every field is directly editable, and every element (Stage/Artefact/Module/Field — see CONTEXT.md's **Element**) can be reordered, or moved between a stage, an artefact and a module, either by dragging its handle or with an equivalent button (Move ↑/↓, "+ Add module…", "+ Add requirement…", "Move to module…"). A markdown or list field on a draft has three **Word targets** boxes, one per size, for how many words authors should aim for (see **Target size and word targets** below); leave all three blank for no target. On a draft, each module a stage lists has a **read-only** checkbox: tick it when the stage mounts that module only so its documents and gate can use it, and the module is edited at an earlier stage. The instance editor then shows it read-only at this stage, naming the earlier stage it is edited at (see *Modules & Fields* below). The toolbar shows a live problems count — sharing the same validation rules the server runs on Save — that jumps straight to the affected element when clicked. An artefact's **Gate** is picked from the stages' own gates (a new artefact starts on the first one, and a new stage starts with a placeholder gate id such as `new-stage-3-gate` to rename), and an artefact gate or a field's "required at gate(s)" that names no stage's gate is flagged as a problem and refused at Save and Publish; a definition an existing instance already uses keeps loading even if it has one. Template editing opens as its own focus-pane view on a full markdown editor. Other actions: creating a **New draft version**, starting a **New definition** (Blank or cloned from the current one), **archiving / restoring** definitions, and **publishing** a draft (which validates it and flips its status to `published`). Save is a single action for everything changed since the last save, with a Save/Discard/Cancel prompt if you try to navigate away with unsaved changes.
 
+#### Interview instructions
+
+A Definition can tell the AI how to interview the people who fill it in. These **Interview instructions** are free text you write at up to three levels, and they stack from broad to narrow: the Definition's, then a Stage's, then a Module's. Use them for the habits of your organisation, such as what a reviewer always asks first, what to probe, the tone to use and how to spell things. A Field has none of its own, because its **guidance** already does that job.
+
+Interview instructions only ever add. They never replace Gantry's own interview rules, so a Gate still means the same thing in every Definition and every fact in a document is still marked with where it came from.
+
+On a draft, the Definitions page shows an **Interview instructions** box on each Stage and each Module, and an **Interview instructions** entry under **Interview** at the end of the Outline (a column at the end of the Map) for the Definition's own. A Local Workspace's Definition editor has the same boxes. Leave a box empty for none. They are saved and published with the rest of the draft, so a published version's Interview instructions never change: the instances on that version are interviewed by exactly what it said when it was published. A published version shows them read-only, and only where there are some. Starting a new draft, copying a Stage or a Module from another Definition, cloning a Definition and promoting one to a library repo all carry them along.
+
+In `definition.yaml` the key is `interview:` on the Definition and on each Stage, and in a Module's YAML file on the Module. It must be text. Anything else (a number, a list) is a problem that `gantry validate` and a Local Workspace report, the Definitions page marks on a draft, and Save and Publish refuse. A Definition that already has one keeps loading, and the AI reads it as no instructions until it is fixed.
+
+**Gantry's interview rules.** Beside the Interview instructions on the Definitions page (under **Interview**, and in a Local Workspace's Definition editor) a read-only **Gantry's interview rules** view shows what your instructions are added to, so you can write them without repeating or contradicting it. It lists Gantry's own fixed rules (draft first; where every fact comes from; saved content changes only through a card; select Fields offer only the Definition's options; when a Field is done and a Stage is ready; settling the words; offering Key decisions sparingly; recording what stays open; stress-testing relationships with scenarios; and **Finish with your recommendations**), the two interviewing skills the AI follows after them with their versions, and how the skills' terms map onto Gantry's. The skills are Matt Pocock's `grilling` and `domain-modeling` (MIT licence), bundled unchanged at a pinned release; a Gantry release moves to a newer one on purpose and says so in the CHANGELOG, so an interview behaves the same until Gantry is upgraded.
+
+The AI is given all of this as one **brief** for the Stage: Gantry's rules first, then the skills, then your Interview instructions (the Definition's, the Stage's, the Module's), the Stage's purpose, Gate and the Artefact aimed for, each Field's guidance, word budget, whether the Gate requires it, type and options, what is saved so far, the Glossary's preferred terms, the Source documents and the decisions log. Where two disagree, the earlier wins. The Source documents are included whole when they come to no more than about half the model's context window, and as a catalogue (title, outline and size) when they are larger. The example Instance is never part of it, so there is nothing for the AI to copy a fact from.
+
 ### Example instances
 
-The worked example throughout this guide remains the `design` definition, illustrated by the bundled **Examples** workspace: `kiwi-cover-mutual`, a fictitious insurer's design with content for every stage, and `gantry`, Gantry's own hosting proposal written as a complete Full SOAP. Both run on `design` version 3, a draft where the next round of design changes is being made, so their documents can differ from version 2's. New `design` instances still start on version 2, the latest published version, unless you pick version 3 in the wizard. The "Populate example text" button on a version 3 stage fills from `kiwi-cover-mutual`.
+The worked example throughout this guide remains the `design` definition, illustrated by the bundled **Examples** workspace: `kiwi-cover-mutual`, a fictitious insurer's design with content for every stage, and `gantry`, Gantry's own hosting proposal written as a complete Full SOAP. Both run on `design` version 3, which is published and is the default for new `design` instances, so their documents can differ from version 2's. Version 3 mounts Gantry's **Glossary**, **Open questions** and **Key decisions** standard modules, has its own Interview instructions for the AI interview, and ends every document with a Sources appendix listing the Source documents it cites. Key decisions are numbered AD01, AD02, … and written in the WH(Y) style, replacing the two `AD | Decision | ADR` tables of version 2; a decision that needs governance endorsement names its ADR at the end of its title (`ADRYYY` until the ADR is registered). Versions 1 and 2 are unchanged, so an instance on either keeps rendering exactly as it did, and nothing is migrated: moving an instance from version 2 to version 3 is a per-instance step. The "Populate example text" button on a version 3 stage fills from `kiwi-cover-mutual`.
+
+`kiwi-cover-mutual` also shows the AI interview's evidence, all of it fictitious, so you can see what a finished Instance looks like before you start one:
+
+- **Source documents.** A small pack of four: a client brief (PDF), a requirements register (spreadsheet), design workshop notes (Word) and a screenshot of the current claim registration screen (image). Open **Source documents** in the editor, or look at the rail on the Interview page. Their text is already read. **Download all (.zip)** saves the pack, so you can upload it to a fresh Instance and try the AI interview on the same evidence.
+- **Citations.** The Background, Design basis, Non-functional requirements, Overview, Dependencies and Open questions cite the pack, as in `[Client brief, p. 1](source:client-brief)`. In the editor a citation opens the document. In the Word documents it prints as plain text, `(Client brief, p. 1)`, and each document ends with a Sources list of the documents it cites.
+- **Decisions logs.** Every Stage has one: the cards answered, a term chosen, a fact in the architect's own words, a Key decision, a Field kept, and the open questions still waiting. Open the **Decisions log** panel on a Stage in the editor or look at the Interview page. They are read-only, and never printed in a document.
+- **A Reviewed copy.** The Full Solution on a Page came back from two reviewers with four comments and one tracked change, and all four are answered in the SOAP Stage's decisions log: one revised, one accepted, one kept as it was with the architect's reason, and one left as an open question (Q6). Open **Review comments** in the editor to see the copy, and **Download Review response list** to get what the architect would send back to the reviewers. The reviewers' names are in the repository, as they always are; the AI is only ever told "Reviewer 1" and "Reviewer 2".
+
+The example's content is what the answers produced, so the wording the reviewers saw is in the Reviewed copy and not in the Modules. The example has no Out of date Fields. If you re-render its documents, the citations print as plain text as above.
+
+The bundled `platform-engineer` example is a worked hire on the `recruitment-onboarding` definition, and it runs on version 4. Version 4 is published and is the default for new `recruitment-onboarding` instances. It is version 3 with the **Glossary** and **Open questions** standard modules mounted on every stage, and with its own Interview instructions, so the AI interviews about HR personal data with care. Open questions are now a table (question, who resolves, by when, status) instead of a list, and *Process gaps* has moved to a Module of its own. The Hire Record ends with a Glossary. Versions 1 to 3 are unchanged, so an instance on one of them keeps rendering exactly as it did. Moving an instance from version 3 to version 4 is a per-instance step: convert its open questions to the table, move its process gaps into the new Module, and add a Glossary.
 
 ## Stages & Gates
 
@@ -147,7 +271,7 @@ A **Stage** is an ordered phase of a Definition. It makes the relevant modules a
 
 A **Gate** is the decision point at the end of a Stage. A gate checks the artefact requirements declared by the Definition. Passing a gate permits the next action; it does not advance an Instance by itself. Local Instances — including Local-workspace Instances (see **Local workspaces** above) — advance explicitly, while Workspace-backed Instances advance when their approved Pull Request is merged.
 
-For a Workspace-backed Instance the gate is checked as part of the Work Item Detail card's **Check status** action; a local Instance with a linked work item checks it with **Check gate & sync work item**. A Local-workspace Instance has no linked work item at all, so its gate is checked as part of **Advance to next stage** itself, with no separate check step. See *Approval workflow* for the full sequence.
+For a Workspace-backed Instance the gate is checked as part of the Work Item Detail card's **Check status** action. An Instance in a server workspace or a Local workspace has no linked work item at all, so its gate is checked as part of **Advance to next stage** itself, with no separate check step. See *Approval workflow* for the full sequence.
 
 A definition lists its stages, and the gate each one ends at, in its `definition.yaml`. The `design` definition, for instance, runs from initial shaping through high-level and detailed design to operational handover, each stage ending at its own gate.
 
@@ -174,6 +298,52 @@ Most fields are free text (Markdown) or a bulleted list — you type the answer.
 
 Which fields are which type is set by the Definition, not by you — an author can't turn a select into free text or the reverse from the editor. If a field's permitted answers look wrong or too narrow, that's a Definition change, made by whoever maintains it.
 
+### Standard modules
+
+Some Modules are not written by the Definition's author: **Gantry provides them**. A **standard module** has an id, a set of Fields and a version that Gantry owns, so it looks and behaves the same in every Definition that uses it. There are three:
+
+- **Glossary** has one Field, *Terms and definitions*, a table of **Preferred term | Definition | Avoid**.
+- **Open questions** has one Field, *Open questions*, a table of **Question | Who resolves | By when | Status**.
+- **Key decisions** has one Field, *Key decisions*, a numbered list of the significant decisions (see **Key decisions** below).
+
+You use one like any other Module: it appears as a card on the Stages that mount it, you fill it in and save it, you mark it `agreed`, and any Artefact that needs it draws on it. What differs is on the Definitions page. A standard module is listed under **Standard modules** in the Outline (and carries a **Gantry-provided** label wherever it appears), and its Fields are shown but can't be edited.
+
+A Definition author, on a draft:
+
+- **Mounts** one with **+ Mount…** under Standard modules, or straight from a Stage's **+ Add module…** list, where each unmounted one is offered as "(Gantry-provided, not mounted yet)". A new mount takes the newest version Gantry has. A Stage that lists it shows it; an Artefact can require it like any Module.
+- **Pins the version.** A Definition names the version it mounts, and Gantry will never change that version. When a later Gantry release adds a version 2, a published Definition on version 1 still renders exactly as it did, and its author moves to version 2 only by choosing it on a new draft.
+- **Adds guidance and Interview instructions.** *Added guidance* is shown after Gantry's own guidance on every Field of the module; *Interview instructions* steer the AI interview and only ever add to Gantry's rules.
+- **Cannot change the shape.** Save and Publish refuse a mount that sets anything besides its version, guidance and interview instructions (Key decisions also takes a prefix and a style, below), that names a version Gantry doesn't provide, or that sits beside a Module of the Definition's own with the same id. The problem is shown against the standard module and counted in the toolbar. In a Local Workspace's Definition editor the same mount is under **Standard modules**, and a Stage lists it by id in its comma-separated Modules.
+
+In `definition.yaml` a mount is a top-level `standard-modules:` list, written as `- id: glossary` with a `version: 1`, and optionally `guidance:` and `interview:`; a Stage then lists the id in its `modules:` like any other. There is no `modules/glossary.yaml` file, because the Module's shape is Gantry's.
+
+#### Key decisions
+
+The **Key decisions** module holds only the decisions that matter: hard to reverse, surprising without their context, and the result of a real trade-off. Routine choices belong elsewhere.
+
+**Numbers.** Each decision gets a number when you add it, such as **AD01**, and keeps it. Moving a decision up or down, or removing one, never renumbers the others, so a document or another decision that refers to "AD03" still means the same decision. A number that has been used is not given out again, even after its decision is removed. The prefix (the letters before the number) is the Definition's. If a later version of the Definition changes it, your decisions keep their numbers and take the new prefix the next time they are saved or printed.
+
+**Editing.** The Stage editor shows one card per decision, with **Add decision**, **↑**, **↓** and **Remove**. The card's fields depend on the Definition's decision style:
+
+- **Default.** Title, *Context*, *Decision*, *Why*, *Considered options* and *Consequences*.
+- **WH(Y)** (from [cgbarlow/adr](https://github.com/cgbarlow/adr)). Title, then the six parts of one sentence: *In the context of*, *Facing*, *We decided for*, *And neglected*, *To achieve* and *Accepting that*. Each decision can also have **links** to other Key decisions, each *Depends on*, *Supersedes* or *Relates to*, chosen from a list of the other decisions. WH(Y)'s governance details and Definition of Done are not part of Gantry's version.
+
+**In the Word document.** A default-style decision prints with its labelled parts. A WH(Y) decision prints as its one sentence — "In the context of …, facing …, we decided for … and neglected …, to achieve …, accepting that …." — with a line under it for each kind of link, such as "Depends on AD01, AD04." The sentence leaves out any part you left empty.
+
+**Checks.** *Check* warns, without stopping a Gate, about two decisions with the same number, a link to a decision that is not in the list, a decision linked to itself, a loop in *Depends on* or *Supersedes*, and links in a Definition that uses the default style (which has none). A decision you removed that others still link to is flagged the same way, and the link is left for you to fix.
+
+**Mounting it.** On a draft, **+ Mount…** offers Key decisions like the other standard modules, and its page has **Prefix** (1 to 6 capital letters, "KD" if you don't choose) and **Decision style** (*Default* or *WH(Y)*). In a Local Workspace's Definition editor they are under **Standard modules**. In `definition.yaml`:
+
+```yaml
+standard-modules:
+  - id: key-decisions
+    version: 1
+    prefix: AD        # 1 to 6 capital letters
+    style: why        # "default" or "why" (WH(Y))
+```
+
+Save, Publish and `gantry validate` refuse a prefix that isn't 1 to 6 capital letters and a style that isn't `default` or `why`. Prefix and style belong to Key decisions only; the other standard modules still refuse them. In the instance file the Field is ordinary text, one bold line per decision (`**AD01: Use PostgreSQL**`) followed by its labelled parts, so it reads well in a pull request; an AI agent writing over MCP can write the same text.
+
 ### Target size and word targets
 
 Some Definitions tell you roughly how much to write in each field. If yours does, every instance has a **Size**: **Small**, **Medium** or **Large**. Size is one of the instance's **Instance settings** (see **Instance settings** above). Medium is about half of Large, and Small about a fifth. The default is the Definition's, and Medium for a Definition that doesn't set one; an instance that never chooses a size works to it. Pick the size under **Instance settings** when you create the instance in the "+ New Workspace" wizard, and change it later under the same heading in **Instance Settings**. Choose it for the solution's risk and audience: a document reviewers need to read closely in one sitting wants a smaller size than a full reference.
@@ -182,9 +352,9 @@ Under each field with a word target, the editor shows the target for the instanc
 
 The target is advice, not a limit. You can always save a field that's over its target, it never stops a gate passing, and a document renders exactly what you wrote, at any size. Gantry never shortens your content for you. Changing the size changes the targets you see, not anything already written.
 
-An AI agent writing through the MCP server sees the same targets: `get_instance` gives each field's target for the instance's size, and when `update_instance_modules` saves a field that's over its target, the save still succeeds and its response carries a note such as `nfrs.performance: 420 words, Medium target ~150` so the agent can tighten it.
+An AI agent writing through the MCP server sees the same targets: `get_instance` gives each field's target for the instance's size, and when `update_instance_modules` saves a field that's over its target, the save still succeeds and its response carries a note such as `nfrs.performance: 420 words, Medium target ~150` so the agent can tighten it. The same response carries a `fieldNotes` list with that note and the other two per-Field checks (see **Gantry checks every draft** below).
 
-The `design` definition's v3 draft sets word targets on every field that appears in a document. Its Large targets match the bundled examples' original level of detail, and the examples are now written to Medium, so **Populate example text** shows the default amount. A Medium Solution Architecture Document comes to roughly half the length of a Large one.
+The `design` definition's v3 sets word targets on every field that appears in a document. Its Large targets match the bundled examples' original level of detail, and the examples are now written to Medium, so **Populate example text** shows the default amount. A Medium Solution Architecture Document comes to roughly half the length of a Large one.
 
 A Definition without word targets shows none of this: no Size in the wizard or Instance Settings, no Instance settings section on the Definitions page and no targets in the editor. For a Definition with word targets, the Definitions page's Instance settings section shows Size as offered because a number of fields declare word targets, with its three choices and its default (Medium, unless the Definition sets another; see **Editing a Definition's Instance settings** above). A Definition author sets a field's targets on the Definitions page (see *Definition versions and the Definitions page* above) or in the module's YAML as `target-words: { small: 40, medium: 100, large: 200 }`. Each must be a whole number above zero, all three sizes are needed, and only Markdown and list fields can have them. Anything else is a problem that `gantry validate` and a Local Workspace report, the Definitions page marks and Save and Publish refuse; a Definition an instance already uses keeps loading even if it has one.
 
@@ -203,6 +373,18 @@ The **Save** button saves every module on the stage that has changed, in one go;
 If you have unsaved changes and switch stage, switch instance, follow a link in the header or press the browser's Back button, Gantry asks whether to **Save**, **Discard** or **Cancel**. **Render**, **Advance to next stage** and **Request Sign-off** ask the same question first, so they always work from your latest content. Closing or refreshing the tab shows the browser's own warning. Changing the view mode or the Artefact selector doesn't count as leaving.
 
 On a Workspace-backed instance, on Azure DevOps, GitHub or GitLab alike, one Save is one commit on the stage's branch containing only the modules you changed. Saving doesn't re-render documents: they are rendered and committed only when you click **Render**, so render before requesting sign-off if the Pull Request should include up-to-date documents.
+
+#### When someone else has saved the stage meanwhile
+
+Two people can have the same stage open, and a Save never silently overwrites the other's work. When you open a stage Gantry notes what it contains (its *version*), and before every Save it checks again. If nothing has changed, your Save goes straight through. If someone else saved in the meantime, Gantry compares, Field by Field, what you started from, what is saved now and what you have:
+
+- **Only the other save changed a Field:** theirs is taken, and it appears in your editor.
+- **Only you changed a Field:** yours is kept.
+- **You both changed the same Field:** a dialog titled *Someone saved changes to this stage while you were editing* lists each such Field with the saved version beside yours. For each one choose **Keep theirs**, **Keep mine**, or **Edit instead** to write your own wording. **Save** stays greyed out until every Field has an answer, and **Cancel** saves nothing and leaves your edits in the editor.
+
+So two people editing different Fields (even in the same module) both save and neither loses anything. After a merge the Save button reads *Saved — merged with changes saved meanwhile*. Uploading an image or other file in the meantime never causes this: only a change to a Field's content does. This works the same on a local workspace, a server workspace, GitHub and Azure DevOps.
+
+An AI agent saving through the MCP server gets the same protection. `get_instance` returns the stage's `stageVersion`, and the agent hands it back to `update_instance_modules`. If you (or anyone) saved the stage after the agent read it, nothing is saved: the agent is told which of the Fields in its call are saved differently now, and is expected to read the stage again and settle the difference with you before saving. An agent that sends no version, as agents written before this check do, still saves as it always did, but the response lists every Field the save overwrote, so you can see what it replaced. Writing the version is strongly preferred, and it will be required once an agent runs a whole interview session.
 
 ### Visual, Split and Markdown views
 
@@ -309,7 +491,7 @@ Use the **Render** button in the view-mode bar to open the Render dialog. It lis
 
 ![Render dialog showing selectable artefacts for the current stage](/user-guide-images/render-dialog.png)
 
-Toggle the artefacts you want, then press **Render**. Gantry renders each selected artefact in sequence and reports the output path (and, for Workspace-backed instances, the Provider URL) in the dialog. For a Workspace-backed instance the rendered `.docx` is pushed to `gantry-workspace/<instance>/out/` in the repository; for a local instance it appears under `instances/<slug>/out/`; for a Local-workspace instance it is written straight into that same `gantry-workspace/<instance>/out/` path, but inside your own folder rather than a repository.
+Toggle the artefacts you want, then press **Render**. Gantry renders each selected artefact in sequence and reports the output path (and, for Workspace-backed instances, the Provider URL) in the dialog. For a Workspace-backed instance the rendered `.docx` is pushed to `gantry-workspace/<instance>/out/` in the repository; for a server-workspace instance it downloads to your browser; for a Local-workspace instance it is written straight into that same `gantry-workspace/<instance>/out/` path, but inside your own folder rather than a repository.
 
 ### Document Control and Review & sign-off tables
 
@@ -390,6 +572,15 @@ When the gate hasn't passed, the message you see (from **Check**, **Advance to n
 
 If every artefact at a stage's gate is set not to count, the gate can never pass. That is a problem: `gantry validate` and a Local Workspace report it, the Definitions page marks the stage, and it blocks Save and Publish. A Definition an existing instance already uses keeps loading even if it has one. A stage with no artefacts at all isn't flagged.
 
+### What a Word document remembers about where it came from
+
+Every Word document Gantry renders is quietly labelled, so that comments someone makes on it can later be traced back to the right place. You will not see anything in the document itself: it looks exactly as it did before.
+
+- **Custom properties.** In Word, open **File > Info > Properties > Advanced Properties > Custom**. The `gantry-*` entries name the instance, the artefact, the stage, the Definition version (for example `design@3`), the commit the content was at and a render id. The render id is different every time you render. Renders of a server workspace have no commit, so they have no `gantry-commit` entry.
+- **Bookmarks.** Each field that is printed in the document is wrapped in a Word bookmark named `gf_` and eight letters and digits. Word hides bookmarks unless you turn on **File > Options > Advanced > Show bookmarks**. A field printed twice gets `_2` on its second copy.
+
+Nothing in your Definition or its templates has to change, and the exported Markdown (`.md`) file is not labelled. Word's Document Inspector, copying the text into a new document, or printing to PDF removes the labels.
+
 ### How a rendered document gets its name
 
 By default a rendered document is named `<Instance name> - <Artefact title>` — for example `Senior Platform Engineer - Offer Pack.docx`. That's fine while the document stays inside its instance folder, but once it's downloaded, emailed or filed alongside documents from other systems, a name built only from the instance and the artefact stops telling anyone what's actually in it.
@@ -405,7 +596,7 @@ A couple of things worth knowing if a filename looks different from what you exp
 
 A gate passing permits the next action; it does not advance an Instance by itself.
 
-For a local Instance, such as a local run of the `design` Definition, use **Advance to next stage** once the current gate has passed. Clicking it re-checks the gate and, if it passes, opens a confirmation dialog — confirm to move the Instance on to its next Stage, or decline to leave it where it is. A local Instance with a linked work item also keeps a separate **Check gate & sync work item** button, which re-checks the current gate and, if it passes, offers to push a state update to that work item. A Local-workspace Instance (see **Local workspaces** above) works the same way but has no linked work item and so no separate check button — **Advance to next stage** is the only action needed.
+For an Instance in a server workspace (see **Server workspaces** above), such as a run of the `design` Definition kept on the Gantry server, use **Advance to next stage** once the current gate has passed. Clicking it re-checks the gate and, if it passes, opens a confirmation dialog — confirm to move the Instance on to its next Stage, or decline to leave it where it is. An Instance in a Local workspace (see **Local workspaces** above) works the same way. Neither has a linked work item, so there is no separate check button — **Advance to next stage** is the only action needed.
 
 For a Workspace-backed Instance, such as a `design` initiative stored on Azure DevOps, GitHub or GitLab, everything to do with review and sign-off happens in the **Work Item Detail card** at the top of the Stage screen. There is no separate section further down the page. The card behaves the same way whichever Provider the workspace uses; the differences in what each Provider shows you are called out where they arise below.
 
@@ -421,6 +612,17 @@ The card's header holds **Show files** (when a workspace is linked), **Show comm
 
 One **Check status** button at the top of the card refreshes everything in a single click: the linked and parent work items, every review request for the Stage, and the sign-off Pull Request. For a Workspace-backed Instance the same click then runs the gate-check-and-sync step — if the current Stage's gate passes and a work item is linked, Gantry offers to push a state update to it. When the sign-off Pull Request has been approved, this is also the click that merges it, advances the Instance and updates the linked work item.
 
+Check status only merges and advances the Instance's current Stage. If a later Stage's Pull Request has been approved while an earlier Stage is still waiting, nothing is merged or advanced, and the card says so: *Stage "…" is approved but waits for the earlier stage "…", the instance's current stage. Nothing was merged or advanced.* Approve the earlier Stage, use **Check status** to merge it, and check the later one again. If the Stage is already behind the current one, the message says that instead. In the `check_status` tool this appears as `merged: false` with a `waitingForStage` field naming the Stage it waits for.
+
+### When the Pull Request was merged on the Provider
+
+Sometimes the sign-off Pull Request is merged on the Provider itself, by the Owner or someone else, before anyone presses **Check status**. Gantry has not recorded that approval, so the Instance still sits on the Stage. When you open that Stage, a notice says so: *Approval merged, not recorded yet.* Gantry only looks; opening the page never records anything, because approval is recorded only when you ask. The notice offers two buttons, each one step:
+
+- **Record approval and move on to …** records the approval and moves the Instance to the next Stage, exactly as Check status does for a merged Pull Request. On the final Stage the button just says **Record approval**.
+- **Record approval and re-open for changes** records the approval, then re-opens the Stage straight away with a fresh branch from `main`, so late review comments can be handled without first moving on and walking back. The approval history is kept.
+
+Re-open follows the usual rule: it is not offered while a later Stage already has a branch of its own, including one drafted ahead by the AI, or while this Stage's own branch is still on the Provider (delete it there once the merge is done). In those cases the button is shown disabled with the reason beside it, and **Record approval and move on** is still there. Neither button works unless the Pull Request really is merged.
+
 ### Reviews
 
 Use **Request Review** in the Reviews section header to ask one or more people to look at the Stage before sign-off. Each request is tracked as its own work item — on Azure DevOps that's a work item per reviewer, and on GitHub and GitLab alike it's an issue per reviewer, even though a GitHub or GitLab issue could technically take several assignees at once: keeping one issue per reviewer is what lets Gantry show "Ana approved, Sam wants changes" as two separate statuses rather than one ambiguous one. Each request shows the reviewer's name. Reviews refresh from the card's **Check status** button, not per row. Once a Stage has more than two reviews, Gantry groups them by outcome — pending, changes requested and approved — so it is easy to see what still needs attention.
@@ -435,21 +637,412 @@ On GitHub specifically: an **Approved** or **Changes requested** review maps dir
 
 On GitLab specifically: GitLab's Merge Requests have no separate "changes requested" review verb on Free/CE, only an Approve/unapprove toggle kept apart from discussion-thread resolution — Gantry reads *not approved with an unresolved discussion thread* as the changes-requested equivalent, and *not approved with no unresolved thread* as still pending, the same way an absent review does. On a GitLab Premium/Ultimate project with enforced Approval Rules configured, Gantry honours those instead; elsewhere it falls back to the toggle-plus-threads reading above. As with GitHub, a merge that GitLab's own branch protection or a required approval refuses is reported to you exactly as GitLab gave it, not retried with a different method.
 
+**Stages are signed off in order.** Sign-off always acts on the Instance's current Stage, the one it is up to on `main`. A later Stage can be started while an earlier one waits for its Owner, but it cannot be sent for sign-off until the earlier Stage has been approved and merged. If you try, from Gantry, from the `request_approval` tool in an AI assistant, or by any other route, the request is refused and no Pull Request is opened. The message names the current Stage, for example *the instance's current stage is "SOAP" (stage "shape"), and stages are approved in order — approve it first*. Approve that Stage first, then request sign-off for the next one. A Stage that is already behind the current one is refused too, with a message saying so.
+
+A later Stage that you start before the earlier one is approved builds on the earlier Stage's branch, or on the nearest earlier Stage that has one if some Stages in between have no branch of their own. It therefore carries the earlier Stage's work, but that work reaches `main` only when the earlier Stage's own Pull Request is approved.
+
 The linked work item is a tracking surface, not the approval mechanism. The Pull Request is what gates a Workspace-backed Stage, and there is no separate in-app Request Approval button — the sign-off flow is the approval mechanism.
+
+### Changed since approval
+
+A Stage is approved when its Pull Request is merged. Later Stages can still change what it said, because Modules are shared: a Module mounted at SOAP and again at High-level Design can be edited from either. When a later Stage changes a Field that an earlier approved Stage's Artefacts print, that earlier Stage is flagged **Changed since approval**. Only Fields the earlier Stage's Artefacts print count; a Field that only a later Artefact prints can grow freely without raising the flag. Every earlier approved Stage is checked, not just the one before, and a change that landed on `main` without anyone re-approving it is flagged the same way, including on an Instance approved before this check existed.
+
+The flag shows in five places:
+
+- **The Stage tab.** The earlier Stage's tab in the Stage navigation carries a **Changed since approval** marker.
+- **The Stage status.** A line under the Stage heading names each flagged Stage and how many Fields changed, for example *SOAP: 2 Fields*.
+- **The Request approval panel.** The Sign-off section of the Work Item Detail card reads, for example, *also re-approves SOAP: 2 Fields*, so you know what a sign-off request is taking on before you make it.
+- **The dashboard.** The Instance's row shows a **Changed since approval** badge.
+- **MCP.** The `check_status` tool returns the same list as `changedSinceApproval`, each entry giving the Stage, the Pull Request that approved it and the Fields that changed.
+
+Local and server workspaces never show it: they have no Pull Request approval to have changed since.
+
+#### Restore approved text
+
+When you are on the current Stage, a **Changed since approval** panel at the top of the editor lists every flagged Field, grouped by the Stage it was approved on. Each Field shows its **Approved text** and its **Current text** side by side, so you can see exactly what changed. A list Field shows its items one per line.
+
+Click **Restore approved text** on a Field to put the approved wording back. Gantry fills the Field in your editor and saves it, as an ordinary Save on the current Stage's branch, so it goes through the same Save check as any other Save: if a colleague saved meanwhile, your changes are merged Field by Field, and a dialog asks only when you both changed this same Field. Restoring replaces whatever the Field says now, and any other changes you have not saved are saved along with it.
+
+The flag clears as soon as no flagged Field differs from its approved text; the Stage tab, the status line, the Request approval line and the dashboard badge all update. If you would rather keep the change, leave the Field alone: the current Stage's approval then re-approves the earlier Stage.
+
+If the current Stage does not show the Module a flagged Field belongs to, or shows it read-only, the panel still shows both texts but cannot restore from here.
+
+#### Re-approval by the later Stage
+
+![A Stage tab flagged Changed since approval, and the Request approval panel naming the second reviewer](/user-guide-images/changed-since-approval.png)
+
+You don't re-open the earlier Stage to fix this. The later Stage's own approval re-approves it, so a passed gate still means the right person signed off. When you **Request Sign-off** on a Stage that changed an earlier Stage's printed Fields:
+
+- **The Pull Request lists the Fields.** Its description names each earlier Stage it also re-approves and the Fields that changed, by Module and Field title, and the Sign-off section says who is needed, for example *Needs SOAP Owner to approve SOAP: 2 Fields*.
+- **A second reviewer is added.** The person who approved the earlier Stage's own Pull Request is added to this one as an extra required reviewer, alongside this Stage's Required reviewer. Gantry keeps one Required reviewer per Instance, so it reads the earlier approver off that earlier Pull Request, which also works for an Instance approved before this rule existed. If it is the same person as this Stage's reviewer, one vote covers both.
+- **Check status waits for both votes.** It won't merge until each of them has approved. While one hasn't, Check status says *Still waiting — Pull Request #7 needs SOAP Owner, whose approval re-approves SOAP, before it can merge*, and an approval from anyone else doesn't stand in. If the earlier Stage's reviewer asks for changes, the Stage waits for that too: either they approve once you've addressed it, or you use **Restore approved text** to put the wording back and ask again.
+- **The merge records it.** Once the Pull Request merges, the earlier Stage keeps its original approval and gains a re-approval entry. Open the earlier Stage's tab and a **Re-approved by a later Stage** note lists, for each one, which Stage did it, which Pull Request, which Fields, who approved it and when. Its **Changed since approval** flag clears, because its approved content is now what that merge approved. Only an edit made after the merge flags it again.
+- **A linked work item is told.** The earlier Stage's work item gets a comment saying it was re-approved (Azure DevOps History, or a comment on the GitHub or GitLab issue), the same way a re-open leaves one.
+
+This applies to Azure DevOps, GitHub and GitLab Workspaces. A Pull Request that changes nothing an earlier Stage prints re-approves nothing, and looks exactly as it did before.
+
+#### Re-rendering before re-approval
+
+When you request sign-off for the current Stage, that sign-off also re-approves every flagged earlier Stage. Gantry refuses **Request Sign-off** until each document of the earlier Stage that prints a changed Field has been re-rendered on the current Stage's branch. Otherwise the approved Word documents on `main` would stop matching the content they were approved on. The refusal names each document, for example *Solution on a Page (SOAP, 1 Field changed)*, and offers **Render onto this stage** beside it. Documents that print none of the changed Fields, and documents the earlier Stage never rendered, are not asked for.
+
+Rendering an earlier Stage's document onto the current Stage does two things:
+
+- **The approved copy is kept.** The document as it was approved moves to `out/approved/`, with its approval date in the name, for example `SOAP — approved 2026-10-12.docx`. It stays on the branch and, once the Pull Request merges, on `main`.
+- **The new render takes the usual name.** The file in `out/` with the usual name always means the currently approved version, and the files in `out/approved/` are the earlier ones.
+
+If a Field the document prints changes again after you render it, it has to be rendered again before you can request sign-off. The render uses the Gantry server's own Pandoc. With MCP, `request_approval` returns the same list as `reRenderRequired`, and the `rerender_earlier_artefact` tool does the render.
 
 ### Review and sign-off status
 
 Each review and sign-off item carries a Gantry status — Requested, In review, Changes requested, Approved or Rejected. On Azure DevOps this is kept separate from the native work item state, which continues to drive the board — if a project has not been set up with the custom status field, Gantry falls back to reading the native state instead, so the card still shows a sensible status. On GitHub and GitLab alike, the same five-value status is what the `gantry:review/<status>` label above carries, read straight from the issue.
 
+### Bringing in review comments
+
+When someone comments on a Word document Gantry rendered and sends it back, bring that **Reviewed copy** into the Instance so the comments sit with the work. The whole flow is five steps: **bring it in**, **read the comments**, **work through them**, **send back a Review response list**, and **render again**. The first two work without any AI; the third uses the AI interview (see **Working through review comments** under **The AI interview**).
+
+Gantry never writes into the Reviewed copy and never replies to the people who commented. The answer goes back to them from you, in a document you download.
+
+- **Bring it in.** Click **Bring in review comments** in the editor header, choose one or more `.docx` files (several copies of the same render can come in at once) and click **Bring in**. Gantry reads each file in your browser first and tells you what it found: how many comment threads and tracked changes, and who made them.
+- **Only Gantry's own renders are accepted.** A document that carries no `gantry-*` properties was not rendered by Gantry; it is refused and you are told to upload it as a Source document instead. A document rendered from another Instance (or an Artefact this Instance does not have) is refused too, and the message names where it came from. If you choose several files and one is refused, the others can still be brought in; the refused one is simply left out.
+- **Where it is kept.** Each copy is saved with the Instance under `reviews/`, with a list in `reviews/manifest.yaml` (an id that never changes, the Artefact, the Stage, the render id and commit, the commenters, the date, and how many comments have been answered). For a Workspace-backed Instance one upload is one commit on the current Stage's branch, whichever Provider; a server workspace and a Local workspace save straight into the Instance's folder. One upload can hold up to 25 MB in all. A Reviewed copy is a record of what came back: it is never cited, and Gantry never changes it or replies to the people who commented.
+- **Reading the comments.** The editor's **Review comments** panel lists each copy's threads grouped by the Field they sit on, read-only: the text the comment was on, the comment and its replies, whether the thread was resolved in Word, and any tracked insertions and deletions. A comment that runs across several Fields is listed on the first and says which others it reaches. A comment on a template heading is listed on the Field under it. Comments on the cover page, Document Control or the table of contents, which Gantry supplies, are grouped as **About the document**; any that cannot be matched to a Field are grouped as **Couldn't be placed**.
+- **When the bookmarks are lost.** Google Docs renames every bookmark when it exports. Gantry then places each comment by matching its text against the content the document was rendered from (rebuilt from the commit for a Workspace-backed Instance; today's content for a server workspace or a Local workspace, which keep no history) and says so in a notice above the copy. A match on wording that more than one Field holds, or only loosely, is marked **Best guess**.
+- **Who can bring one in.** You need the same access as for any other change to the Instance, and an archived Instance cannot take one.
+- **Working through them.** **Work through these with the AI** on the Review comments panel (and **Work through review comments** on the Interview page) turns the comments into question cards, one for each thread (see **Working through review comments** under **The AI interview**). For each comment you accept the edit, have the AI revise the Field, keep it as it is (with your reason in your own words), or say you can't settle it yet. Saving the round writes each answer to the Stage's decisions log.
+- **The Review response list.** Once comments have been answered, **Download Review response list** (on the Review comments panel, in the Interview page's rail and on the card that appears after the round is saved) gives you a Word document to send back. It has one table for each Reviewed copy with a row for every answered comment: the comment (and any replies or tracked change, word for word), who made it, the Field it was on, the outcome (*Edit accepted*, *Wording revised*, *Kept as it was*, *Not settled yet*, *Noted*, and so on) and your reason, in your own words as you typed them (left as a dash when you gave none). It is made from the decisions log each time you ask, so it is always up to date, and it is ordinary Word, so you can edit the wording before you send it. If you revised a Field but then kept what was saved, the list says the wording stayed as it was rather than claiming it changed. Nothing is saved for it: it is not written into the Reviewed copy, not added to the Instance's files and not committed.
+- **Render again.** A Save never renders the Word documents (see **Rendering**), so after the round is saved the card tells you to **render again** when you want the commenters to see the changes. That stays a button you press; Gantry does not do it for you.
+
 ### Commit history
 
 Use **Show commit history** in the card header to open a dialog listing the commits on the current Stage's branch. This works before a Pull Request exists, so you can see what has been committed to the Stage while it is still in progress.
+
+## The AI interview
+
+The **AI interview** is a way to draft a Stage with an AI. You give an Instance its **Source documents** (a client brief, requirements, meeting notes), connect an **AI Provider**, and open the **Interview page**. The AI reads the documents, drafts every Field they support into a live preview, and talks it through with you. Nothing is saved until you confirm the Stage, and the AI never marks a Module `agreed` or passes a Gate that needs approval or review: those stay with people.
+
+This release covers a **Local**, **Server-hosted**, **Azure DevOps** or **GitHub** workspace, starting from its **current Stage**. GitLab and Atlassian workspaces don't have it yet (they take it when saving Modules there arrives), and neither does a Stage the Instance has already moved past; **✦ AI interview** is greyed out there and its tooltip says why. On an Azure DevOps or GitHub workspace it also works on a Stage after the current one, which is how it drafts ahead (see **Drafting ahead**). The one exception to "the current Stage" is **Bring up to date** (see **Bringing drafts up to date**), which on a Local or Server-hosted workspace also works on an earlier Stage. On an Azure DevOps or GitHub workspace a Stage moves on only when its Pull Request is approved, so the session asks for approval and waits for the Owner (see **Approvals in a session**). The AI asks you **question cards** in rounds (see below). Every Save also commits the Stage's **decisions log** (see below). One interview can carry on across several Stages with **Run until** (see **Running until a later Stage**). **Pause** saves your place so you can carry on later, in any browser (see **Pausing and resuming**).
+
+### Before you start
+
+- **Add Source documents** to the Instance (see **Source documents** above). You can also add them from the Interview page itself, under **Source documents** in the left rail with **+ Add Source document**. The AI works from their text, so a Word file, a PDF with a text layer or a Markdown file is read. A picture or a scanned PDF has no text: it is sent to the AI as it is if the AI Provider can read it, and listed as unreadable if not (see **How the AI reads your Source documents**).
+- **Connect an AI Provider** under **AI Providers** on Global Settings (see **AI Providers** above), or with **Connect an AI Provider** on the Interview page's kickoff, which opens the same dialog. An AI Provider belongs to your browser, so you set it up again in another browser.
+
+### Opening the page
+
+Choose **✦ AI interview** in the Instance editor's header. If the editor has changes you haven't saved, Gantry asks whether to save them or discard them first, because the AI reads what is *saved*. The page has three columns:
+
+- **Left rail.** The Source documents, and **+ Add Source document** (or drop a file on it). Gantry reads the text out of the file in your browser, as it does in the editor.
+- **Centre.** The conversation. The **chat box is pinned at the bottom**; it is greyed out until the interview starts.
+- **Right.** The **live draft** of the Stage's Modules. Saved content is shown as it is; the AI's drafts are marked **AI draft · unsaved**.
+
+**← Editor** takes you back to the editor, and **✦ AI interview** brings you back to the same conversation and drafts for as long as the Instance stays open. Closing or reloading the tab doesn't lose them either: Gantry keeps a working copy in this browser (see **Pausing and resuming**), and warns you first if you have unsaved drafts.
+
+### Kickoff
+
+Before the AI says anything, the centre column shows a short form:
+
+- **AI Provider.** The Default one is pre-selected. If you have none, the form says so and **Connect an AI Provider** opens the settings dialog. An AI Provider that hasn't been tested is **tested when you press Start** (the key, the model and the other checks from **Test connection**); if the test fails, the form shows why and nothing starts.
+- **How the AI will ask.** The form says whether this model asks **natively** (with a tool, so every question is a card), in **text** (the *text fallback*: a model that can't use tools writes its questions and drafts in a block Gantry reads), or in **plain chat** (a model that can do neither; you answer in the chat box). Gantry tries them in that order and never refuses a model. The text fallback and plain chat work, but are less reliable. If a model keeps sending cards Gantry can't use, the interview carries on in plain chat and says so.
+- **Artefact to aim for.** When more than one Artefact can pass this Stage's Gate (for example *SOAP* and *SOAP (full)*), you choose which one the AI works towards. The **lightest** one, the one that requires the least, is pre-selected.
+- **Run until.** The Stage the interview is to carry on to. It offers this Stage and every later one, and starts on this Stage only (see **Running until a later Stage**).
+- **Source documents.** How many the AI will read, and a hint if there are none.
+- **Out of date Fields and New documents.** When Fields on this Stage are flagged Out of date, the form says the interview starts with a round of cards about them; when documents are **New since last interview**, it says the AI reads them against what is saved (see **Bringing drafts up to date**).
+- **A warning for documents this model can't read.** If the chosen AI Provider can't read a picture, or a scanned PDF, the form lists them before you start, so you can choose another AI Provider or carry on without them.
+- **Start interview.**
+
+### Drafting
+
+The AI opens with a short summary of what it found in the Source documents, then **drafts every Field they support**. You see each draft appear in the right-hand preview as the AI writes it.
+
+- **Read-only Modules are left out.** They are context for the AI, not something it writes.
+- **Optional Fields** are drafted only when the documents support them.
+- **Saved content changes only through a card.** The AI drafts into Fields that are empty. A Field that already holds content, whoever wrote it, is never overwritten: if the AI would change it, you get a **Keep / Use the AI's version / Merge** card (see below). Content saved at an earlier Stage is extended to this Stage's depth, never rewritten.
+- **Where a fact comes from.** A figure from a Source document is cited as `[title, p. 4](source:id)`, shown as a small 📄 mark. A fact you told the AI in the chat is written as plain fact. Something the AI proposed that you accepted is marked **(target assumption)**. The AI is told never to invent a figure, a date or a name.
+- **Nothing the example shows is sent.** The example Instance a Definition may offer (the "Populate example text" source) is for people to fill a form from; it is never given to the AI.
+
+#### Gantry checks every draft
+
+The AI writes each Field through a *draft field step*, and Gantry checks the draft before it reaches the preview:
+
+- a **select** value must be one of the Field's options;
+- the **word count** must be within the Field's budget at the Instance's Target size (see **Target size and word targets**);
+- every **figure** must be cited with a Source document or marked **(target assumption)**, unless you typed that figure yourself in the chat. A citation to a document that isn't in the Instance is also a problem.
+
+If a draft has a problem, Gantry sends it back to the AI **once**, saying what to fix. If it is still wrong, or the AI doesn't answer, the draft still appears in the preview, with the problem shown as a **warning** under the Field. A check never blocks anything: you decide.
+
+An outside agent writing through the MCP server is held to the same three checks on **every** content write, whether or not it is running an interview. When `update_instance_modules` saves a Field with a select value that isn't exactly one of the options, a word count over the budget, or a figure with no source, the save still succeeds and the response carries a note for each problem under `fieldNotes`, naming the Field and saying how to fix it. A clean write returns an empty list. The checks are the same code the draft step uses, so the two never disagree. An outside agent can't tell which figures you typed yourself, so it may be noted for one; tell it where the figure came from and mark it **(target assumption)** or cite the Source document.
+
+#### An outside agent reads your Source documents, decisions logs and Reviewed copies
+
+An outside agent such as Claude Code, working through the Gantry MCP server, can do with your Source documents, decisions logs and Reviewed copies what you can do in the web app, so it drafts from the same evidence and doesn't make figures up. Who can reach an Instance over MCP doesn't change: these are files in the same repository, read with the same Workspace PAT.
+
+- **Reading.** The agent can list your Source documents (with which are replaced or removed) and read any of them: the extracted text Gantry kept, a page at a time (a PDF by its own page numbers, anything else in sections of about 20,000 characters), or a picture as a picture. It can read each Stage's decisions log, and each Reviewed copy's comment threads and tracked changes, grouped by the Field they sit on, the way the editor's **Review comments** panel shows them.
+- **Uploading.** The agent can add a Source document or bring in a Reviewed copy under exactly your rules: 25 MB, the same file types, one commit on the current Stage's branch on an Azure DevOps or GitHub workspace, an optional "this replaces" link, and the same manifest entry. A document that carries no `gantry-*` properties is refused as a Reviewed copy with the same message you get in the browser. An agent has no browser to read a document in, so **Gantry's server reads the text** with the same reader your browser uses (for a Word document's comments, Gantry's own reader), and the text and manifest entry come out the same as if you had uploaded the file. Nothing is sent to the server that was meant to stay on your computer, because the MCP server can't reach a Local workspace.
+- **Out of date Fields.** `get_instance` lists the Fields that are Out of date, with the reason for each, so the agent can tell you what changed and keep or redraft them on your word (see **Using an outside agent**).
+- **Decisions logs over MCP** can be read on Server-hosted, Azure DevOps and GitHub workspaces. A GitLab or Atlassian workspace answers that its log is not kept yet.
+
+### Using an outside agent
+
+You can run the interview with an **outside agent** instead of Gantry's own AI: Claude Code, say, working through the Gantry MCP server. It uses its own model and its own chat, so it needs no AI Provider here, and it is held to the same rules Gantry's own AI is. A session can move between the two: start in the browser and carry on with an agent, or the reverse.
+
+- **The same brief.** The agent asks Gantry for the **interview brief** of a Stage and gets exactly what the in-app AI gets: Gantry's interview rules, the grilling and domain-modeling skills, the Definition's Interview instructions, the Stage's purpose, each Field's guidance, budget and options, the saved content, the preferred terms, your Source documents and the decisions log so far. It also gets a **recap** of the Stage's log. Question cards are web-only, so the agent asks its questions in its own chat, a round at a time, with its recommendation, a one-line reason and the Source document it rests on.
+- **A session over MCP.** The agent can **start**, **pause** and **resume** a "run until Stage X" session. Nothing is saved while you talk. When you confirm the stage summary, or ask the agent to pause, it saves **once**: the content, the answers it recorded and the session's status go in **one commit**, never a commit per answer. The agent has to pass the Stage version it read, so it can never overwrite a colleague's changes unseen; a save in a session without one is refused.
+- **Moving between the browser and an agent.** A paused session, whoever paused it, carries on from the last commit. Whichever side resumes runs **Check status** once (on a workspace with Pull Requests) and recaps from the decisions log, and the **committed log wins** over anything either side remembers. If you resume in the browser you see the same recap (*Resuming Shape: 14 decisions, 2 open questions...*) as when you resume your own session.
+- **What the log says about an agent.** Every entry an agent records has the same shape and the same append-only rules as the rest of the log, and is stamped **recorded by an outside agent**: an agent's account of what you said can't be checked against what you typed, so the label tells a reader whose account it is. The Decisions log panel and the Pull Request diff show it. The session's status names *outside agent* and the model the agent reports, with tokens **not reported**. Gantry rebuilds the log's *Fields* record from the content's `source:` citations and from the entries that name each Field, so a Field the agent drafted from a Source document is flagged **Out of date** when that document changes, the same as one Gantry's AI drafted. When an agent keeps or redrafts an Out of date Field on your word, it records that with a labelled entry.
+- **Held to the in-app AI's rules.** While it is in a session, Gantry itself refuses (with the reason Gantry's AI is given) what the in-app AI is not allowed to do: an agent **never passes a Gate** (on a workspace with Pull Requests it requests approval and waits for the Owner; on a local or server workspace it advances only after you confirmed the stage summary and chose to carry on); it requests **approvals strictly in Stage order**; and it **doesn't write a Module** that an earlier Stage with an open Pull Request also mounts. An agent that isn't in a session is treated like a person in the web app, and nothing new is refused.
+- **After a review round.** The agent reads a Reviewed copy's comment threads, records an outcome for each thread (the same outcomes as the Review comments round) and can fetch the **Review response list** as a Word document. Gantry never writes into the Reviewed copy or replies to the people who commented.
+- **What stays in the browser.** AI Provider settings: an outside agent is its own AI. The definition tools for Interview instructions and standard modules are the existing Definition tools.
+
+Who can reach an Instance over MCP doesn't change: the Source documents, logs and Reviewed copies are files in the same repository, read with the same Workspace PAT. See the MCP server's README for the tools.
+
+### How the AI reads your Source documents
+
+Gantry decides how each Source document reaches the AI, for the AI Provider you are using. You never have to choose, except to mark a PDF **Read visually**.
+
+- **A pack that fits is sent whole.** While the extracted text of all the documents comes to no more than about half of the model's context window, the AI is given every document in full.
+- **A pack that doesn't fit becomes a catalogue.** Past that, the AI is given a *catalogue* instead: each document's id, title, kind, size, page count and outline, and none of its text. It also gets a `read_source_document` tool, and reads the parts it needs by document id and range: pages (`pages 3-5`), a section by its heading (`section: Scope`), or character offsets (`0-20000`). One read returns at most 30,000 characters and says where to carry on. This is also how a small local model with a short window can take part. A model that doesn't use tools asks for a read in text instead (the text fallback), so no model is refused.
+- **Reads are recorded.** Each read shows in the conversation (*Read Client brief (section "Scope")*) and is recorded as an **input** of the Fields the AI then drafts, together with the documents the draft cites. The Interview page shows them under **Decisions log · inputs** in the left rail, and as *Drew on: …* under each drafted Field, and the decisions log keeps them (see **The decisions log**). Each input carries a fingerprint of the text the AI saw, so a document that changes later can be told apart. (Committing the log with the Stage Save arrives with the decisions log.)
+- **PDFs are sent as text by default.** That is far cheaper than sending the PDF, and works with every AI Provider.
+- **A PDF is sent as the PDF itself** only when its text is empty (a scan) or you marked it **Read visually**, *and* the AI Provider takes PDFs: Anthropic, OpenAI, and OpenRouter (with a model that reads images; Gantry then tells OpenRouter to hand the PDF straight to the model, so no separate OCR charge appears on your OpenRouter account). Where the AI Provider doesn't take PDFs, a PDF marked Read visually falls back to its text, and says so in the conversation; a scan with no text is listed as unreadable.
+- **Pictures are sent as they are** (PNG, JPEG, GIF, WebP) to a model whose **Test connection** found it **reads images**. A text-only model is told the picture is unreadable and won't rely on it. A picture over 5 MB is not sent, and neither is any original once all the originals together would pass 15 MB; both are listed as unreadable with the reason.
+- **Unreadable is said, not hidden.** The kickoff form warns before you start, the conversation says it once when the interview starts (and again if you switch to an AI Provider with different abilities), and the AI is told which documents it can't see so that it asks you instead of guessing.
+
+### Question cards and rounds
+
+After drafting, the AI asks you what it needs as **question cards**. The questions come in **rounds**: a round holds every question whose prerequisites are already settled, and a question that depends on another is held back until you have answered that one (then it appears by itself). Within a round the cards are sorted: first those about Fields the Gate requires, then Source documents that disagree, then facts that are missing, then optional Fields. Cards show **four at a time** with **Back** and **Next**, and the round is **submitted together** with **Submit**. When you submit, the AI redrafts the Fields your answers feed.
+
+Each card has:
+
+- a **header chip** naming the topic, the Field your answer feeds, and "choose any" when you may pick several;
+- the **question**, and **option tiles** with the AI's recommendation already selected and badged **RECOMMENDED**;
+- a one-line **Why I recommend it**, with the Source document and the page or slide it rests on;
+- an **Other** tile, added by Gantry, which opens a text box for your own words. What you type there is your own fact, so a figure in it needs no source.
+
+A card about a **select** Field shows exactly the options the Definition allows, with no Other: if none of them fits, say so in the chat box and the AI logs it as an open question rather than inventing an option.
+
+The cards stay on screen while you read the preview, and you can type in the chat box too. If you type while cards are open, the cards are put away and the AI answers what you wrote; it asks again if it still needs them.
+
+#### Settling words, Key decisions and open questions
+
+The AI also uses the cards to settle three things that every Definition has in common. Where they land depends on which of Gantry's **standard modules** (Glossary, Key decisions, Open questions) the Definition mounted on the Stage you are interviewing.
+
+- **Preferred terms.** When two Source documents name one thing differently ("claim" in the brief, "case" in the minutes), or when your own wording is fuzzy or clashes with the Glossary, the AI asks a **term card** (chip **Preferred term**). Each name is an option and the card says in a line what the thing is. The one you choose is the **preferred term**; the other names become names to avoid. Choose **Other** to give your own name. Your choice is logged as a **term choice** and **binds every later Stage**: the AI is told to use it everywhere, and each later Stage is given the choices of the Stages before it. Where the **Glossary** is mounted on the Stage, the AI drafts it from your choices (a row for each: *Preferred term | Definition | Avoid*) rather than writing terms in as they come up, and Gantry sends back a draft that leaves one out. Where the Glossary is not mounted, the choice stays in the decisions log only.
+- **Key decisions.** Where **Key decisions** is mounted, the AI offers a **Key decision card** (chip **Key decision**) only for a decision that is hard to reverse, surprising without its context, and a real trade-off. The card lists the three reasons. A routine answer is an ordinary card, and the AI is not allowed to dress one up: a card that does not give all three reasons is shown as an ordinary question. The AI drafts a decision you confirm into the Key decisions Field as the next number (for example AD04), in the Definition's prefix and style (default or WH(Y)), keeping every saved decision's number; Gantry checks the draft's prefix, parts and links. The decisions log still records every answer, Key decision or not. Where Key decisions is not mounted, nothing is offered as a Key decision.
+- **Open questions.** A question you cannot answer yet is logged as an open question. Where **Open questions** is mounted, the AI drafts every open question in the log into it, one row each (*Question | Who resolves | By when | Status*), including any left open at an earlier Stage, and Gantry sends back a draft that has fewer rows than there are open questions. The AI never invents who resolves a question or by when. Where it is not mounted, the question stays in the decisions log only.
+
+The AI also stress-tests how things relate to each other with **scenarios**: a concrete edge case, built only from what the documents and you have said and marked as hypothetical, asked as a card whose options are the possible outcomes.
+
+#### Keep, use the AI's version, or merge
+
+If the AI would change a Field that already holds content, nothing in the preview changes until you decide. A card shows the saved text beside the AI's version and offers:
+
+- **Keep**: the saved text stays exactly as it is, and the AI is told not to propose a change to it again. This is the recommended choice;
+- **Use the AI's version**: the AI's text replaces it in the preview (it is written only when you save the Stage), and the AI may then revise it;
+- **Merge**: the AI writes one version that keeps what is good in both.
+
+#### Editing a draft by hand
+
+Click a drafted Field in the preview (or its **Edit** button) to edit it in place. A text Field opens a text box showing the Markdown as it will be stored, a list opens one item per line, a select offers its options and a date opens a date picker. **Done** keeps your edit and **Cancel** drops it. The Interview page is the only place to edit a draft: the Instance editor shows **saved content only**, and a Module that has unsaved AI drafts carries a banner there, *"edit them on the Interview page"*, with a link.
+
+A Field you edit by hand becomes **yours**:
+
+- It is marked **Your edit · unsaved** instead of *AI draft · unsaved*, and **the AI changes it only through a card**. If the AI would change it, you get the same **Keep / Use the AI's version / Merge** card as for saved content, with your text beside the AI's. Keep is recommended. The AI is told which Fields you edited and what they now say, and to treat your words as settled fact.
+- **Gantry's checks don't run on your text.** No word budget, no "figure has no source" warning, no options check beyond the choices the editor offers. A hand-edited Field is **done** when it has content: how long it is and what it covers are your call.
+- **It is logged as a hand edit**, with the text you typed kept as your own words (see **The decisions log**). Editing the same Field again adds a new hand edit that replaces the earlier one.
+- **Its inputs are rebuilt from your text.** The decisions log then lists only the Source documents your text still cites, with your hand edit. Delete a `[title, p. 4](source:id)` citation and that document is no longer one of the Field's inputs.
+
+There is no button to hand a Field back. **Ask in the chat box** ("rewrite the problem statement as two sentences") and the AI changes it, logging your request; or **choose the AI's version** on a card. Either way the AI's text goes in and the change is logged.
+
+A Field the AI is drafting at that moment shows **drafting…** and can't be edited until its draft lands. If the AI sends a draft for a Field while you have its editor open, your edit is not overwritten: you get the card.
+
+#### When a Field is done and a Stage is ready
+
+Gantry works out for itself when a Field is **done**: it has content, it sits between about **60% of its word budget** and the budget, it covers each point its guidance asks for, and no open question feeds it. The preview marks each Field in scope **Done**, or says what is missing. A Field in scope is one the Gate requires for the Artefact you chose, or any other Field with content; an optional Field the documents don't support is simply left empty.
+
+The Stage is **ready** when the Gate check passes for the Artefact you chose **and** every Field in scope is done. Only then does the stage-end card appear (see **Saving the Stage**).
+
+#### Finish with your recommendations
+
+**Finish with your recommendations** sits above the chat box and is always available. It **accepts every pending recommendation**: the cards still open are answered with the AI's recommendations (any you have already answered keep your answer). The AI redrafts, and any figure it proposed that isn't from a Source document or from you is marked **(target assumption)**. Then the AI asks **one last round**, about only the Fields it can't responsibly propose, such as a named Owner. The stage-end card waits until you have answered that round.
+
+### Chatting and switching AI Provider
+
+Type in the chat box at any time: a fact ("the budget is capped at $1.2M"), a correction, or "leave out Finance". The AI reads it with the Source documents and redrafts what it affects. A figure you state needs no source.
+
+You can **switch AI Provider between any two turns** with the picker at the top of the conversation: the next turn goes to the other AI Provider, which is given the conversation so far. A switch is refused, with the reason, if the AI Provider you pick fails its test. If a call fails part-way, nothing is lost: a rejected key shows a prompt to enter a new one and the same request is sent again, a rate limit or no credit shows **Retry**, and any other failure shows the reason and **Try again**.
+
+### Token usage and caching
+
+Gantry shows how much the AI has read and written, in **tokens** and nothing else. There is no money figure anywhere, and no budget or limit: a session is never stopped for its size.
+
+- **In the left rail**, once the AI has said something, a **Tokens** block shows **This session** (the whole run so far, across the Stages it has been through) and **This stage**, each as a size such as *610k tokens* (input and output together).
+- **Hover over either figure** to see the breakdown: the input, cached and output tokens, and the share of input that was read from the cache, for example *"Input 1,000,000 tokens, cached 720,000, output 12,345. 72% of input read from cache."* A high share means the Source documents were read cheaply, not re-read in full on every turn.
+- **In the run plan**, each Stage that has been started shows its own total under its name. Nothing is shown for a round, and nothing about tokens appears in AI Provider settings.
+- **The figures are what each AI Provider reports.** A model that reports nothing shows nothing. A model on your own computer is counted the same way when it reports its tokens, and is never priced.
+- **They are kept with the Stage.** The decisions log's status block records each model used on the Stage (by AI Provider type and model) with its own input, cached and output tokens, committed in the Stage's Save. Open the Interview page from another browser and the run plan and the totals come from what was committed, so nothing is lost by changing computer.
+
+**Prompt caching is always on, with nothing to set.** Where the AI Provider supports it, Gantry asks for the stable start of every request to be cached for **one hour**: Gantry's rules, the Stage, your saved content and the **Source documents** all come first, and what changes from turn to turn (the decisions log, the latest conversation) comes after. Anthropic (and Anthropic models through OpenRouter) is sent an explicit cache point after the Source documents. OpenAI caches a repeated start by itself, so for it Gantry simply keeps the Source documents in the same place, in the same order, on every turn. Models on your own computer are not asked to cache.
+
+### Saving the Stage
+
+When the Stage is **ready** (Gantry's **real Gate check passes** for the Artefact you chose, counting the AI's drafts as if they were saved, and every Field in scope is done), a **stage-end card** appears: *"Shape is ready. Save it?"* It does not appear while question cards are open or while the last round after **Finish with your recommendations** is waiting. Until then, a line under the preview shows the Gate check, what is still outstanding and how many Fields are done. Fields the AI left out are for you to fill in, in the editor or by telling the AI.
+
+Both buttons of the card make **one stage Save**, the same Save as in the editor, so it goes through the **Save check**: if a colleague saved the same Stage meanwhile, Gantry merges Field by Field and asks only about a Field you both changed. The Modules the AI wrote into stay **`draft`**; only a person marks a Module `agreed`. After the Save, the card confirms it and shows the result of the Gate check on what was saved. The drafts then show as ordinary saved content, and the editor shows them too.
+
+When the interview is only for this Stage, the card has one button, **Save and stop here**. When it is **running until a later Stage**, the card has two (see below).
+
+### Running until a later Stage
+
+A Stage is often drafted straight after the one before it. **Run until** at the kickoff lets one interview carry on across Stages without you starting each one: pick the Stage to end at, and the AI drafts the current Stage, then the next, and so on up to and including the one you picked. This section is about a Local and a Server-hosted workspace, because neither needs approval to move to the next Stage. A workspace on Azure DevOps or GitHub runs the same way except that a Stage moves on only when the Owner approves its Pull Request (see **Approvals in a session**).
+
+- **Run plan.** The left rail shows one row for every Stage of the Instance, in order, with where it stands: **drafting** (the AI is working on it), **awaiting confirmation** (its stage-end card is up), **waiting** (not reached yet), **done** (saved, and the Instance has moved past it) or **paused**. The Stage you picked is marked **target**, and the Stages after it are struck through, because this run does not reach them. The rows change as the interview goes, so you can see at a glance where it is.
+- **The stage-end card.** On every Stage but the last of the run, the card has two buttons. **Save, advance, carry on** (recommended) makes one stage Save, **advances the Instance to the next Stage** (the Gate is checked again first, exactly as with **Advance to next stage** in the editor), and the AI starts the next Stage by itself, with the same AI Provider and the lightest Artefact that can pass its Gate. **Save and stop here** makes the one Save and **pauses** the run. On the last Stage of the run, the one you picked, the card has one button, **Save and finish the run**.
+- **Out of date marks.** A row also shows a mark such as **3 Out of date** when Fields on that Stage drew on a Source document that has since been removed, replaced or read again with different text (see **Keeping drafts up to date when a document changes**). The mark is a flag, not a change: **Bring up to date** (see **Bringing drafts up to date**) is how those Fields are dealt with. The Source documents in the rail show **replaced by …** and **New since last interview** the same way the list in the editor does, and the **This replaces…** picker is there too.
+- **In order.** Stages are drafted in order, and never skipped. The AI starts a Stage only after you have confirmed the one before it.
+- **Done.** The run is **done** when the card of the Stage you picked is confirmed. The Instance then stands at that Stage; it is not advanced past it.
+- **If it cannot advance.** If the Gate no longer passes, or the Instance cannot be written to, the Save has still happened and the card says why the Stage did not advance. The run stays paused on that Stage; fix the cause and choose **Resume the run**.
+- **Each Stage has its own decisions log.** Each Stage's answers, facts and drafted Fields are committed with that Stage's Save, in that Stage's own file, so the log you see on a Stage is only about that Stage. The AI is told what the earlier Stages saved, as it is for any Stage.
+
+#### Pausing and resuming
+
+**Save and stop here** on a Stage before the target pauses the run. The Stage is saved, the Instance stays on it, and the card says the run is paused and offers **Resume the run**, which advances to the next Stage and carries on to the target. You do not have to resume straight away. The decisions log records the pause: the status line it commits in that Save holds the **run target** and the **state of each Stage of the run**. When you open the Interview page on the Stage later (after closing the tab, say) its kickoff says *"A run to Ship was paused after Shape was saved"* and offers **Resume the run**, which continues from there. The same note appears if the run had moved on to a Stage but you closed the page before that Stage was saved. Resuming never skips a Stage and never repeats a Save.
+
+If a colleague (or another browser of yours) saved a Field of the Stage while you were interviewing, and you changed that Field too, the Save doesn't open the editor's dialog. It becomes a **round of cards**, one per Field: your wording and theirs side by side, with **Keep mine**, **Keep theirs** and **The AI's merged wording** (the AI writes one version that keeps what is good in both; if it can't, the card has two choices). Nothing is pre-selected, and the Save waits until you've chosen for every Field. A Field only one of you changed is never asked about: your change, or theirs, is taken. **Cancel the Save** writes nothing. Each choice you make is recorded in the decisions log (which side you chose, not the AI's merged wording).
+
+### Bringing drafts up to date
+
+When a Source document is removed, replaced or read again with different text, the Fields that drew on it are flagged **Out of date** (see **Keeping drafts up to date when a document changes**). **Bring up to date** works through exactly those Fields with you, one card each. There are three ways in:
+
+- **Bring up to date** on the editor's banner opens the Interview page on **just the flagged Fields**: no run, no Artefact to aim for and no *Run until*. On a Local or Server-hosted workspace it goes **stage by stage in order**: it begins on the first Stage that has flagged Fields (even if that is not the current Stage), and when you have saved that round it offers **Next** to the following Stage. A Stage's own Module is asked about on the first Stage that can edit it.
+- **A normal interview starts with this round** when Fields on its Stage are flagged. The cards come first, before the AI is called, and the interview carries on afterwards as usual.
+- **At the start of a normal interview**, the AI reads the documents marked **New since last interview** against what is saved, and asks a card only where a document adds to or contradicts something. Where it adds nothing, the AI says so in a line and carries on.
+
+**The cards.** There is one card for each flagged Field. It shows the Field's saved text, why it is flagged and which document it cites, with a recommendation pre-selected:
+
+- *A document that was changed or replaced.* **Keep** (the text still holds) or **Redraft** (recommended). A Field flagged because an earlier Field changed gets the same two choices, with **Keep** recommended.
+- *A document that was removed.* **Keep** (the citation stays and shows *removed*), **Re-cite to** another document, or **Redraft without it**. Re-cite is pre-selected when another document supports the text: the one that replaced it, or one the Field already drew on or cites. Gantry does the re-cite itself, with no AI: the citations of the removed document now point at the other one (without the old page number, which belonged to the old document), and the change is in the preview for you to save.
+- *A redraft.* The AI redrafts only the Fields you chose to redraft. Because the Field holds saved content, its draft still comes to you as the usual **Keep, use the AI's version, or merge** card, and nothing changes until you choose.
+
+**Only answering a card clears a flag.** Each answer is an entry in the Stage's decisions log (*Brought up to date*), naming the document that triggered it and what you decided. Saving the round is one Stage Save, through the Save check, with the Modules left `draft`; the flags clear when that Save has carried your answers. A Field you leave flagged writes nothing, so it stays flagged. A round that needs no AI (all **Keep**, or only re-cites) is saved without touching the Stage's status line.
+
+**Where the change lands.**
+
+- **Local and Server-hosted workspaces:** in place, on the Stage that edits the Module.
+- **Azure DevOps and GitHub, a Field of an approved Stage:** the change is **carried forward** to the current Stage where that Module can be edited, and the card says it changes approved content that is re-approved with the current Stage (see **Changed since approval**). Where the current Stage cannot edit the Module, the card **offers to re-open** the approved Stage when Gantry allows it (only the Stage just before the current one, and only while the current Stage has not been started: it has no branch, which uploading, renaming or removing a Source document, or saving anything, creates). Choose it and the round ends with a choice: **Re-open** the Stage now, in which case the other answers in the round are not saved (saving them would start the current Stage, and a Stage cannot be re-opened while a later one is under way), and Bring up to date begins again on the re-opened Stage, where every flagged Field can be changed in place; or **Save the other answers instead**, which leaves the Fields that need the approved Stage flagged. When Gantry does not allow a re-open, the card **logs an open question** naming what stops the change instead, and the Field stays as it is.
+- **A Stage awaiting approval:** the change is saved on that Stage's own branch, so it updates its Pull Request.
+- **A drafted-ahead Stage** is never touched by a Source document's change: its Fields stay flagged, and the page says so. Bring them up to date once that Stage is the current one. The one exception is a Field drafted from an earlier Field that a revision changed (see **When the Owner sends a Stage back**): it is asked about on its own Stage, keep or redraft, and any change is saved on that Stage's own branch without touching its approval status.
+
+**Agreed Modules.** Accepting a change to a Module that a person marked `agreed` returns it to `draft`. The Save card says so, and the decisions log keeps a note saying why (*Background was agreed and is back to draft … Only a person marks a Module agreed*). The AI never marks anything agreed.
+
+### Working through review comments
+
+Once a **Reviewed copy** is in the Instance (see **Bringing in review comments**), the Interview page can step through it with you, the same way it runs the interview: one question card for each comment, and nothing is applied until you answer. **Bring in review comments** is on the Interview page too (in the left rail, under **Source documents**).
+
+- **Ways in.** **Work through these with the AI** on the editor's **Review comments** panel, or **Work through review comments** in the Interview page's rail, opens the page on **just the review comments**: no run, no Artefact to aim for and no *Run until*. It is a focused round, not a session. If an interview is **already going** (or you tick **Also ask the review questions in the first round** before you start it), the review questions **join its next round** instead: **Add N to the interview's next round** in the rail puts them in the round that is open, opens a round of their own when the AI is waiting, or queues them while the AI is working. If the interview is **paused**, the same button holds them until you resume.
+- **One card for each thread.** Each unresolved comment thread is one card, with the comment, its replies and the text it was on. One commenter's **tracked changes** in one Field make one card of their own (or sit on that commenter's thread when they have one beside it). **Commenters who changed the same wording differently share one card**, with an **Accept** choice for each person's edit. A thread **resolved in Word is not asked**: the rail lists them collapsed, and **Ask about this** brings one back in.
+- **The choices.**
+  - **Accept the edit** (a tracked change) is recommended **only when the Field is unchanged since the render**. Gantry makes the edit itself when it can do so without guessing (deleted words found once in the Field, a paragraph inserted after the paragraph it followed); otherwise the AI makes it. Either way it appears in the preview, never in the saved Module.
+  - **Revise** asks the AI to redraft the Field to deal with the comment. Because the Field holds saved content, its draft still comes to you as the usual **Keep, use the AI's version, or merge** card. When the Field **has changed since the render**, the card shows the old and the new wording side by side, recommends Revise, and the AI proposes one merged wording; nothing is applied automatically.
+  - **Keep as is** leaves the Field alone. A box under the card takes **your own words** (optional), which are kept in the log exactly as you typed them.
+  - **Can't settle yet** records an **open question** (in the Open questions module where one is mounted on the Stage). Where the Key decisions module is mounted, the AI may offer a significant one as a Key decision.
+- **Comments on the document.** Comments on the cover, Document Control, the table of contents, and any that Gantry could not place on a Field, each get a card: **Assign to a Field** (you pick which, and it is then handled as a comment on that Field), **Log an open question**, or **Note it**.
+- **Who the AI sees.** The AI is told commenters as **Reviewer 1**, **Reviewer 2**; real names are scrubbed from everything it is sent, including your own words. Real names stay in the repository: in the Reviewed copy, its manifest and the decisions log.
+- **Where the change lands** follows **Bring up to date**: in place on a Local or Server-hosted workspace; on Azure DevOps and GitHub, carried forward from an approved Stage to the current one, offered as a re-open where Gantry allows it, or else an open question naming what stops it. A Stage awaiting approval takes the change on its own branch, updating its Pull Request. **A drafted-ahead Stage never takes one**: its comments stay unanswered and the page says so.
+- **Agreed Modules.** Accepting or revising a change to a Module a person marked `agreed` returns it to `draft`. **The card says so before you answer**, and the decisions log keeps a note.
+- **The log.** Each answered thread adds a **Review comment answered** entry to the Stage's decisions log. It stands on its own: the Reviewed copy and thread ids, who commented and when, the comment, its replies and the tracked change word for word, the Fields and whether each had changed since the render, and what you decided in your own words. The copy's manifest then shows how many of its comments are answered. Gantry never writes into the Reviewed copy or replies to the people who commented, and a Save does not render the Word documents again: render when you want reviewers to see the changes. The card after the Save says so, and offers the **Review response list** built from these log entries (see **Bringing in review comments**).
+
+### Approvals in a session
+
+On an **Azure DevOps** or **GitHub** workspace a Stage moves on only when its **Pull Request** is approved and merged by a person, so a run does not "advance" by itself. The session saves a Stage, asks for its approval, and waits for the Owner. **The AI never approves a Stage or passes a Gate that needs approval, and it has no part in Request Review**: only the buttons you press ask, and only a person on the Provider (Azure DevOps or GitHub) approves.
+
+- **The stage-end card.** Its first button is **Save, request approval, draft ahead** (recommended); on the last Stage of the run it reads **Save and request approval**. It makes the one stage Save (see **Saving the Stage**), then asks for approval, which opens the Stage's Pull Request exactly as **Request Sign-off** does in the editor (the Gate is checked again first, and any earlier approved document that needs re-rendering is named). The second button, **Save and stop here**, makes the Save and asks for nothing. Unless this is the last Stage of the run, the session then moves on to the next Stage while the Owner reviews (see **Drafting ahead**).
+- **Awaiting approval.** (If the Owner sends the Stage back instead, see **When the Owner sends a Stage back**.) The Stage's row in the run plan now says **Awaiting approval** and links to the **Pull Request**, and the centre column shows an **Awaiting approval** card with the same link and a **Check status** button. The session waits here.
+- **Check status.** Gantry **never polls** the Provider. It looks only when you ask: click the **Awaiting approval** row in the run plan, press **Check status** on the card, or open the Interview page on a Stage that already has a Pull Request (it checks once as it opens). When the Owner has approved, Check status merges the Pull Request, the Instance moves on to the next Stage, and, if the run goes on, the AI starts that Stage by itself with the same AI Provider. Otherwise it says why not: still waiting for the Owner, changes requested, rejected, or approval invalidated by a later commit. At the last Stage of the run the run is **done** when you confirm its card; the Instance moves on when the Owner approves it.
+- **Approval queued.** Approval goes in Stage order: Request approval refuses a Stage that is not the Instance's current one, because approving it first would carry an earlier Stage's unapproved work into `main`. A Stage that is ready while an earlier one is still pending is therefore **queued**: its row says **Approval queued**, and its Pull Request opens by itself the next time Check status sees the earlier Stage merge. The Owner only ever sees the Pull Request that is next in line.
+- **Drafting ahead.** While the Owner reviews a Stage, the session carries on with the next Stage of the run instead of waiting (see **Drafting ahead**). The **Awaiting approval** card also has a **Draft ahead** button for a session that was left waiting.
+- **Commits.** Every Save lands on the Stage's own branch, with the Stage's decisions log in the same commit as its Modules. **Source documents** you add while the session runs are committed on the current Stage's branch too, each upload its own commit (see **Source documents**), so the next Stage's branch carries them and they reach `main` when the Stage is approved.
+- **Resuming.** Open the Interview page on the Instance in any browser and Gantry runs Check status once, and **what the Provider says overrides the log**. If the Owner has approved meanwhile, the Instance is on the next Stage and the kickoff offers **Resume the run**; if the Pull Request is still open, the page shows **Awaiting approval**. If the log says a Stage was waiting for approval but the Provider has no Pull Request for it, **Resume the run** asks for approval again. If another session on the Stage was left unfinished, the warning card for a second session names **who last saved the Stage**: on these workspaces the author of its latest commit, as the Provider records it.
+
+#### Changing an approved Stage from the interview
+
+On an Azure DevOps or GitHub workspace, the Fields an earlier **approved** Stage's documents print are **approved content** (see **Changed since approval**). The interview treats them the way it treats saved content, and a bit more carefully, because changing one changes what an approved document says:
+
+- **Only a card changes them.** If the AI wants to reword a Field that an earlier approved Stage prints, even one that was empty when that Stage was approved, nothing reaches the live draft. You get a **Needs re-approval** card instead: *"Scope notes · Body is printed by Scope, which is already approved. Changing it changes approved content, so Scope needs re-approval with this Stage."* It shows the approved wording beside the AI's version, with **Keep** pre-selected. **Use the AI's version** and **Merge** say they send the earlier Stage back for approval with this one; **Keep** leaves the approved wording and nothing is re-approved. A Field that only this Stage's documents print is drafted as usual, with no card.
+- **Source updates follow the same rule.** Bringing a Field up to date after a Source document changed goes through the same card whenever the Field is approved content, so a changed document never rewrites an approved Stage on its own.
+- **The choice is logged.** The decisions log records Keep, Use the AI's version or Merge on that Field together with the Stage it would re-approve, and the log panel reads, for example, *Approved content in Scope notes · Body (printed by Scope): replaced it with the AI's version, needing re-approval of Scope with this Stage*.
+- **The run plan flags the earlier Stage.** Once a Save has changed a Field an earlier approved Stage prints, that Stage's row in the run plan shows **changed since approval**, the same flag as on its Stage tab.
+- **The stage-end card says what the Save will do.** When the changes you confirmed touch an earlier Stage's documents, the card adds *Saving also re-renders Scope document from the changed wording, then asks for approval of this Stage and Scope together.* **Save, request approval** then makes the Save, renders each of those documents onto this Stage's branch (the approved copy goes to `out/approved/`, as in **Re-rendering before re-approval**), and opens the Pull Request, which also re-approves the earlier Stage and adds its approver. The Awaiting approval card lists what was re-rendered. **Save and stop here** saves the content and leaves the documents as they are; the later **Request approval** button, or the editor's **Render onto this stage**, does the rest.
+
+### Drafting ahead
+
+Approval can take days, so on an Azure DevOps or GitHub workspace the AI does not sit idle. When you press **Save, request approval, draft ahead**, the Pull Request opens for the Stage you just saved and the session moves on by itself to the next Stage of your run, up to the one you picked in **Run until**. The Instance itself stays where it is, on the Stage under review; the run plan shows that Stage as **Awaiting approval** (click it to run Check status) and the one the AI is working on as **Drafting ahead**.
+
+- **A head start only.** The AI writes only the Modules that no pending Stage uses. A Module that an earlier Stage under review also uses is **held**: the Interview page lists it, the AI is told not to touch it, and **Gantry refuses any write to it** until that earlier Stage is approved and merged (the refusal names the Stage, and it applies to the editor and to outside agents too). This keeps the Owner's requested changes on the earlier Stage from ever conflicting with the later one. In a Definition where most Modules are shared, the head start is small, and a drafted-ahead Stage usually reaches its stage-end card only after the earlier Stage merges.
+- **The Waiting card.** When nothing draftable is left, one card says what the Stage is waiting for and offers **Check approval now** (recommended) or **Stop here**. Either one first saves the head start as **one commit on that Stage's branch**, with its decisions log in the same commit. **Check approval now** then runs Check status; if the Owner has approved, the Instance moves on, the held Modules open and the AI carries on by extending their Fields, ending at the usual stage-end card. **Stop here** ends the session; open the Interview page later and press Check status when the Owner has approved. The Stage gets its full Save later, when it is ready, so a Stage can have **more than one AI Save**, and its decisions log lists the time of each.
+- **Stage order.** Each later Stage's branch is stacked on the one before, and approvals still go in Stage order: a Stage that is ready while an earlier one is pending is **queued** and its Pull Request opens by itself once Check status sees the earlier one merge. Nothing polls.
+- **If the Owner asks for changes** to the earlier Stage, you revise it with the AI (see **When the Owner sends a Stage back**). It is revised on its own branch and merges without conflict, because nothing later touched its Modules. A later draft that drew on the changed content is asked about before the run carries on.
+- **Re-opening** an earlier Stage is not possible while a later Stage has been drafted ahead on a branch of its own.
+
+### When the Owner sends a Stage back
+
+On an Azure DevOps or GitHub workspace the Owner can send a Stage back from its Pull Request: **request changes** (GitHub), vote **waiting for author** (Azure DevOps), or **reject** it (a reject vote on Azure DevOps; closing the Pull Request without merging on GitHub). Gantry never polls, so it learns this the way it learns of an approval: you click the Stage's **Awaiting approval** row in the run plan, or press **Check status**. It works the same whether the session is on that Stage or has drafted ahead on a later one.
+
+- **One card, two choices.** The centre column shows a card, **Changes requested** or **Rejected**: **Revise <Stage> with the AI** (recommended) or **Stop the session here**. Drafting ahead is paused while it is up, and **what the AI drafted ahead is kept either way**: if it has not been saved it is saved as a head start on that Stage's own branch before the session goes back or stops.
+- **Every comment, resolved or not.** Revising opens the Interview page on the Stage that was sent back. Gantry reads **every comment on its Pull Request**, resolved ones included (inline comments, the conversation and the message of a review), lists them in the conversation, and asks **one card for each**: **Change the content**, **No change needed** (say why under *Other* if you want the reason kept) or **Log an open question**, or your own words under *Other*. A comment whose thread the Owner resolved recommends *No change needed*, but is still asked. Each card links to the comment on the Provider.
+- **The AI only does what you chose.** Once the cards are answered the AI redrafts only the comments you chose to change. Saved content still changes **only through the keep / use the AI's version / merge cards**, as everywhere else.
+- **Saving the revision.** **Save the revision** is one Stage Save on the Stage's own branch, with its decisions log in the same commit, and that **updates the open Pull Request**. It asks for nothing and moves nothing on: the Stage's row goes back to **Awaiting approval**, and the card reminds you to **tell the Owner it is ready for another look**.
+- **The AI never writes to the Pull Request.** It posts no comments, no replies and resolves no threads: Gantry only *reads* the Pull Request. Your answers are kept in the decisions log as **PR comment answered** entries (who wrote the comment, where, a link to it, an excerpt, what you decided, and the entries that answered it). As with review comments, the AI is told what each comment says but never who wrote it: the names stay in the log.
+- **Later drafts that went stale.** If the revision changed a Field that a later Stage's draft was written from (Gantry compares fingerprints, the same way as for **Out of date** Fields), the revision's saved card says so and offers **Review them on <Stage>**: a **Bring up to date** round with **Keep** or **Redraft** for each Field, before the run carries on. That Stage keeps its place in the run (an Approval queued Stage stays queued).
+- **Rejected.** A rejected Stage shows the same card. **Revise** works exactly as above; **Stop the session here** ends the session and keeps everything that was drafted ahead.
+
+### Re-opening a signed-off Stage from the interview
+
+When a Source document contradicts approved content, or you ask, the AI may **offer to re-open** the signed-off Stage (see **Re-open a signed-off Stage** in the editor). Gantry shows that offer as a card, **Re-open <Stage>** or **Not now**, **only when it would allow the re-open right then**: the Stage must be the one just before the current one, and no later Stage may have a branch yet. When it would not, there is no card; Gantry logs an **open question** that names what stops it. Choosing **Not now** logs an open question too, so it is not forgotten. A re-opened Stage **joins the run plan**, its page starts by itself, and its decisions log carries on in the same file.
+
+### The decisions log
+
+Every Stage keeps a **decisions log**: the record of what was decided in the interview. It is a file, `interview/<stage>.yaml`, kept next to the Instance's `modules/`, `sources/` and `assets/` folders, in the same place for every kind of workspace. **It is committed in the same Save as the Stage's content**, so the Save from the Interview page writes the Modules and the log together (on a Local workspace both go into your folder; on a server workspace they are one request, and in a Blob container one all-or-nothing write; on an Azure DevOps or GitHub workspace they are one commit on the Stage's own branch). Between Saves your browser keeps a working copy of the answers and drafts not yet saved, so closing the tab loses nothing in the same browser; another browser sees what was saved at the last Save or **Pause**.
+
+What the log holds:
+
+- **Your answers to question cards.** Each entry keeps the question, the options, the AI's recommendation and why, the Source document and page it cited, the answer you chose, anything you typed under **Other** in your own words, and the Field it fed.
+- **Facts you told the AI in chat, word for word.** When the AI uses something you typed, Gantry keeps *your* message as you wrote it against the Field it fed, never the AI's wording of it. Thanks, "go on" and other chat that fed nothing is not kept, and **what the AI said is never kept**: there is no transcript.
+- **Your choice on saved content**: keep, use the AI's version, or merge. The same choice on a Field you edited by hand is recorded as being about your own edit.
+- **Your hand edits**, each with the text you typed, word for word (see **Editing a draft by hand**).
+- **Pull Request comments you answered** (**PR comment answered**): when the Owner sends a Stage back, each comment on its Pull Request with who wrote it, where, a link to it, an excerpt, what you decided and the entries that answered it. The log only records them; nothing is ever written to the Pull Request.
+- **Term choices**: the preferred term you chose on a term card and the names to avoid (or your own wording, if you typed it). A later choice about the same thing replaces the earlier one, and a choice binds every later Stage.
+- **Open questions**, including a select Field where none of the options fitted. An open question is closed when a later answer on the same Field resolves it.
+- **The Artefact you aimed for, a change of AI Provider model between turns, and a restart marker.** **Start this stage over** (in the left rail, after a confirmation) appends the marker: the AI ignores every earlier answer from then on, saved content is untouched, and the earlier entries stay in the file.
+- **For each drafted Field, what it was drafted from**: the Source documents and pages, and Fields of earlier Stages, each with a fingerprint of what was read, plus the entries that fed it. The AI names these when it drafts a Field; Gantry checks they exist and adds every read and citation it saw. This record is overwritten when the Field is redrafted, and it is what lets Gantry tell later that a draft has gone out of date.
+- **A status block, one line per interview session**: who ran it, the Stage the run was aimed at (its **target**), the Stage's state (in a run, also each Stage of the run and its state, so a paused run knows where it stands), the Artefact aimed for, the time of the last AI save, each AI Provider *type* and *model* used with its own input, cached and output tokens (see **Token usage and caching**), the Interview instructions version, and the versions of the bundled skills. **It never holds an API key, an address or a name you gave an AI Provider.** There is no money figure.
+
+**Entries are only ever added.** A changed answer is a new entry that *replaces* the old one, and an open question is closed by an entry that *resolves* it; Gantry never edits or deletes an entry, and refuses a Save that would.
+
+You see the log in two places, and neither lets you edit it:
+
+- **The Interview rail** shows a **Decisions log** count (the latest decisions plus the open questions), with open questions called out and how many entries are not saved yet.
+- **The Decisions log panel** in the Instance editor, above the Stage's Modules, for each Stage that has one. It shows the **latest answers**, the **open questions** highlighted with **Resume to answer** (which opens the Interview page on the current Stage), and **Show history** for every entry including the replaced ones. The log is never printed in a rendered Artefact.
+
+When you open the Interview page on a Stage that has a log, the AI is told what the log already settles and does not ask it again.
+
+### Pausing and resuming
+
+**Pause**, above the chat box, saves the decisions log and the drafts so far as one Save, through the same Save check as any other. It happens only because you pressed it: Gantry still never saves on its own. The Modules the AI wrote into stay `draft`. The page then says **Paused**, and the interview stops; nothing is lost.
+
+To carry on, open the Interview page on the Instance again, **in this browser or any other**. Because an AI Provider belongs to a browser, in a new browser you pick one first. The page shows a recap (for example *Resuming Shape: 14 decisions, 2 open questions, last asked about hosting*) and **Start interview** becomes **Resume interview**. The AI is given the decisions log and the saved content, **not the old conversation** (that was never kept). It opens with the same recap and then asks the next round of questions. The session you paused is the one that carries on, so the log keeps one status line for it and its token totals.
+
+When the page opens, it reads the decisions log of every Stage of the Instance. On a workspace with a Provider, it runs **Check status** once first, and what the Provider reports overrides what the log's status block says (for example a Stage that has since been approved has no session still going).
+
+**If you close the tab without pausing**, nothing is lost in the same browser. Between Saves, the browser keeps a **working copy** of what isn't saved yet: the drafts, the answers and the open round of cards, and what the AI needs to carry on. Open the Interview page in that browser again and it resumes exactly where it stopped, with no recap needed. Another browser doesn't see the working copy, only what was saved. The working copy is never the truth: if the decisions log has been saved since the copy began (you saved or paused from another browser, or someone else's session did), the **saved log wins**. The copy is **set aside** and the page says so, and the interview carries on from the saved log and content.
+
+**Two sessions on one Stage.** There is no lock. If you start (or resume) while another session on the same Stage isn't done, a card tells you when it last saved (and who, on a remote workspace) and offers **Carry on alongside** or **Cancel**. Alongside, each Save is checked Field by Field against the other's, and the two decisions logs **merge in time order**: both sets of entries are kept, a later answer to a question the other session also answered replaces the earlier one, and the log's record of what each Field was drafted from is rebuilt. A session you paused yourself isn't "another session": resuming takes it over.
 
 ## Settings
 
 Gantry's Settings are split by scope:
 
-- **Global Settings** holds the **Advanced mode** toggle, off by default — with it off, a browser only ever sees the Local workspace flow (see **Local workspaces** above), with no Provider, work-item or sign-off UI anywhere in the app. It also holds a **default ticketing system** choice, which only ever affects a *new* Azure DevOps Workspace's own ticketing-system override (Jira is listed but disabled). There is no global Personal Access Token here, or anywhere else: every Server-hosted Workspace holds its own **Workspace PAT** (see **Choosing a Provider** above), so this screen has nothing credential-related to set.
+- **Global Settings** holds the **Advanced mode** toggle, off by default — with it off, a browser only ever sees the Local workspace flow (see **Local workspaces** above), with no Provider, work-item or sign-off UI anywhere in the app. It also holds a **default ticketing system** choice, which only ever affects a *new* Azure DevOps Workspace's own ticketing-system override (Jira is listed but disabled). There is no global Personal Access Token here, or anywhere else: every Server-hosted Workspace holds its own **Workspace PAT** (see **Choosing a Provider** above), so there is no credential to set for a Workspace here. It also holds your **AI Providers** (see **AI Providers** below), which do have keys, but those belong to your browser rather than to any Workspace.
+- **Global Settings** also lists the **Blob containers** your operator has set up, when there are any. Each shows its name, its address, the kind of credential the server uses to reach it, and whether the server can reach it right now (with the reason when it can't, such as "the container does not exist" or "the credential was refused access"). The list is read-only and never shows a credential: a container belongs to the deployment, so adding or changing one is the operator's job, not something done from this screen. If the section isn't there, no containers have been set up.
 - **Workspace Settings** controls the Owner and the Workspace's own PAT — set it, replace it, or clear it, entirely independently of every other workspace's own token — plus, for an Azure DevOps workspace only, a ticketing-system override (Jira is listed but disabled; a GitHub or GitLab workspace has no such choice, since its tracker is fixed by its Provider — GitHub Issues or GitLab Issues respectively). This screen also shows the Workspace's Provider and, at a glance, whether its PAT is set, missing or was rejected on the last request that used it. These settings apply to the Workspace and can be opened from an Instance that belongs to it. The same screen also holds **Archive workspace** / **Restore workspace**.
 - **Instance Settings** controls the Instance's Assignee (and, for a Workspace-backed Instance, its Required reviewer) and, under an **Instance settings** heading, whatever Instance settings its Definition offers, such as **Size** when it sets word targets, **Classification** when it lists markings and the instance's own **Logo** (see **Instance settings**, **Classification**, **Your instance's own logo** and **Target size and word targets** above), and shows read-only information about the Instance and its linked work item. The same screen also holds **Archive instance** / **Restore instance**. An archived instance is hidden from the dashboard but still opens at its direct URL.
 
@@ -457,13 +1050,68 @@ An override narrows the scope of a setting: a workspace's own PAT and ticketing-
 
 For example, an architect can give a GitHub `design` Workspace its own PAT while a separate Azure DevOps `design` Workspace keeps its own, entirely unrelated token, and assign one `design` Instance without changing its Workspace or sibling Instances.
 
+### AI Providers
+
+An **AI Provider** is the outside AI service that reads an Instance's source material and interviews you to draft it: Anthropic, OpenAI, OpenRouter, Ollama, LM Studio, or any other OpenAI-compatible service. (It has nothing to do with a **Provider**, the place a Workspace's repo and work items live.) AI Providers are set up under **AI Providers** on **Global Settings**, once, and then used in every Workspace.
+
+They belong to your **browser**, not to a Workspace or to the Gantry server. Like a Workspace PAT, the key is kept in this browser and sent with each request that needs it. Gantry's server passes the request on to the AI Provider and never stores or logs the key. This also means you set your AI Providers up again in another browser.
+
+The table lists each AI Provider's **Name**, **Type**, **Model**, **Question cards**, **Reads images** and **Status**, with **Test**, **Edit** and **Delete** beside it. There is no on/off switch: delete an AI Provider you no longer want. One AI Provider is marked **Default**, and exactly one always is: the first one you add, until you use **Make Default** on another. Deleting the Default hands it to the next AI Provider in the list.
+
+**Add AI Provider** opens a dialog:
+
+- **Name** and **Type**. Choosing a Type fills in the usual **Address**, which you can change (for a proxy, or a self-hosted service).
+- **Key**. Needed for every Type except Ollama and LM Studio, where it is optional.
+- **Model**. Once the address and key are entered, Gantry asks the AI Provider which models it has and offers them as you type. You can always type a model name of your own, such as one the list leaves out.
+- **Temperature** and **Max tokens**.
+- **Advanced**: top_p, top_k, min_p, frequency and presence penalties, stop sequences, reasoning effort, and **Context window**. The context window is how much the model can read at once, and Gantry uses it to choose between putting the whole document pack in the prompt and giving the AI a catalogue to look things up in. Gantry fills it in where the AI Provider says (Anthropic, OpenRouter, Ollama and LM Studio) and uses a default otherwise. You can always change it, and once you have, Gantry leaves your number alone.
+
+Changing an AI Provider's **Type**, **Address** or **Model** marks it **Untested**. Changing only its name, key or settings such as temperature leaves the last result alone.
+
+#### Test connection
+
+**Test** runs four checks, in order, and lists what each found under the AI Provider's row:
+
+1. **Key accepted.** The AI Provider answered and did not reject the key.
+2. **Model exists.** The model you chose is one the AI Provider lists. (Some custom services don't list their models; for those Gantry checks the model with the calls below.)
+3. **Question cards.** Whether the model can ask you questions as cards. See below.
+4. **Reads images.** Whether the model can read a picture, so Source documents that are images can be sent to it. Where the AI Provider says so itself (Anthropic, OpenRouter, Ollama and LM Studio) Gantry believes it; otherwise it shows the model a small picture and asks what colour it is. A model that can't read images still passes: pictures are simply left out when you use it.
+
+The results are kept with the AI Provider and shown in the table as **Question cards**, **Reads images** and **Status** (**Ready**, **Failed** or **Untested**). You don't have to press Test before using an AI Provider: an untested one is tested automatically when an AI interview session starts.
+
+**Question cards** are how the AI asks you questions in the AI interview: each has two to four choices, the AI's recommendation (one of them) and often the Source document it is based on. There are two ways a model can produce them, and Test shows which one yours uses:
+
+- **Native.** The model asks for a card through a tool call, the reliable way. Gantry checks every card itself. If the AI sends one that isn't valid (too few or too many choices, a recommendation that isn't one of them, or a Source document that doesn't exist) Gantry sends it back to the AI once to correct, and shows the corrected card.
+- **Text fallback.** For a model that doesn't use tools, Gantry asks it to write its questions in a fixed format in the reply, and reads them from there into the same cards. If a reply can't be read that way, it is shown as ordinary chat and you answer in your own words. Gantry never refuses a model for this.
+
+A card appears only when it is complete; until then you see "preparing questions…".
+
+#### When a call fails part-way
+
+Nothing is lost when an AI call fails, because only a stage summary you have confirmed is ever saved.
+
+- **The key is rejected.** Gantry stops and shows an inline prompt with a key field. Enter a key and the same request is sent again. The new key becomes the AI Provider's key.
+- **You've run out of credit, or the AI Provider is limiting requests.** Gantry shows the AI Provider's message and a **Retry** button. Add credit or wait a moment, then press Retry.
+- **Anything else** (an unreachable address, an unknown model) is shown with the reason, and the AI Provider's Status shows **Failed** after a Test.
+
+#### Models that run on your own computer
+
+For Ollama and LM Studio, say where the model **runs**:
+
+- **This computer** (the default): your browser calls the model directly, so it can reach a model on your laptop even when Gantry is hosted somewhere else. The model's server has to allow requests from the Gantry page. For Ollama, set `OLLAMA_ORIGINS` to include the address you open Gantry at, and restart Ollama. For LM Studio, turn on CORS in its server settings. If a request is blocked, the dialog and **Test** tell you this and name the address to allow.
+- **The Gantry server**: the Gantry server calls the model, so it has to be able to reach the address.
+
+#### Private addresses (for whoever runs Gantry)
+
+Every call except a local model on *this computer* goes through the Gantry server. So that a hosted Gantry can't be pointed at its own internal network, the server **refuses private and loopback addresses** (such as `localhost`, `10.x.x.x`, `192.168.x.x` or a cloud metadata address), even when a public name points at one. A person who needs it, for example a model on the Gantry server's own network, asks the operator to set the environment variable `GANTRY_AI_ALLOW_PRIVATE_URLS=1` on the server and restart it.
+
 ## Definition Reference Guide
 
 This section is for architects who already know the organisation's reference documents and want to know where each part of them lives in Gantry. There is one guide per definition; each maps the definition's reference documents heading-by-heading onto Gantry stages, modules and fields, and shows which fields are shared across stages.
 
 ### Contoso Solution Design
 
-The `design` definition (version 2) reproduces six Contoso design documents from one set of authored content. Content is introduced once and carried forward: a field is authored at the stage where it is first needed, re-opened — never re-typed — at every later stage that needs it, and rendered into whichever documents call for it.
+The `design` definition (versions 2 and 3) reproduces six Contoso design documents from one set of authored content. Content is introduced once and carried forward: a field is authored at the stage where it is first needed, re-opened — never re-typed — at every later stage that needs it, and rendered into whichever documents call for it.
 
 The six documents, the reference each one reproduces, and the stage that produces them:
 
@@ -482,7 +1130,7 @@ The rendered documents are deliberately **not** a one-to-one copy of every refer
 - **Consolidation over sprawl.** Where a reference document has a chapter of viewpoints or a deep product-specific hierarchy (the SAD's Logical Components View, the SSAD's thirty product sub-sections, the ATLAS's fifty-five infrastructure headings), Gantry gives it one field. Put the finer structure inside the field as sub-headings when an instance needs it; a module per heading would mostly sit empty.
 - **Document control is the tool's job.** Version, date, commit, gate status and the review / sign-off table are rendered at the top of every document by Gantry from the instance's history and pull request — not authored as fields. Where a reference has a Document Control, Approved By, Consulted or Sign-Off section, that is what it maps to.
 
-**Version 3 (draft).** Every version 3 document opens with a [cover page and a table of contents](#cover-page-and-table-of-contents). The cover's title is the instance's name, not its slug, so the documents no longer start with a `<slug>: <document>` heading; their first heading is section 1. The cover's classification is the instance's [Classification](#classification), chosen from the New Zealand Protective Security Requirements markings `UNCLASSIFIED`, `IN-CONFIDENCE`, `SENSITIVE` and `RESTRICTED` when the instance is created or later in Instance Settings. There is no default. An organisation with a different scheme lists its own markings in its own copy of the definition. It is printed in the page header of every page rather than above the cover's title; see [Word styles and your house style](#word-styles-and-your-house-style). Leave it as None and the header has no classification. No stage has a "Document handling" section any more. An instance that chose a marking there before needs it chosen again in Instance Settings, because version 3 is still a draft. The cover's author is the instance's assignee. Each document's cover purpose is a statement for the reader, such as "This document describes the complete solution architecture …", while its purpose stays the instruction to the author shown below. Version 3's headings are numbered 1, 1.1 and 1.1.1, and its tables share one style with a repeating header row and rows that don't split across pages; see [Word styles and your house style](#word-styles-and-your-house-style).
+**Version 3.** Every version 3 document opens with a [cover page and a table of contents](#cover-page-and-table-of-contents). The cover's title is the instance's name, not its slug, so the documents no longer start with a `<slug>: <document>` heading; their first heading is section 1. The cover's classification is the instance's [Classification](#classification), chosen from the New Zealand Protective Security Requirements markings `UNCLASSIFIED`, `IN-CONFIDENCE`, `SENSITIVE` and `RESTRICTED` when the instance is created or later in Instance Settings. There is no default. An organisation with a different scheme lists its own markings in its own copy of the definition. It is printed in the page header of every page rather than above the cover's title; see [Word styles and your house style](#word-styles-and-your-house-style). Leave it as None and the header has no classification. No stage has a "Document handling" section any more. An instance that chose a marking there before needs it chosen again in Instance Settings, because version 3 is still a draft. The cover's author is the instance's assignee. Each document's cover purpose is a statement for the reader, such as "This document describes the complete solution architecture …", while its purpose stays the instruction to the author shown below. Version 3's headings are numbered 1, 1.1 and 1.1.1, and its tables share one style with a repeating header row and rows that don't split across pages; see [Word styles and your house style](#word-styles-and-your-house-style).
 
 #### How to read the tables
 
@@ -496,7 +1144,7 @@ Stage abbreviations used below: **SOAP** — the SOAP stage; **HLD** — High-le
 
 Reference: *SAMPLE SOAP (Mobile Phone Assistance)*, a Confluence export. All fields are authored at the SOAP stage.
 
-**Version 3 (draft)** puts the SOAP in the Full SOAP's order, under the Full SOAP's headings, wherever the two show the same content, so a reader at the business case finds each thing where the Full SOAP puts it: `# Overview` (Problem statement, Affected domains) › `# Design basis` *(only when filled: Assumptions)* › `# High-level requirements` › `# High-level solution overview` (Process flow, Feature breakdown and involved teams) › `# Teams required` › `# Estimates` › `# References` *(only when filled)*. Each shared field sits at the Full SOAP's level, so High-level requirements, the solution overview, Teams required, Estimates and References are chapters. Affected domains, Process flow and Feature breakdown, which only the SOAP renders, sit beside their nearest shared neighbour. The fields and the gate are version 2's. The table below gives version 2's headings, with a *Version 3* note on each row whose heading or place changed. See ADR-0060.
+**Version 3** puts the SOAP in the Full SOAP's order, under the Full SOAP's headings, wherever the two show the same content, so a reader at the business case finds each thing where the Full SOAP puts it: `# Overview` (Problem statement, Affected domains) › `# Design basis` *(only when filled: Assumptions)* › `# High-level requirements` › `# High-level solution overview` (Process flow, Feature breakdown and involved teams) › `# Teams required` › `# Estimates` › `# References` *(only when filled)*. Each shared field sits at the Full SOAP's level, so High-level requirements, the solution overview, Teams required, Estimates and References are chapters. Affected domains, Process flow and Feature breakdown, which only the SOAP renders, sit beside their nearest shared neighbour. The fields and the gate are version 2's. The table below gives version 2's headings, with a *Version 3* note on each row whose heading or place changed. See ADR-0060.
 
 | Reference heading | Where to find it in Gantry | Description / rationale |
 | --- | --- | --- |
@@ -514,7 +1162,7 @@ Reference: *SAMPLE SOAP (Mobile Phone Assistance)*, a Confluence export. All fie
 
 Reference: *JEDI Full SOAP Template*. All fields are authored at the SOAP stage. The Full SOAP and the SOAP share the same modules; the Full SOAP simply renders more of them.
 
-**Version 3 (draft)** gives the Full SOAP the headings the rest of version 3 uses, in the same order, because it is the document the SOAP follows: `# Introduction` is `# Overview`, "High level" is hyphenated as in the SAD (`# High-level requirements`, `# High-level solution overview`), and `# Questions` is `# Open questions`, the field's heading in the HLD. The fields and the gate are version 2's. The table below gives version 2's headings, with a *Version 3* note on each row whose heading changed. See ADR-0060.
+**Version 3** gives the Full SOAP the headings the rest of version 3 uses, in the same order, because it is the document the SOAP follows: `# Introduction` is `# Overview`, "High level" is hyphenated as in the SAD (`# High-level requirements`, `# High-level solution overview`), and `# Questions` is `# Open questions`, the field's heading in the HLD. The fields and the gate are version 2's. The table below gives version 2's headings, with a *Version 3* note on each row whose heading changed. See ADR-0060.
 
 | Reference heading | Where to find it in Gantry | Description / rationale |
 | --- | --- | --- |
@@ -532,7 +1180,7 @@ Reference: *JEDI Full SOAP Template*. All fields are authored at the SOAP stage.
 | `H1` Assumptions | Design Basis › Assumptions — rendered earlier, under `# Design basis` | Same content, different position (see the Design basis row). Only rendered when filled. |
 | `H1` Estimates | Teams, contact persons, and high-level estimates › Estimates `team-and-estimates.estimates` → `# Estimates` | Match. The HLD's cost-benefit and delivery approach refine these rather than restate them. |
 | `H1` Sequencing | Full SOAP Details › Sequencing `soap-full-details.sequencing` → `# Sequencing`, preceded by the reference's fixed "possible example" note | Match. |
-| `H1` Questions | Open Questions › Open questions `open-questions.questions` → `# Questions` | Version 2 merged the Full SOAP's own questions field into the shared Open Questions module: a question raised at SOAP is the same question the ARB sees in the HLD's Open questions. *Version 3:* `# Open questions`, the HLD's heading. |
+| `H1` Questions | Open Questions › Open questions `open-questions.questions` → `# Questions` | Version 2 merged the Full SOAP's own questions field into the shared Open Questions module: a question raised at SOAP is the same question the ARB sees in the HLD's Open questions. *Version 3:* `# Open questions`, the HLD's heading; the Module is Gantry's Open questions standard module, so the Field is a table (Question, Who resolves, By when, Status). |
 | `H1` Caveats | Full SOAP Details › Caveats `soap-full-details.caveats` → `# Caveats` | Defaults to the JEDI template's eight standing caveats; edit only if an initiative needs to vary one. These qualify the *estimate*; caveats about the *design* belong in Design Basis › Caveats. |
 | `H1` References | Teams, contact persons, and high-level estimates › References `team-and-estimates.references` → `# References` | Match. Mandatory here, optional on the lightweight SOAP. |
 
@@ -597,7 +1245,7 @@ Reference: *SAD Template* (98 headings). All fields are authored at the Detailed
 | `H1` Solution Overview | `# Solution overview`, opened by Architecture › Solution description | Same chapter. It also carries the High Level Architectural View content (rows below) so the architecture reads in one place. |
 | `H2` Dependencies | Dependencies › Dependencies `dependencies.dependencies-overview` *(carried from SOAP/HLD)* → `## Dependencies overview`; › Dependency list `dependencies.dependency-list` → `## Dependency list` | The overview is pre-filled; the structured list is new at this gate. Version 2 moved both to the reference's early position. |
 | `H1` High Level Architectural View | Continues `# Solution overview` (Design decisions → Applicable standards) | Merged into Solution overview; the sub-sections keep the reference's order. |
-| `H2` Design Decisions | Architecture › Design decisions `architecture.design-decisions` → `## Design decisions` | Match. Deepen the SOAP sketch to build-ready depth. In version 3, write it as an `AD \| Decision \| ADR` table: every decision gets an AD id, and only a decision that needs governance endorsement names an ADR (`ADRYYY` until registered). Don't assume ARB endorsement — a decision is not an ADR, and an ADR is not an ARB item. |
+| `H2` Design Decisions | Architecture › Design decisions `architecture.design-decisions` → `## Design decisions` | Match. Deepen the SOAP sketch to build-ready depth. In version 2, write it as an `AD \| Decision \| ADR` table: every decision gets an AD id, and only a decision that needs governance endorsement names an ADR (`ADRYYY` until registered). Don't assume ARB endorsement — a decision is not an ADR, and an ADR is not an ARB item. *Version 3:* the Field is replaced by the **Key decisions** standard module (`key-decisions.decisions`), printed as `## Key decisions`. Each decision is numbered AD01, AD02, … and written in the WH(Y) style, and an ADR is named at the end of the decision's title, under the same rule. |
 | `H2` Architectural Risks | Architecture › Architectural risks `architecture.architectural-risks` → `## Architectural risks` | Match. Structural risks only; delivery and operating risks are in the Risks module. |
 | `H2` Solution Description | Architecture › Solution description `architecture.solution-description` → `## Solution description` | Match. Expands the SOAP overview and process flow. |
 | `H2` Architectural Goals | Architecture › Constraints and goals `architecture.constraints` → `## Constraints and goals` | Goals and constraints are one short passage in practice; three headed sections would mostly be empty. |
@@ -664,7 +1312,7 @@ Reference: *SAD Template* (98 headings). All fields are authored at the Detailed
 | `H2` Future Considerations | Non-Functional Requirements › Other non-functional requirements `nfrs.other-nfrs` → `## Other non-functional requirements` | Folded. |
 | `H2` Decommission | Support and Operations › Decommission `support-and-operations.decommission` *(optional)* → `## Decommission` | Added in version 2: end of life is an operational commitment, not a quality attribute. |
 | *(gantry-only)* `# Operational readiness` | Support and Operations › Support handover readiness `support-and-operations.support-handover-readiness` → `# Operational readiness` | The SAD carries only the handover summary; full support detail is the SSAD's job. In version 3 the SSAD heads the same field `## Operational readiness` too. |
-| `H1` Glossary | Glossary › Terms and definitions `glossary.terms-and-definitions` → `# Glossary` | Match. Shared with the SSAD and As-built. |
+| `H1` Glossary | Glossary › Terms and definitions `glossary.terms-and-definitions` → `# Glossary` | Match. Shared with the SSAD and As-built. *Version 3:* the Field is `glossary.terms` of Gantry's Glossary standard module, with the same table. |
 | `H1` Document Control | Document Control table at the top of the document | Not a field: version, date, commit and gate status come from the instance's history. |
 | `H2` Version History | Document Control table and the instance's commit history | As above. |
 | `H2` Template Information | Definition version, shown in Instance Settings | As above. |
@@ -678,7 +1326,7 @@ Reference: *SAD Template* (98 headings). All fields are authored at the Detailed
 
 Reference: *FV Help Tool SSAD* — a filled instance for one product family, not a blank template, so most of its headings are product names. All fields are authored at the Detailed Design stage; the SSAD is a second rendering of the same design data as the SAD, focused on what a support team needs.
 
-**Version 3 (draft)** puts the SSAD in the SAD's order, under the SAD's headings, so a reviewer reading both finds each thing in the same place: `# Overview` › `# Design basis` *(only when filled)* › `# Business architecture` (Stakeholders and support contacts) › `# Solution overview` (Solution description, Dependency list, Architectural risks) › `# Open issues` › `# Risks` (Risk register) › `# Logical components view` › `# Technology architecture` (Interfaces) › `# Support and operations` › `# Glossary` › `# References`. All the support material, from Environments, URLs and domains to Operational readiness, stays together in the one `# Support and operations` chapter. A field the SAD also renders takes the SAD's heading, so Disaster recovery and backup is `## Backup and archiving policy` and Support handover readiness is `## Operational readiness`; Stakeholders and support contacts keeps its name. Operational accounts and licences is spelt the New Zealand way, `## Operational accounts and licences`, in both documents. Like the SAD, the SSAD opens with the Overview paragraph (Overview › Overview `introduction.overview`) and the Design basis Assumptions and Constraints, which the SAD already asks for at the same gate; otherwise the fields are version 2's. The table below gives version 2's headings; for version 3, read each field's heading from this outline. See ADR-0057.
+**Version 3** puts the SSAD in the SAD's order, under the SAD's headings, so a reviewer reading both finds each thing in the same place: `# Overview` › `# Design basis` *(only when filled)* › `# Business architecture` (Stakeholders and support contacts) › `# Solution overview` (Solution description, Dependency list, Architectural risks) › `# Open issues` › `# Risks` (Risk register) › `# Logical components view` › `# Technology architecture` (Interfaces) › `# Support and operations` › `# Glossary` › `# References`. All the support material, from Environments, URLs and domains to Operational readiness, stays together in the one `# Support and operations` chapter. A field the SAD also renders takes the SAD's heading, so Disaster recovery and backup is `## Backup and archiving policy` and Support handover readiness is `## Operational readiness`; Stakeholders and support contacts keeps its name. Operational accounts and licences is spelt the New Zealand way, `## Operational accounts and licences`, in both documents. Like the SAD, the SSAD opens with the Overview paragraph (Overview › Overview `introduction.overview`) and the Design basis Assumptions and Constraints, which the SAD already asks for at the same gate; otherwise the fields are version 2's. The table below gives version 2's headings; for version 3, read each field's heading from this outline. See ADR-0057.
 
 | Reference heading | Where to find it in Gantry | Description / rationale |
 | --- | --- | --- |
@@ -727,7 +1375,7 @@ Reference: *FV Help Tool SSAD* — a filled instance for one product family, not
 | `H2` Release Procedures | Support and Operations › Release procedures `support-and-operations.release-procedures` → `## Release procedures` | Match. Version 2 moved it late, as in the reference. |
 | `H2` Whakarongorau *(second occurrence)* | Dependencies › Dependency list; Integration › Interfaces | As the first. |
 | `H2` Google Maps Integration | Integration › Interfaces | An integration point. |
-| `H1` Glossary | Glossary › Terms and definitions `glossary.terms-and-definitions` → `# Glossary` | Match. |
+| `H1` Glossary | Glossary › Terms and definitions `glossary.terms-and-definitions` → `# Glossary` | Match. *Version 3:* the Field is `glossary.terms` of Gantry's Glossary standard module. |
 | `H1` References | Teams, contact persons, and high-level estimates › References `team-and-estimates.references` *(optional, carried from SOAP)* → `# References` | Version 2 wired the shared references list in. |
 | *(gantry-only)* `## Data classification` · `## Availability and continuity` · `## Disaster recovery and backup` · `## Scalability and capacity` · `## Monitoring and alerting` · `## Support handover readiness` | Data › Data classification; Non-Functional Requirements › Availability and continuity, › Disaster recovery and backup, › Scalability and capacity; Support and Operations › Monitoring and alerting, › Support handover readiness | The reference scatters these concerns across its product sections. Gantry gives the support team one place for each, under `# Solution overview`. |
 
@@ -735,12 +1383,12 @@ Reference: *FV Help Tool SSAD* — a filled instance for one product family, not
 
 Reference: *ATLAS – Migration Infrastructure Design – Approved* — a filled, approved design for one migration, so its lower headings are that migration's services. Fields are authored at the Operational Handover stage; the Overview, Design Basis, Glossary, Recovery Plan and Data Security Controls content is carried from Detailed Design and re-opened, not re-typed.
 
-**Version 3 (draft)** puts the As-built in the SAD's order, under the SAD's headings, wherever the two show the same content, so a reviewer at Operational Handover finds each thing where the SAD and SSAD put it: `# Overview` (Executive summary *(only when filled)*, Overview, Purpose, In scope, Out of scope) › `# Design basis` *(only when filled: Assumptions, Constraints, Caveats, Design principles, Outcomes and deliverables)* › `# As-built design` › `# Failure and recovery` (Recovery approach, then Resiliency, Test scenarios and RACI when filled, then Backup and archiving policy) › `# Security` (Security concerns, and Security control inheritance and dependencies when filled) › `# Appendix` *(only when filled)* › `# Changes from the agreed design` › `# Acceptance criteria` › `# Operational notes` *(only when filled)* › `# Handover confirmation` › `# Glossary`. The As-built's own chapters, from As-built design to Handover confirmation, keep their place. The only new field is the optional Executive summary (Overview › Executive summary `introduction.executive-summary`), the one the SAD and SSAD open with; otherwise the fields and the gate are version 2's. The table below gives version 2's headings, with a *Version 3* note on each row whose heading or place changed. See ADR-0060.
+**Version 3** puts the As-built in the SAD's order, under the SAD's headings, wherever the two show the same content, so a reviewer at Operational Handover finds each thing where the SAD and SSAD put it: `# Overview` (Executive summary *(only when filled)*, Overview, Purpose, In scope, Out of scope) › `# Design basis` *(only when filled: Assumptions, Constraints, Caveats, Design principles, Outcomes and deliverables)* › `# As-built design` › `# Failure and recovery` (Recovery approach, then Resiliency, Test scenarios and RACI when filled, then Backup and archiving policy) › `# Security` (Security concerns, and Security control inheritance and dependencies when filled) › `# Appendix` *(only when filled)* › `# Changes from the agreed design` › `# Acceptance criteria` › `# Operational notes` *(only when filled)* › `# Handover confirmation` › `# Glossary`. The As-built's own chapters, from As-built design to Handover confirmation, keep their place. The only new field is the optional Executive summary (Overview › Executive summary `introduction.executive-summary`), the one the SAD and SSAD open with; otherwise the fields and the gate are version 2's. The table below gives version 2's headings, with a *Version 3* note on each row whose heading or place changed. See ADR-0060.
 
 | Reference heading | Where to find it in Gantry | Description / rationale |
 | --- | --- | --- |
 | `H1` Table of Contents | Not modelled | Word generates it. |
-| `H1` Terms & Definitions | Glossary › Terms and definitions `glossary.terms-and-definitions` *(carried)* → `# Terms & Definitions` | Match. *Version 3:* `# Glossary`, the last chapter, as in the SAD and SSAD. |
+| `H1` Terms & Definitions | Glossary › Terms and definitions `glossary.terms-and-definitions` *(carried)* → `# Terms & Definitions` | Match. *Version 3:* `# Glossary`, the last chapter, as in the SAD and SSAD; the Field is `glossary.terms` of Gantry's Glossary standard module. |
 | `H1` Introduction | `# Overview` (Overview module, carried) | Named for the module. |
 | `H2` Overview | Overview › Overview `introduction.overview` → `## Overview` | Match. |
 | `H2` Purpose | Overview › Purpose `introduction.purpose` → `## Purpose` | Match. |
@@ -754,7 +1402,7 @@ Reference: *ATLAS – Migration Infrastructure Design – Approved* — a filled
 | `H2` Outcomes / Deliverables | Design Basis › Outcomes and deliverables `design-basis.outcomes-and-deliverables` *(optional)* → `## Outcomes and deliverables` | Match. |
 | `H1` Migration Infrastructure Design | `# As-built design` (As-Built Notes module) | The ATLAS's product chapter becomes the generic as-built design chapter. |
 | `H2` Overview | As-Built Notes › Design overview `as-built-notes.design-overview` → `## As-built overview` | Renamed so the document does not carry two "Overview" headings. |
-| `H2` Architecture Decisions | As-Built Notes › Architecture decisions `as-built-notes.architecture-decisions` *(optional)* → `## Architecture decisions` | Match. |
+| `H2` Architecture Decisions | As-Built Notes › Architecture decisions `as-built-notes.architecture-decisions` *(optional)* → `## Architecture decisions` | Match. *Version 3:* the Field is replaced by the same **Key decisions** Module the SAD prints (`key-decisions.decisions`, optional), as `## Key decisions`. It is one list, so the As-built keeps the SAD's AD numbers, and a decision taken during the build takes the next number. |
 | `H2` Data Migration Flows | As-Built Notes › Data migration and process flows `as-built-notes.process-flows` → `## Data migration and process flows` | The twelve flow headings below are authored inside this one field, as sub-headings. |
 | `H3` Migration Approach | As-Built Notes › Data migration and process flows — sub-heading | Instance-specific flow. |
 | `H3` Migration Infrastructure Flows | As-Built Notes › Data migration and process flows — sub-heading | As above. |
@@ -904,7 +1552,7 @@ The table below is the field-level view of "content is introduced once and carri
 | Security › Privacy and confidentiality concerns `security.privacy-and-confidentiality` | — | ● HLD | ● SAD, SSAD | — | HLD → DD |
 | Architecture › Business context `architecture.business-context` | — | — | ● SAD | — | DD |
 | Architecture › Solution users `architecture.solution-users` | — | — | ○ SAD | — | DD |
-| Architecture › Design decisions `architecture.design-decisions` | — | — | ● SAD | — | DD |
+| Architecture › Design decisions `architecture.design-decisions` *(version 3: Key decisions `key-decisions.decisions`)* | — | — | ● SAD | — | DD |
 | Architecture › Architectural risks `architecture.architectural-risks` | — | — | ● SAD, SSAD | — | DD |
 | Architecture › Solution description `architecture.solution-description` | — | — | ● SAD, SSAD | — | DD |
 | Architecture › Constraints and goals `architecture.constraints` | — | — | ● SAD | — | DD |
@@ -930,7 +1578,7 @@ The table below is the field-level view of "content is introduced once and carri
 | Support and Operations › Release procedures `support-and-operations.release-procedures` | — | — | ● SSAD | — | DD |
 | Support and Operations › Support handover readiness `support-and-operations.support-handover-readiness` | — | — | ● SAD, SSAD | — | DD |
 | Support and Operations › Decommission `support-and-operations.decommission` | — | — | ○ SAD | — | DD |
-| Glossary › Terms and definitions `glossary.terms-and-definitions` | — | — | ● SAD, SSAD | ● As-built | DD → Handover |
+| Glossary › Terms and definitions `glossary.terms-and-definitions` *(version 3: `glossary.terms`)* | — | — | ● SAD, SSAD | ● As-built | DD → Handover |
 | Recovery Plan › Recovery approach `recovery-plan.recovery-approach` | — | — | ● SAD | ● As-built | DD → Handover |
 | Recovery Plan › Resiliency `recovery-plan.resiliency` | — | — | ○ SAD | ○ As-built | DD → Handover |
 | Recovery Plan › Test scenarios `recovery-plan.test-scenarios` | — | — | ○ SAD | ○ As-built | DD → Handover |
@@ -938,7 +1586,7 @@ The table below is the field-level view of "content is introduced once and carri
 | Data Security Controls › Controls `data-security-controls.controls` | — | — | ● SAD, SSAD | ● As-built | DD → Handover |
 | Data Security Controls › Inheritance and dependencies `data-security-controls.inheritance-and-dependencies` | — | — | ○ SAD, SSAD | ○ As-built | DD → Handover |
 | As-Built Notes › Design overview `as-built-notes.design-overview` | — | — | — | ● As-built | Handover |
-| As-Built Notes › Architecture decisions `as-built-notes.architecture-decisions` | — | — | — | ○ As-built | Handover |
+| As-Built Notes › Architecture decisions `as-built-notes.architecture-decisions` *(version 3: Key decisions `key-decisions.decisions`)* | — | — | — | ○ As-built | Handover |
 | As-Built Notes › Data migration and process flows `as-built-notes.process-flows` | — | — | — | ● As-built | Handover |
 | As-Built Notes › Infrastructure and configuration `as-built-notes.infrastructure-and-configuration` | — | — | — | ● As-built | Handover |
 | As-Built Notes › Appendix `as-built-notes.appendix` | — | — | — | ○ As-built | Handover |

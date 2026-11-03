@@ -37,7 +37,7 @@ function readExampleFile(relPath) {
   return relPath.startsWith('modules/') ? exampleModuleText(relPath.slice('modules/'.length).replace(/\.md$/, '')) : readFileSync(join('workspaces/examples/kiwi-cover-mutual', relPath), 'utf8')
 }
 
-async function seedLocalWorkspace(page, slug) {
+async function seedLocalWorkspace(page, slug, name = 'Local Editor Workspace') {
   const files = {
     [`gantry-workspace/${slug}/instance.yaml`]: `definition: design\nslug: ${slug}\nstage: shape\nassignee: a.architect\ndefinitionVersion: 1\n`,
   }
@@ -61,7 +61,7 @@ async function seedLocalWorkspace(page, slug) {
     for (const [path, content] of Object.entries(files)) await writePath(dir, path, content)
     const id = await rememberWorkspace({ handle: dir, name })
     return id
-  }, { files, name: 'Local Editor Workspace' })
+  }, { files, name })
 }
 
 // Like seedLocalWorkspace above, but also writes one binary file (a base64
@@ -619,15 +619,82 @@ test('a later plain "+ New Workspace" visit is not left on a stale "New Instance
       await page.getByRole('link', { name: '← Workspaces' }).click()
       await page.waitForSelector('.master-detail, .dashboard-empty', { timeout: 10_000 })
 
-      // A genuinely unrelated, later "+ New Workspace" visit.
+      // A genuinely unrelated, later "+ New Workspace" visit. Record every
+      // heading the wizard ever renders from here on (#76): the stale
+      // shortcut used to be undone in a post-paint effect, so the very first
+      // render of this visit briefly showed "New Instance" and a one-shot
+      // textContent read raced the correction — the intermittent failure.
+      await page.evaluate(() => {
+        window.__headings = []
+        const record = () => {
+          const h = document.querySelector('main.wizard-page > h2')
+          if (h) window.__headings.push(h.textContent)
+        }
+        new MutationObserver(record).observe(document.body, { childList: true, subtree: true, characterData: true })
+      })
       await page.getByRole('link', { name: '+ New Workspace' }).first().click()
       await page.waitForSelector('main.wizard-page h2', { timeout: 5_000 })
 
       assert.equal(await page.locator('main.wizard-page > h2').textContent(), 'New Workspace')
+      // Let any late correction land, then check the wizard never showed the stale heading at all.
+      await page.waitForTimeout(300)
+      const headings = await page.evaluate(() => window.__headings)
+      assert.ok(headings.length > 0, 'the observer saw the wizard render')
+      assert.deepEqual([...new Set(headings)], ['New Workspace'], 'no frame of the visit showed the stale "New Instance" shortcut')
       // The real workspace-creation flow — a location toggle, not the
       // instance-creation step's definition picker.
       assert.ok(await page.locator('button:has-text("Local")').count() > 0, 'Workspace location toggle is present')
       assert.equal(await page.locator('#instance-name').count(), 0, 'must not skip straight to instance creation')
+
+      assert.deepEqual(pageErrors, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+// Regression (#76): the same stale-shortcut hazard as above, but for a second
+// Instance Switcher visit aimed at a *different* workspace. `preact-iso`
+// re-renders the wizard in place when only the query string changes, and both
+// preselect effects ignore a new id while `selectedWorkspace` still holds the
+// old one — so without a reset the second visit sat on the first workspace's
+// "New Instance" step.
+test('a second Instance Switcher "+ New Instance" visit for a different local workspace is not left on the first workspace', async () => {
+  await withRunningServer({}, async (base) => {
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      await page.addInitScript(() => {
+        FileSystemDirectoryHandle.prototype.queryPermission = async () => 'granted'
+        FileSystemDirectoryHandle.prototype.requestPermission = async () => 'granted'
+      })
+      const pageErrors = []
+      page.on('pageerror', (err) => pageErrors.push(err.message))
+
+      await page.goto(`${base}/`)
+      const firstId = await seedLocalWorkspace(page, 'first-claims', 'First Workspace')
+      const secondId = await seedLocalWorkspace(page, 'second-claims', 'Second Workspace')
+      await page.goto(`${base}/new-instance?local=${encodeURIComponent(firstId)}`)
+      await page.waitForSelector('#instance-name', { timeout: 10_000 })
+      assert.equal(await page.locator('.result-card .result-row .v').first().textContent(), 'First Workspace')
+
+      // Client-side navigation to the other workspace's shortcut (a full
+      // page.goto() would reset module state and mask the bug).
+      await page.evaluate((id) => {
+        const a = document.createElement('a')
+        a.id = 'to-second'
+        a.href = `/new-instance?local=${encodeURIComponent(id)}`
+        a.textContent = 'to second'
+        document.body.appendChild(a)
+      }, secondId)
+      await page.locator('#to-second').click()
+      await page.waitForFunction(
+        () => document.querySelector('.result-card .result-row .v')?.textContent === 'Second Workspace',
+        null,
+        { timeout: 10_000 }
+      )
+      assert.equal(await page.locator('main.wizard-page > h2').textContent(), 'New Instance')
 
       assert.deepEqual(pageErrors, [])
     } finally {

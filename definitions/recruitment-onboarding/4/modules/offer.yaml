@@ -1,0 +1,49 @@
+id: offer
+title: Offer
+purpose: >
+  The offer of employment made to the preferred candidate, and what happened to it.
+
+  The terms are written at Appointment and put to executive approval before any offer is made;
+  HR then extends them unchanged. Status and negotiation are kept at Offer, Contract and
+  Payroll. Nothing binds until the offer is accepted, so this module is the boundary between a
+  selection decision and a commitment. Keep `status` current: several later steps assume
+  acceptance, and a stale status here is how a provisioning run starts for someone who
+  declined.
+
+fields:
+  - id: terms
+    title: Offer terms
+    type: markdown
+    required-at:
+      - approved-to-appoint
+    guidance: >
+      The terms proposed for executive approval, which HR then extends to the candidate
+      unchanged: the engagement basis and, where not permanent, the term; remuneration as the
+      band and position in band, never the salary figure (the offer letter in the HR system is
+      the record); hours; location; the proposed start date. Enough that the contract can be
+      drawn from it without going back to anyone. Do not edit these once the offer is extended;
+      record every later change, and who agreed it, in `negotiation`.
+
+  - id: status
+    title: Status
+    type: select
+    required-at:
+      - onboarding-approved
+    options:
+      - Extended
+      - Accepted
+      - Declined
+    guidance: >
+      Extended, accepted or declined — the current state of this offer. Record the date of each
+      change, and for a decline its reason category, in `negotiation` below. Onboarding approval
+      must not be signed off unless this reads Accepted.
+
+  - id: negotiation
+    title: Negotiation
+    type: markdown
+    required: false
+    guidance: >
+      Every change agreed after the offer was extended, and who agreed it — or, if the offer
+      was declined, when, and a reason category (terms, timing, another offer, withdrew), not
+      the candidate's personal reasons. Leave empty where the offer was accepted as made with
+      nothing to record.

@@ -1,0 +1,88 @@
+version: 1
+stage: handover
+status:
+  - session: kcm-ho-1
+    who: p.natarajan
+    target: handover
+    state: saved
+    artefact: as-built
+    lastAiSave: 2026-10-06T10:02:00.000Z
+    saves:
+      - 2026-10-06T10:02:00.000Z
+    models: []
+    instructions: design@3
+    skills:
+      grilling: 1.2.3
+      domain-modeling: 1.2.3
+fields:
+  key-decisions.decisions:
+    drafted: 2026-10-06T10:02:00.000Z
+    inputs:
+      - field: architecture.logical-components
+        title: Architecture · Logical components
+        fingerprint: 1e1da3181c8c04
+    entries:
+      - kcm-ho-1-2
+      - kcm-ho-1-3
+  as-built-notes.changes-from-design:
+    drafted: 2026-10-06T10:02:00.000Z
+    inputs:
+      - field: key-decisions.decisions
+        title: Key decisions · Key decisions
+        fingerprint: 076028b49d47fc
+    entries:
+      - kcm-ho-1-2
+      - kcm-ho-1-4
+entries:
+  - id: kcm-ho-1-1
+    at: 2026-10-06T08:55:00.000Z
+    session: kcm-ho-1
+    who: p.natarajan
+    kind: artefact
+    artefact: as-built
+    title: As-Built Document
+    candidates:
+      - as-built
+  - id: kcm-ho-1-2
+    at: 2026-10-06T09:10:00.000Z
+    session: kcm-ho-1
+    who: p.natarajan
+    kind: fact
+    words: In UAT a claim was accepted on a policy that had just changed, because CIS held the lookup for 15 minutes. We cut the cache to 5.
+    fields:
+      - key-decisions.decisions
+      - as-built-notes.changes-from-design
+  - id: kcm-ho-1-3
+    at: 2026-10-06T09:18:00.000Z
+    session: kcm-ho-1
+    who: p.natarajan
+    kind: answer
+    round: 1
+    card: d1
+    header: Cache
+    question: Is the policy-lookup cache change a new Key decision, or a change to AD02?
+    options:
+      - A new decision, AD08, that relates to AD02
+      - Rewrite AD02
+    recommendation:
+      - A new decision, AD08, that relates to AD02
+    why: A decision made during the build takes the next number; the design-time one is kept as it was written.
+    answer:
+      - A new decision, AD08, that relates to AD02
+    followed: true
+    keyDecision: true
+    significance:
+      hardToReverse: Support will rely on the figure in runbooks.
+      surprising: Design said 15 minutes.
+      tradeOff: More calls reach Policy Data Management.
+    fields:
+      - key-decisions.decisions
+  - id: kcm-ho-1-4
+    at: 2026-10-06T09:30:00.000Z
+    session: kcm-ho-1
+    who: p.natarajan
+    kind: saved-content
+    field: as-built-notes.changes-from-design
+    choice: merge
+    fields:
+      - as-built-notes.changes-from-design

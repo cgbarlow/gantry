@@ -568,3 +568,81 @@ test('getCommitDiffs warns when Azure DevOps truncates the diff (allChangesInclu
     assert.match(warnings[0], /allChangesIncluded/)
   })
 })
+
+// ---------- #263: binary Instance files up to 100 MB ----------
+
+// 1.5 MB of non-text bytes covering every byte value, so any UTF-8 or base64-text guess corrupts it.
+function bigBinary(seed = 7, size = 1_500_000) {
+  const bytes = Buffer.alloc(size)
+  for (let i = 0; i < size; i++) bytes[i] = (i * 31 + seed + (i >> 8)) & 0xff
+  return bytes
+}
+
+function withFakeAdo(options, fn) {
+  return withFakeServer({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, validPat: VALID_PAT, ...options }, fn)
+}
+
+test('getFileBytes reads back any binary file byte for byte, not just png/jpg', async () => {
+  const bytes = bigBinary()
+  await withFakeAdo({}, async (baseUrl) => {
+    const ado = client(baseUrl)
+    await ado.writeFile('/gantry-workspace/demo/source/spec.pdf', bytes.toString('base64'), { contentType: 'base64encoded' })
+    const readBack = await ado.getFileBytes('/gantry-workspace/demo/source/spec.pdf')
+    assert.ok(Buffer.isBuffer(readBack))
+    assert.equal(readBack.length, bytes.length)
+    assert.ok(readBack.equals(bytes), 'the bytes read back differ from the bytes written')
+  })
+})
+
+test('getFileBytes reads a text file as its exact UTF-8 bytes', async () => {
+  await withFakeAdo({ files: { '/notes.md': 'café\n' } }, async (baseUrl) => {
+    assert.ok((await client(baseUrl).getFileBytes('notes.md')).equals(Buffer.from('café\n', 'utf8')))
+  })
+})
+
+test('getFileBytes honours the branch, and throws the neutral NotFoundError for a missing path', async () => {
+  await withFakeAdo({ files: { '/a.bin': 'main' }, branchFiles: { 'stage-x': { '/a.bin': 'branch' } } }, async (baseUrl) => {
+    const ado = client(baseUrl)
+    assert.equal((await ado.getFileBytes('/a.bin', { branch: 'stage-x' })).toString('utf8'), 'branch')
+    assert.equal((await ado.getFileBytes('/a.bin')).toString('utf8'), 'main')
+    await assert.rejects(() => ado.getFileBytes('/missing.bin'), NotFoundError)
+  })
+})
+
+test('a binary file can be overwritten and the new bytes read back', async () => {
+  const first = bigBinary(1)
+  const second = bigBinary(2, 1_200_000)
+  await withFakeAdo({}, async (baseUrl) => {
+    const ado = client(baseUrl)
+    assert.equal((await ado.writeFile('/source/big.bin', first.toString('base64'), { contentType: 'base64encoded' })).changeType, 'add')
+    assert.equal((await ado.writeFile('/source/big.bin', second.toString('base64'), { contentType: 'base64encoded' })).changeType, 'edit')
+    assert.ok((await ado.getFileBytes('/source/big.bin')).equals(second))
+  })
+})
+
+test('fileExists never downloads the file, and is false for a missing path or branch', async () => {
+  const contentLog = []
+  await withFakeAdo({ files: { '/source/big.bin': bigBinary(), '/source/small.md': 'x\n' }, contentLog }, async (baseUrl) => {
+    const ado = client(baseUrl)
+    assert.equal(await ado.fileExists('/source/big.bin'), true)
+    assert.equal(await ado.fileExists('/source/small.md'), true)
+    assert.equal(await ado.fileExists('/source/missing.bin'), false)
+    assert.equal(await ado.fileExists('/source/big.bin', 'no-such-branch'), false)
+    assert.deepEqual(contentLog, [], 'no file content may be served to answer an existence check')
+  })
+})
+
+test('deleteFile removes a binary as one commit on the named branch, leaving main alone', async () => {
+  const bytes = bigBinary()
+  await withFakeAdo({ files: { '/keep.md': 'k\n' }, branchFiles: { 'stage-branch': { '/keep.md': 'k\n' } } }, async (baseUrl) => {
+    const ado = client(baseUrl)
+    await ado.writeFile('/source/big.bin', bytes.toString('base64'), { contentType: 'base64encoded', branch: 'stage-branch' })
+    await ado.writeFile('/source/big.bin', bytes.toString('base64'), { contentType: 'base64encoded' })
+    const before = await ado.getBranchObjectId('stage-branch')
+    await ado.deleteFile('/source/big.bin', { branch: 'stage-branch' })
+    assert.notEqual(await ado.getBranchObjectId('stage-branch'), before, 'the delete is a commit on the stage branch')
+    assert.equal(await ado.fileExists('/source/big.bin', 'stage-branch'), false)
+    assert.equal(await ado.fileExists('/source/big.bin', 'main'), true)
+    assert.equal(await ado.fileExists('/keep.md', 'stage-branch'), true)
+  })
+})

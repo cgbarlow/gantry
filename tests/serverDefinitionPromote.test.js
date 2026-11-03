@@ -89,7 +89,7 @@ test(
         // repo's own store — proven by reading the pushed files straight back over the same Git
         // Items API the real client uses.
         const itemsRes = await fetch(
-          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-repo/items?path=${encodeURIComponent('/definitions/widget-process/1/definition.yaml')}&versionDescriptor.version=definition%2Fwidget-process-v1&versionDescriptor.versionType=branch&api-version=7.1`,
+          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-repo/items?path=${encodeURIComponent('/definitions/widget-process/1/definition.yaml')}&versionDescriptor.version=definition%2Fwidget-process-v1&versionDescriptor.versionType=branch&includeContent=true&api-version=7.1`,
           { headers: { Authorization: `Basic ${Buffer.from(`:${VALID_PAT}`).toString('base64')}` } }
         )
         assert.equal(itemsRes.status, 200)
@@ -97,26 +97,26 @@ test(
         assert.match(item.content, /id: widget-process/)
 
         const moduleRes = await fetch(
-          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-repo/items?path=${encodeURIComponent('/definitions/widget-process/1/modules/intro.yaml')}&versionDescriptor.version=definition%2Fwidget-process-v1&versionDescriptor.versionType=branch&api-version=7.1`,
+          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-repo/items?path=${encodeURIComponent('/definitions/widget-process/1/modules/intro.yaml')}&versionDescriptor.version=definition%2Fwidget-process-v1&versionDescriptor.versionType=branch&includeContent=true&api-version=7.1`,
           { headers: { Authorization: `Basic ${Buffer.from(`:${VALID_PAT}`).toString('base64')}` } }
         )
         assert.equal(moduleRes.status, 200, 'the module file made it into the same commit')
 
         const templateRes = await fetch(
-          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-repo/items?path=${encodeURIComponent('/definitions/widget-process/1/templates/doc.md.tmpl')}&versionDescriptor.version=definition%2Fwidget-process-v1&versionDescriptor.versionType=branch&api-version=7.1`,
+          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-repo/items?path=${encodeURIComponent('/definitions/widget-process/1/templates/doc.md.tmpl')}&versionDescriptor.version=definition%2Fwidget-process-v1&versionDescriptor.versionType=branch&includeContent=true&api-version=7.1`,
           { headers: { Authorization: `Basic ${Buffer.from(`:${VALID_PAT}`).toString('base64')}` } }
         )
         assert.equal(templateRes.status, 200, 'the markdown template made it into the same commit')
 
         const docxRes = await fetch(
-          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-repo/items?path=${encodeURIComponent('/definitions/widget-process/1/templates/reference-doc.docx')}&versionDescriptor.version=definition%2Fwidget-process-v1&versionDescriptor.versionType=branch&api-version=7.1`,
+          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-repo/items?path=${encodeURIComponent('/definitions/widget-process/1/templates/reference-doc.docx')}&versionDescriptor.version=definition%2Fwidget-process-v1&versionDescriptor.versionType=branch&includeContent=true&api-version=7.1`,
           { headers: { Authorization: `Basic ${Buffer.from(`:${VALID_PAT}`).toString('base64')}` } }
         )
         assert.equal(docxRes.status, 200, 'the reference .docx made it into the same commit, base64-shipped')
 
         // Never a direct write to main — main is completely untouched.
         const mainRes = await fetch(
-          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-repo/items?path=${encodeURIComponent('/definitions/widget-process/1/definition.yaml')}&versionDescriptor.version=main&versionDescriptor.versionType=branch&api-version=7.1`,
+          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-repo/items?path=${encodeURIComponent('/definitions/widget-process/1/definition.yaml')}&versionDescriptor.version=main&versionDescriptor.versionType=branch&includeContent=true&api-version=7.1`,
           { headers: { Authorization: `Basic ${Buffer.from(`:${VALID_PAT}`).toString('base64')}` } }
         )
         assert.equal(mainRes.status, 404, 'the promoted content never lands on main directly — only the PR branch')
@@ -306,7 +306,7 @@ test(
         assert.equal(body.results[0].ok, true, JSON.stringify(body.results[0]))
 
         const itemsRes = await fetch(
-          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-local-repo/items?path=${encodeURIComponent('/definitions/local-widget/1/definition.yaml')}&versionDescriptor.version=definition%2Flocal-widget-v1&versionDescriptor.versionType=branch&api-version=7.1`,
+          `${baseUrl}/${ORGANIZATION}/${PROJECT}/_apis/git/repositories/promote-local-repo/items?path=${encodeURIComponent('/definitions/local-widget/1/definition.yaml')}&versionDescriptor.version=definition%2Flocal-widget-v1&versionDescriptor.versionType=branch&includeContent=true&api-version=7.1`,
           { headers: { Authorization: `Basic ${Buffer.from(`:${VALID_PAT}`).toString('base64')}` } }
         )
         assert.equal(itemsRes.status, 200)
