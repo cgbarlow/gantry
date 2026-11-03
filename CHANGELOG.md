@@ -17,6 +17,20 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.13.2 — 2026-11-03
+
+A fix for the newest Claude models in the AI interview. No setup changes.
+
+### Fixed
+
+- **Claude Sonnet 5.5 (and other models that refuse a temperature setting) no longer show as unable
+  to use tools** (#316). These models reject the temperature a new AI Provider starts with (0.3),
+  answering with an error. Gantry read that error as "this model doesn't support tools" and fell
+  back to asking questions in text, which is less reliable. It now tries again without the sampling
+  settings the model refused, remembers that for the model, and keeps your saved settings. Test
+  connection also says what the AI Provider answered when it falls back to text. If you saw "This
+  model can't use tools" on a Claude model, press **Test connection** again.
+
 ## 0.13.1 — 2026-11-03
 
 A small fix to adding an AI Provider. No setup changes.
