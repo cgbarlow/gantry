@@ -151,7 +151,8 @@ function installBaseUrlRoutes(page, adoBaseUrl) {
 //
 // `version` and `size` (#219) pick the design Definition at that version and
 // choose that Target size under the Instance step's "Instance settings"
-// heading, confirming the draft prompt when the version is a draft.
+// heading. The version must be published: a draft would raise the draft
+// confirmation dialog, which this helper does not handle.
 async function createLocalSourceInstance(page, { gantryBase, workspaceName, instanceName, version, size }) {
   await page.goto(`${gantryBase}/new-workspace`)
   await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
@@ -181,18 +182,10 @@ async function createLocalSourceInstance(page, { gantryBase, workspaceName, inst
   await page.locator('#instance-assignee').fill('a.architect')
   if (size) await page.getByRole('region', { name: 'Instance settings' }).locator('#instance-size').selectOption(size)
 
-  if (version) {
-    await page.getByRole('button', { name: 'Create instance', exact: true }).click()
-    await Promise.all([
-      page.waitForNavigation({ timeout: 10_000 }),
-      page.getByRole('dialog', { name: 'Draft version confirmation' }).getByRole('button', { name: 'Confirm' }).click(),
-    ])
-  } else {
-    await Promise.all([
-      page.waitForNavigation({ timeout: 10_000 }),
-      page.getByRole('button', { name: 'Create instance', exact: true }).click(),
-    ])
-  }
+  await Promise.all([
+    page.waitForNavigation({ timeout: 10_000 }),
+    page.getByRole('button', { name: 'Create instance', exact: true }).click(),
+  ])
 
   // Navigate off the editor route immediately — its own load/save logic
   // (A6, #297) keeps touching this same local workspace's files
@@ -566,7 +559,8 @@ test('Import: a sized local instance\'s Target size is pre-selected under "Insta
       await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), VALID_PAT)
 
       await page.goto(`${gantryBase}/new-workspace`)
-      // design v3 (a draft) declares word targets, so it offers Size.
+      // design v3 declares word targets, so it offers Size. v3 has been published
+      // since #308 (it was a draft before), so choosing it raises no draft confirmation.
       const { slug } = await createLocalSourceInstance(page, {
         gantryBase,
         workspaceName: 'Sized Source WS',
@@ -583,14 +577,10 @@ test('Import: a sized local instance\'s Target size is pre-selected under "Insta
       await group.waitFor({ timeout: 10_000 })
       assert.equal(await group.locator('#instance-size').inputValue(), 'small', 'the source instance\'s size is pre-selected, not the default')
 
-      // A draft version asks for confirmation on leaving the Instance step and again on creating.
-      const confirmDraft = () => page.getByRole('dialog', { name: 'Draft version confirmation' }).getByRole('button', { name: 'Confirm' }).click()
       await page.getByRole('button', { name: 'Next: link a work item' }).click()
-      await confirmDraft()
       await page.waitForSelector('#work-item-type option', { state: 'attached', timeout: 10_000 })
       await page.locator('#new-work-item-title').fill('Sized import parent work item')
       await page.getByRole('button', { name: 'Create instance & link' }).click()
-      await confirmDraft()
       await page.waitForSelector('text=Instance created', { timeout: 10_000 })
 
       const client = createAzureDevOpsClient({ organization: ORGANIZATION, project: PROJECT, repository: REPOSITORY, pat: VALID_PAT, baseUrl: adoBaseUrl })
