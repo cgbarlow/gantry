@@ -21,6 +21,7 @@ import {
   setDefaultAiProvider,
   normaliseAiProvider,
   validateAiProviderDraft,
+  callsFromBrowser,
   canFetchModels,
   fetchModels,
   fetchOllamaContextWindow,
@@ -49,6 +50,10 @@ export function AiProviderDialog({ provider, onClose }) {
   const [stopText, setStopText] = useState(() => (provider ? provider.advanced.stop.join('\n') : ''))
   const [errors, setErrors] = useState({})
   const [models, setModels] = useState({ status: 'idle', list: [], message: '' })
+  // A model that runs on this computer is called straight from the browser, which Chrome only allows after the
+  // person agrees to let this site reach their device. So its list loads when they press Load models, not
+  // as a side effect of choosing the type; `loadedFor` is the address/key it was pressed for.
+  const [loadedFor, setLoadedFor] = useState(null)
   const [contextSource, setContextSource] = useState(provider?.contextWindowEdited ? 'edited' : 'default')
   const autoKnown = useRef(false)
   const nameRef = useRef(null)
@@ -74,8 +79,9 @@ export function AiProviderDialog({ provider, onClose }) {
   // The model list is fetched once the address (and key, where one is needed) are filled in. Fetching again
   // whenever the type, address, key or where it runs changes; free text in the Model field is always allowed.
   const fetchKey = [draft.type, draft.address, draft.key, draft.runsOn].join('\u0000')
+  const needsPress = callsFromBrowser(draft)
   useEffect(() => {
-    if (!canFetchModels(draft)) {
+    if (!canFetchModels(draft) || (needsPress && loadedFor !== fetchKey)) {
       setModels({ status: 'idle', list: [], message: '' })
       return undefined
     }
@@ -93,7 +99,7 @@ export function AiProviderDialog({ provider, onClose }) {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [fetchKey])
+  }, [fetchKey, loadedFor])
 
   // The context window follows the chosen model while the architect hasn't typed their own: the AI Provider's
   // figure where it gives one, otherwise the type's default.
@@ -225,8 +231,13 @@ export function AiProviderDialog({ provider, onClose }) {
                 ? models.message || `${models.list.length} model${models.list.length === 1 ? '' : 's'} found. Pick one or type your own.`
                 : models.status === 'error'
                   ? models.message
-                  : `The model list is fetched once the address${typeInfo.keyRequired ? ' and key are' : ' is'} entered. You can always type a model in.`}
+                  : needsPress
+                    ? 'Press Load models to list the models on this computer. Your browser may ask to let this site reach apps on your device; allow it to continue. You can always type a model in.'
+                    : `The model list is fetched once the address${typeInfo.keyRequired ? ' and key are' : ' is'} entered. You can always type a model in.`}
           </p>
+          ${needsPress && canFetchModels(draft) && models.status !== 'loading'
+            ? html`<button type="button" class="btn btn-secondary ai-provider-load-models" onClick=${() => setLoadedFor(fetchKey)}>Load models</button>`
+            : null}
 
           <div class="ai-provider-row">
             <div>

@@ -169,6 +169,12 @@ test('a local model on this computer is called by the browser itself, and a bloc
       await page.click('text=Add AI Provider')
       await page.selectOption('#ai-provider-type', 'ollama')
       await page.fill('#ai-provider-address', aiBase)
+      // Choosing a local type and an address contacts nothing: the architect presses Load models, so the
+      // browser's local-network prompt never arrives as a surprise.
+      await page.waitForTimeout(1000)
+      assert.equal(seen.length, 0, 'nothing is called until Load models is pressed')
+      assert.match(await page.textContent('.ai-provider-model-status'), /Press Load models/)
+      await page.click('.ai-provider-load-models')
       await page.waitForFunction(() => /OLLAMA_ORIGINS/.test(document.querySelector('.ai-provider-model-status')?.textContent ?? ''))
       const status = await page.textContent('.ai-provider-model-status')
       assert.ok(status.includes('OLLAMA_ORIGINS'))
@@ -176,6 +182,7 @@ test('a local model on this computer is called by the browser itself, and a bloc
       assert.ok(seen.every((s) => s.origin === new URL(base).origin), 'the browser made the call itself (it carries the page origin)')
 
       await page.selectOption('#ai-provider-type', 'lmstudio')
+      await page.click('.ai-provider-load-models')
       await page.waitForFunction(() => /LM Studio/.test(document.querySelector('.ai-provider-model-status')?.textContent ?? ''))
       assert.match(await page.textContent('.ai-provider-model-status'), /CORS/)
     }))
@@ -190,6 +197,7 @@ test('a local model on this computer is called by the browser itself, and a bloc
       await page.selectOption('#ai-provider-type', 'ollama')
       assert.equal(await page.isChecked('input[name="ai-provider-runs-on"][value="browser"]'), true, 'This computer is the default')
       await page.fill('#ai-provider-address', aiBase)
+      await page.click('.ai-provider-load-models')
       await page.waitForFunction(() => document.querySelectorAll('#ai-provider-model-options option').length === 2)
       assert.deepEqual(await modelOptions(page), ['llama3.1:8b', 'qwen3:4b'])
       await page.fill('#ai-provider-model', 'llama3.1:8b')
