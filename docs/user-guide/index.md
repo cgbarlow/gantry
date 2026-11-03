@@ -1098,7 +1098,7 @@ Nothing is lost when an AI call fails, because only a stage summary you have con
 
 For Ollama and LM Studio, say where the model **runs**:
 
-- **This computer** (the default): your browser calls the model directly, so it can reach a model on your laptop even when Gantry is hosted somewhere else. The model's server has to allow requests from the Gantry page. For Ollama, set `OLLAMA_ORIGINS` to include the address you open Gantry at, and restart Ollama. For LM Studio, turn on CORS in its server settings. If a request is blocked, the dialog and **Test** tell you this and name the address to allow.
+- **This computer** (the default): your browser calls the model directly, so it can reach a model on your laptop even when Gantry is hosted somewhere else. The model's server has to allow requests from the Gantry page. For Ollama, set `OLLAMA_ORIGINS` to include the address you open Gantry at, and restart Ollama. For LM Studio, turn on CORS in its server settings. If a request is blocked, the dialog and **Test** tell you this and name the address to allow. The model list for a model on this computer loads when you press **Load models**, not as soon as you choose the type. On a hosted Gantry your browser may then ask whether this site can access other apps and services on your device (Chrome's local network access); allow it to continue, or block it and type the model name in yourself.
 - **The Gantry server**: the Gantry server calls the model, so it has to be able to reach the address.
 
 #### Private addresses (for whoever runs Gantry)

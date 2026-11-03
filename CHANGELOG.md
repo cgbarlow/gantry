@@ -17,6 +17,19 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.13.1 — 2026-11-03
+
+A small fix to adding an AI Provider. No setup changes.
+
+### Fixed
+
+- **Choosing Ollama or LM Studio no longer makes Chrome ask for local network access without
+  warning** (#314). On a hosted Gantry, picking a local type in **Add AI Provider** started
+  contacting `localhost` at once, and Chrome answered with "wants to access other apps and services
+  on this device" before you had asked for anything. A model that runs on this computer now lists
+  its models only when you press **Load models**, and the dialog says that Chrome may ask. Cloud
+  types, and local models the Gantry server calls, still load their list automatically.
+
 ## 0.13.0 — 2026-11-03
 
 The AI interview. An architect can now start from Source documents (briefs, contracts, scanned
