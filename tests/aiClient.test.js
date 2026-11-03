@@ -481,3 +481,46 @@ test('an untested AI Provider is tested automatically when a session starts; a t
   assert.equal(ai.calls.length, calls, 'no second test')
   assert.equal(await client.ensureTested('nope'), null)
 })
+
+// ---------- models that refuse sampling settings ----------
+
+// A model that answers 400 to any request carrying temperature, top_p or top_k, as the newest Claude models do.
+function noSamplingAi() {
+  return fakeAi((req) => {
+    if (req.method === 'GET') return jsonRes(200, { data: [{ id: 'claude-no-sampling', max_input_tokens: 200000, capabilities: { image_input: { supported: true } } }] })
+    if (req.body.temperature !== undefined || req.body.top_p !== undefined || req.body.top_k !== undefined) {
+      return jsonRes(400, { type: 'error', error: { type: 'invalid_request_error', message: '`temperature` may only be set to 1 for this model.' } })
+    }
+    return sse(fixture('anthropic-tool-call.sse'))
+  })
+}
+
+test('a model that refuses sampling settings is called again without them, once, and then remembered', async () => {
+  const p = anthropic({ model: 'claude-no-sampling', temperature: 0.3 })
+  const ai = noSamplingAi()
+  const events = []
+  for await (const e of client.streamChat(providers.getAiProvider(p.id), { messages: [{ role: 'user', text: 'go' }], tools: [] }, { fetchImpl: ai.fetchImpl })) events.push(e)
+  assert.deepEqual(events.map((e) => e.type), ['text', 'tool-start', 'tool-call', 'usage', 'done'])
+  assert.equal(ai.calls.length, 2, 'refused once, then answered')
+  assert.equal(ai.calls[0].body.temperature, 0.3)
+  assert.equal(ai.calls[1].body.temperature, undefined)
+  // The next call leaves them out from the start, and the saved setting is untouched.
+  for await (const e of client.streamChat(providers.getAiProvider(p.id), { messages: [{ role: 'user', text: 'again' }], tools: [] }, { fetchImpl: ai.fetchImpl })) void e
+  assert.equal(ai.calls.length, 3)
+  assert.equal(ai.calls[2].body.temperature, undefined)
+  assert.equal(providers.getAiProvider(p.id).temperature, 0.3)
+})
+
+test('Test connection on a model that refuses sampling settings still finds native question cards', async () => {
+  const p = anthropic({ model: 'claude-no-sampling', name: 'No sampling', temperature: 0.3 })
+  const result = await client.testConnection(providers.getAiProvider(p.id), { fetchImpl: noSamplingAi().fetchImpl })
+  assert.equal(result.status, 'passed')
+  assert.equal(result.questionCards, 'native')
+})
+
+test('a text fallback after a refused tool check says what the AI Provider answered', async () => {
+  const p = anthropic({ name: 'Refuses tools' })
+  const result = await client.testConnection(providers.getAiProvider(p.id), { fetchImpl: connectionAi({ card: 'unsupported' }).fetchImpl })
+  assert.equal(result.questionCards, 'text')
+  assert.match(result.steps.find((s) => s.id === 'cards').detail, /refused the tool-call check \(this model does not support tools\)/)
+})

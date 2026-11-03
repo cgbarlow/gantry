@@ -25,15 +25,36 @@ import { ASK_TOOL, ASK_TOOL_NAME, TEXT_FALLBACK_INSTRUCTIONS, interpretTurn, sta
 
 // ---------- streaming one call ----------
 
+// Newer models refuse sampling settings (temperature, top_p, top_k) other than their own default with a 400 that says
+// so. Rather than read that as "this model can't do the job", the call is made again without them, once, and the
+// model is remembered so later calls leave them out from the start. Settings the architect typed stay saved.
+const REFUSES_SAMPLING = new Set()
+const SAMPLING_REFUSAL = /temperature|top_p|top_k|sampling/i
+const samplingKey = (provider) => [provider.type, provider.address, provider.model].join('\u0000')
+const hasSampling = (provider) => [provider.temperature, provider.advanced?.topP, provider.advanced?.topK].some((v) => v !== null && v !== undefined)
+const withoutSampling = (provider) => ({ ...provider, temperature: null, advanced: { ...provider.advanced, topP: null, topK: null } })
+
+async function callWithoutRefusedSampling(provider, params, options) {
+  const skip = REFUSES_SAMPLING.has(samplingKey(provider))
+  const first = skip ? withoutSampling(provider) : provider
+  const res = await callAiProvider(first, buildChatRequest(first, params), options)
+  if (res.ok) return res
+  const failure = await failureFromResponse(res, provider)
+  if (skip || failure.status !== 400 || !SAMPLING_REFUSAL.test(failure.message) || !hasSampling(provider)) throw failure
+  REFUSES_SAMPLING.add(samplingKey(provider))
+  const bare = withoutSampling(provider)
+  const again = await callAiProvider(bare, buildChatRequest(bare, params), options)
+  if (!again.ok) throw await failureFromResponse(again, provider)
+  return again
+}
+
 /**
  * One streamed call. An async generator of the internal events (text, tool-start, tool-call, usage, done).
  * `params` is `{ system, cachePrefix, messages, tools, maxTokens }` (`cachePrefix`: the start of `system` that stays the same from turn to turn, #294); `options` is `{ fetchImpl, origin, signal }`.
  * Throws an `AiProviderError` for a call that failed, whose `code` says what to do about it.
  */
 export async function* streamChat(provider, params, options = {}) {
-  const request = buildChatRequest(provider, params)
-  const res = await callAiProvider(provider, request, options)
-  if (!res.ok) throw await failureFromResponse(res, provider)
+  const res = await callWithoutRefusedSampling(provider, params, options)
   const type = res.headers?.get?.('content-type') ?? ''
   if (!res.body || (/json/i.test(type) && !/event-stream/i.test(type))) {
     // An endpoint that ignored `stream: true` and sent one JSON answer.
@@ -346,12 +367,14 @@ export async function testConnection(provider, options = {}) {
       steps.push({ id: 'cards', label: 'Question cards', ok: true, detail: 'The AI Provider says this model doesn’t use tools, so Gantry will ask for questions in text (text fallback).' })
     } else {
       let native = false
+      let refusedWith = ''
       try {
         const reply = await collect(provider, { ...CARD_PROBE, tools: [ASK_TOOL] }, callOptions)
         const call = reply.toolCalls.find((c) => c.name === ASK_TOOL_NAME)
         native = Boolean(call && !call.invalid && validateCards(call.input).ok)
       } catch (err) {
         if (!notSupported(err)) throw err
+        refusedWith = err.message
       }
       result.questionCards = native ? 'native' : 'text'
       steps.push({
@@ -360,7 +383,9 @@ export async function testConnection(provider, options = {}) {
         ok: true,
         detail: native
           ? 'The model asked a complete, valid question card using a tool call (native).'
-          : 'The model didn’t answer with a valid tool call, so Gantry will ask for questions in text (text fallback).',
+          : refusedWith
+            ? `The AI Provider refused the tool-call check (${refusedWith}), so Gantry will ask for questions in text (text fallback).`
+            : 'The model didn’t answer with a valid tool call, so Gantry will ask for questions in text (text fallback).',
       })
     }
   } catch (err) {
