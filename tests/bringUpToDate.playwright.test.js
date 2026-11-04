@@ -162,7 +162,10 @@ test('server workspace: the banner opens the round on the first Stage that has f
     await page.waitForSelector('[data-testid="interview-card"][data-card-type="change"]')
     assert.match(posts[0].raw, /REDRAFT/)
     assert.doesNotMatch(posts[0].raw, /Begin the interview/)
-    assert.deepEqual(posts[0].body.messages[1], { role: 'user', content: 'The new brief moves the deadline; keep that in mind.' }, 'the opening message goes with the first request, after the answers')
+    // As the last message it carries the conversation's cache point (#328), so its text sits in a block.
+    const opening = posts[0].body.messages[1]
+    assert.equal(opening.role, 'user')
+    assert.deepEqual([opening.content].flat().map((b) => b.text ?? b), ['The new brief moves the deadline; keep that in mind.'], 'the opening message goes with the first request, after the answers')
     assert.deepEqual(await page.locator('[data-testid="interview-msg"][data-who="you"]').first().textContent(), 'The new brief moves the deadline; keep that in mind.')
     assert.deepEqual(await page.locator('[data-testid="interview-card"][data-card-type="change"] [data-testid="card-option"]').evaluateAll((els) => els.map((el) => el.dataset.option)), ['Keep', "Use the AI's version", 'Merge'])
     await choose(page, 'change:ma.body', "Use the AI's version")
