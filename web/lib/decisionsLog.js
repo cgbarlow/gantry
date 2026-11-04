@@ -2,7 +2,8 @@
 // Stage's `modules/`, `sources/` and `assets/` in every workspace kind and committed in the same Save as the Stage's content.
 //
 // Three parts:
-//   * `status`   one entry per session: who, the run's target Stage, this Stage's state (and, in a run, each Stage's state), the Artefact aimed for, the last AI save,
+//   * `status`   one entry per session: who, the run's target Stage, this Stage's state (and, in a run, each Stage's state), the Artefact aimed for
+//                (and, in a run, the one chosen for each Stage, #332), the last AI save,
 //                each AI Provider type and model used (with its tokens), the Interview instructions version, the skill versions, and the
 //                architect's opening message (#331), word for word. Never a key, an address or a custom name: `sessionStatus` builds an entry
 //                from a short list of known keys only.
@@ -98,6 +99,11 @@ export function sessionStatus(input = {}) {
   const runStages = Object.fromEntries(Object.entries(stages).map(([id, state]) => [safeToken(id, 80), safeToken(state, 40)]).filter(([id, state]) => id && state))
   if (Object.keys(runStages).length) status.stages = runStages
   status.artefact = safeToken(input.artefact, 80) || null
+  // #332: the Artefact chosen at the kickoff for each Stage of the run, so each Stage the run reaches aims for its own, and a run resumed in another
+  // browser keeps them. Stage and Artefact ids only.
+  const chosen = isObject(input.artefacts) ? input.artefacts : {}
+  const runArtefacts = Object.fromEntries(Object.entries(chosen).map(([id, artefact]) => [safeToken(id, 80), safeToken(artefact, 80)]).filter(([id, artefact]) => id && artefact))
+  if (Object.keys(runArtefacts).length) status.artefacts = runArtefacts
   const isoTime = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)
   status.lastAiSave = isoTime(input.lastAiSave) ? input.lastAiSave : null
   // #296: every AI Save this session made on the Stage, oldest first. A Stage can have more than one (a head start saved while an earlier Stage awaits approval, then the rest once it has merged), and the log records each. `lastAiSave` is the newest.

@@ -65,7 +65,7 @@
 import { runTurn, runWithRecovery, ensureTested, isTooLong, EMPTY_USAGE } from './aiClient.js'
 import { ASK_TOOL_NAME, FALLBACK_FENCE } from './aiCards.js'
 import { AiProviderError, getAiProvider } from './aiProviders.js'
-import { buildInterviewBrief, estimateTokens, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
+import { artefactChoices, buildInterviewBrief, estimateTokens, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
 import { DRAFT_TOOL, DRAFT_TOOL_NAME, DRAFT_FENCE, DRAFT_TEXT_FALLBACK_INSTRUCTIONS, checkDraft, extractDraftBlocks, isBlankValue, normaliseDraftValue, citedSourceIds, stripDraftBlocks } from './interviewDraft.js'
 import { countWords } from './targetSize.js'
 import {
@@ -215,13 +215,8 @@ function splitRef(ref) {
   return { moduleId: text.slice(0, dot), fieldId: text.slice(dot + 1) }
 }
 
-/** The Artefacts that can pass `stage`'s Gate, and the lightest (fewest requirements), which is pre-selected. */
-export function artefactChoices(definition, stageId) {
-  const stage = (definition?.stages ?? []).find((s) => s.id === stageId)
-  const candidates = (definition?.artefacts ?? []).filter((a) => a.gate === stage?.gate && a.satisfiesGate !== false)
-  const lightest = candidates.length ? candidates.reduce((best, a) => ((a.requires?.length ?? 0) < (best.requires?.length ?? 0) ? a : best)) : null
-  return { candidates, lightest }
-}
+// The Artefacts that can pass a Stage's Gate, and the lightest: kept with the brief, which names the one aimed for (#332).
+export { artefactChoices }
 
 // ---------- shortening old reads (#328, docs/adr/0073) ----------
 // Every read the AI makes (a Source document, a repository file, a search) stays in the conversation and is sent again with every later
@@ -2308,7 +2303,7 @@ ${reviewAnswers.text}` : '',
         fieldKeys: keys,
         handEdited: keys.filter((key) => state.drafts[key]?.handEdited === true),
         saving,
-        status: { who: context.actor, target: target ?? context.targetStageId ?? context.stageId, state: runState, stages: stages ?? context.runStages, artefact: context.artefactId, instructions: context.instructionsVersion, opening: state.opening },
+        status: { who: context.actor, target: target ?? context.targetStageId ?? context.stageId, state: runState, stages: stages ?? context.runStages, artefact: context.artefactId, artefacts: context.runArtefacts, instructions: context.instructionsVersion, opening: state.opening },
       })
     },
 

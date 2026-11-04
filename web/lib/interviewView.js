@@ -15,7 +15,7 @@ import { aiProviders, defaultAiProvider, updateAiProvider } from './aiProviders.
 import { AiProviderDialog, AiRecoveryPrompt } from './aiProvidersView.js'
 import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
 import { repositoryReaderFor } from './sourceRepositoryClient.js'
-import { artefactChoices, createInterviewSession } from './interviewSession.js'
+import { createInterviewSession } from './interviewSession.js'
 import { stageReadiness } from './interviewReadiness.js'
 import { PAGE_SIZE, isAnswered, pageCards, pageCount } from './interviewRounds.js'
 import { loadInterviewSkillsInBrowser } from './interviewSkills.js'
@@ -29,7 +29,7 @@ import { planUpdateRound, stagesToUpdate } from './bringUpToDate.js'
 import { answeredCounts, assignChoices, planReview, reviewerLabels } from './reviewRound.js'
 import { ReviewContext, ReviewInputs, ReviewSection } from './reviewView.js'
 import { downloadReviewResponseList, hasReviewResponses, reviewResponseRows } from './reviewResponse.js'
-import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runOpening, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
+import { artefactRows, beginRun, chosenArtefacts, clearRun, interviewRuns, nextStage, planRows, resumableRun, runArtefacts, runOpening, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
 import { isRemoteInstance, lastSavedBy, openApproval, pullRequestLink, remoteRecord } from './interviewApproval.js'
@@ -317,7 +317,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const run = interviewRuns.value[instance.slug] ?? null
   const carryingOn = run?.carryOn === instance.stage.id
   const [pickedProvider, setPickedProvider] = useState(carryingOn ? run.providerId ?? null : null)
-  const [pickedArtefact, setPickedArtefact] = useState(null)
+  const [pickedArtefacts, setPickedArtefacts] = useState({}) // #332: the Artefact the architect chose on this kickoff, by Stage id
   const [pickedTarget, setPickedTarget] = useState(carryingOn ? run.target : null)
   const [resumeLogs, setResumeLogs] = useState(null) // the committed logs of this Stage and the one before it, which say whether a run was left part-way
   const [resumeMessage, setResumeMessage] = useState('')
@@ -435,9 +435,6 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     setSources(entries)
   }, [])
 
-  const choices = useMemo(() => (setup.status === 'ready' ? artefactChoices(setup.definition, instance.stage.id) : { candidates: [], lightest: null }), [setup, instance.stage.id])
-  const artefactId = pickedArtefact ?? choices.lightest?.id ?? null
-
   // #293: the run's target Stage ("Run until"). The current Stage when no other is picked, which is a run of one Stage.
   const stagesList = instance.stages ?? []
   const targets = runTargets(stagesList, instance.stage.id)
@@ -446,6 +443,26 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const wantedTarget = pickedTarget ?? (targets.some((t) => t.id === loggedTarget) ? loggedTarget : null)
   const target = targets.some((t) => t.id === wantedTarget) ? wantedTarget : instance.stage.id
   const followingStage = nextStage(stagesList, instance.stage.id)
+  // #331, #332: the run in this tab that this Stage is part of: the one that carried on into it, or one still running to the same target.
+  const sameRun = Boolean(run && run.phase === 'running' && run.target === target)
+
+  // #332: the Artefact each Stage of the run aims for ("Artefact for each Stage"). What the run already chose comes from the run in this tab, or
+  // else from the status blocks of this Stage and the one before it, so a run or a paused session resumed in another browser keeps its choices.
+  // Bring up to date, review comments and a revision have no Artefact to choose: they aim for this Stage's lightest, as before.
+  const choosing = !update && !review && !revise
+  const previousStageId = stagesList[stagesList.findIndex((st) => st.id === instance.stage.id) - 1]?.id ?? null
+  const rememberedArtefacts =
+    !choosing || setup.status !== 'ready'
+      ? {}
+      : carryingOn || sameRun
+        ? run.artefacts ?? {}
+        : { ...(previousStageId ? runArtefacts(setup.logs?.[previousStageId], previousStageId) : {}), ...runArtefacts(committedLog, instance.stage.id) }
+  const stageArtefacts =
+    setup.status === 'ready'
+      ? artefactRows({ definition: setup.definition, stages: stagesList, currentStageId: instance.stage.id, targetStageId: choosing ? target : instance.stage.id, picked: choosing ? pickedArtefacts : {}, remembered: rememberedArtefacts })
+      : []
+  const runArtefactsNow = chosenArtefacts(stageArtefacts)
+  const artefactId = stageArtefacts[0]?.chosen?.id ?? null
 
   // #296 (docs/adr/0063): this Stage is being drafted ahead of the Instance's current one. It gets a head start only: the Modules an earlier,
   // still pending Stage also mounts are held, so the AI sees them as read-only here and Gantry refuses any write to them until that Stage merges.
@@ -471,6 +488,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           approvedPrinted,
           stageId: instance.stage.id,
           artefactId,
+          // #332: the Artefact chosen for each Stage of the run, which the status block records with each Save.
+          runArtefacts: { ...(carryingOn || sameRun ? run.artefacts : {}), ...runArtefactsNow },
           size: instance.size,
           saved: [...ownSaved, ...heldFresh, ...otherSaved],
           sources: sources ?? [],
@@ -762,7 +781,6 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
 
   async function startInterview(options) {
     // #331: the opening message is what the architect typed; else, on a Stage of a run, the run's; else, resuming the session they paused, that session's.
-    const sameRun = run && run.phase === 'running' && run.target === target
     const words = opening.trim() || ((carryingOn || sameRun) && run.opening) || (startedOver.current ? '' : ctxRef.current?.resume?.adopt?.opening ?? '')
     // Bring up to date, a review round and a revision are not runs: they have no target Stage and never move the Instance on (#298, #303, #299).
     // A revision has no box: its round is the Owner's comments.
@@ -772,7 +790,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     // A run of one Stage is still a run: its plan and its status block say where it stands. A Stage the run carried on into carries on the same run.
     if (carryingOn) updateRun(instance.slug, { carryOn: null, at: instance.stage.id })
-    else beginRun(instance.slug, { target, startStageId: sameRun ? run.startStageId : instance.stage.id, providerId: providerInUse, at: instance.stage.id, opening: words })
+    else beginRun(instance.slug, { target, startStageId: sameRun ? run.startStageId : instance.stage.id, providerId: providerInUse, at: instance.stage.id, opening: words, artefacts: { ...(sameRun ? run.artefacts : {}), ...runArtefactsNow } })
     await sessionRef.current?.start({ ...options, opening: words })
   }
 
@@ -835,10 +853,13 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     setPickedTarget(resume.targetStageId)
     // #331: the run carries on with the opening message it was started with, unless the architect typed a new one here.
     const words = opening.trim() || runOpening(resumeLogs?.[resume.fromStageId])
+    // #332: and with the Artefact it chose for each Stage, unless the architect chose another here.
+    const chose = runArtefacts(resumeLogs?.[resume.fromStageId], resume.fromStageId)
+    const artefacts = { ...chose, ...chosenArtefacts(artefactRows({ definition: setup.definition, stages: stagesList, currentStageId: instance.stage.id, targetStageId: resume.targetStageId, picked: pickedArtefacts, remembered: chose })) }
     if (resume.mode === 'advance' && remote) {
       // #295: a remote Stage was saved but its approval never asked for (Save and stop here, or the request failed): resuming asks for it, then the session waits for the Owner.
       const startStageId = runStartStage(stagesList, resumeLogs?.[resume.fromStageId], resume.fromStageId)
-      beginRun(instance.slug, { target: resume.targetStageId, startStageId, providerId, at: instance.stage.id, opening: words })
+      beginRun(instance.slug, { target: resume.targetStageId, startStageId, providerId, at: instance.stage.id, opening: words, artefacts })
       const asked = await requestApproval()
       if (!asked.ok) setResumeMessage(asked.message)
       else if (resume.targetStageId !== instance.stage.id && followingStage) await draftAhead({ phase: 'saved', approval: 'requested' }) // and the session drafts ahead while the Owner reviews (#296)
@@ -850,7 +871,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       return
     }
     const startStageId = runStartStage(stagesList, resumeLogs?.[resume.fromStageId], resume.fromStageId)
-    beginRun(instance.slug, { target: resume.targetStageId, startStageId, providerId, at: instance.stage.id, carryOn: follow ? follow.id : instance.stage.id, opening: words })
+    beginRun(instance.slug, { target: resume.targetStageId, startStageId, providerId, at: instance.stage.id, carryOn: follow ? follow.id : instance.stage.id, opening: words, artefacts })
     if (follow) {
       const result = await onAdvance()
       if (!result.ok) {
@@ -1092,7 +1113,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     sessions.delete(`${instance.slug}|${stageId}`)
     workingCopies.clear(`${instance.slug}|${stageId}`)
     if (run) updateRun(instance.slug, { carryOn: stageId, phase: 'running', providerId: providerInUse, at: stageId, startStageId: stageId, reopened: stageId })
-    else beginRun(instance.slug, { target, startStageId: stageId, providerId: providerInUse, at: stageId, carryOn: stageId, reopened: stageId, opening: snap?.opening ?? '' })
+    else beginRun(instance.slug, { target, startStageId: stageId, providerId: providerInUse, at: stageId, carryOn: stageId, reopened: stageId, opening: snap?.opening ?? '', artefacts: runArtefactsNow })
     let result
     try {
       result = await onReopenStage(stageId)
@@ -1187,7 +1208,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     const carries = carry && !ahead && target !== instance.stage.id && Boolean(followingStage) && Boolean(providerInUse)
     if (carries) {
       if (run) updateRun(instance.slug, { carryOn: followingStage.id, phase: 'running', providerId: providerInUse })
-      else beginRun(instance.slug, { target, startStageId: instance.stage.id, providerId: providerInUse, at: instance.stage.id, carryOn: followingStage.id, opening: snap?.opening ?? '' })
+      else beginRun(instance.slug, { target, startStageId: instance.stage.id, providerId: providerInUse, at: instance.stage.id, carryOn: followingStage.id, opening: snap?.opening ?? '', artefacts: runArtefactsNow })
     }
     let result
     try {
@@ -1233,7 +1254,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     if (!followingStage || !onDraftAhead) return
     setSaving({ ...saved, phase: 'drafting-ahead', advanceError: '' })
     if (run) updateRun(instance.slug, { carryOn: followingStage.id, phase: 'running', providerId: providerInUse })
-    else beginRun(instance.slug, { target, startStageId: instance.stage.id, providerId: providerInUse, at: instance.stage.id, carryOn: followingStage.id, opening: snap?.opening ?? '' })
+    else beginRun(instance.slug, { target, startStageId: instance.stage.id, providerId: providerInUse, at: instance.stage.id, carryOn: followingStage.id, opening: snap?.opening ?? '', artefacts: runArtefactsNow })
     let result
     try {
       result = await onDraftAhead(followingStage.id)
@@ -1263,6 +1284,36 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   }
 
   // ---------- pieces ----------
+  // #332: "Artefact for each Stage", under Run until: one row per Stage of the run, each with the Artefacts that can pass its Gate. The rows always
+  // show, so it is clear what the AI drafts towards; a row with nothing to choose is ghosted.
+  const artefactBlock = () => html`<fieldset class="kick-artefacts" data-testid="interview-artefacts">
+    <legend>Artefact for each Stage</legend>
+    ${stageArtefacts.map((row) => {
+      const only = row.candidates.length === 1
+      const none = row.candidates.length === 0
+      const why = none ? 'No Artefact passes this Gate' : only ? 'Only one Artefact can pass this Gate' : undefined
+      return html`<div key=${row.id} class="kick-artefact-row" data-testid="interview-artefact-row" data-stage-id=${row.id}>
+        <label for=${`interview-artefact-${row.id}`}>${row.title} (gate: ${row.gate})</label>
+        <select
+          id=${`interview-artefact-${row.id}`}
+          data-testid="interview-artefact"
+          data-stage-id=${row.id}
+          disabled=${only || none || phase === 'testing'}
+          title=${why}
+          onChange=${(e) => {
+            const value = e.currentTarget.value
+            setPickedArtefacts((was) => ({ ...was, [row.id]: value }))
+          }}
+        >
+          ${none
+            ? html`<option value="">No Artefact passes this Gate</option>`
+            : row.candidates.map((a) => html`<option key=${a.id} value=${a.id} selected=${a.id === row.chosen?.id}>${a.title ?? a.id}${row.candidates.length > 1 && a.id === row.lightest?.id ? ' (lightest)' : ''}</option>`)}
+        </select>
+      </div>`
+    })}
+    <p class="kick-note" data-testid="interview-artefacts-note">The AI drafts what the Artefact chosen for each Stage requires. Where more than one can pass a Gate, the lightest is pre-selected.</p>
+  </fieldset>`
+
   // Before Start: which Source documents this AI Provider can't read, so the architect can choose another (#292).
   const unreadableNote = () => {
     if (!provider?.test || !sources) return null // an untested AI Provider is tested on Start, and only then is it known what it reads
@@ -1475,14 +1526,6 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           : null}
         ${provider ? html`<${CardModeNote} provider=${provider} />` : null}
 
-        ${!update && !review && !revise && choices.candidates.length > 1
-          ? html`<label for="interview-artefact">Artefact to aim for</label>
-            <select id="interview-artefact" data-testid="interview-artefact" onChange=${(e) => setPickedArtefact(e.currentTarget.value)}>
-              ${choices.candidates.map((a) => html`<option key=${a.id} value=${a.id} selected=${a.id === artefactId}>${a.title ?? a.id}${a.id === choices.lightest?.id ? ' (lightest)' : ''}</option>`)}
-            </select>
-            <p class="kick-note">More than one Artefact can pass this Stage's Gate. The lightest is pre-selected; the AI drafts what the one you choose requires.</p>`
-          : null}
-
         ${!update && !review && !revise && targets.length > 1
           ? html`<label for="interview-run-until">Run until</label>
             <select id="interview-run-until" data-testid="interview-run-until" onChange=${(e) => setPickedTarget(e.currentTarget.value)}>
@@ -1491,9 +1534,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             <p class="kick-note" data-testid="interview-run-until-note">
               ${target === instance.stage.id
                 ? 'The interview covers this Stage only. Pick a later Stage to carry on into it: the run plan on the left shows the Stages in order.'
-                : `The AI drafts each Stage in order, up to and including ${stageTitleOf(target)}, and you confirm each one. A Stage is never skipped. Later Stages aim for their lightest Artefact.`}
+                : `The AI drafts each Stage in order, up to and including ${stageTitleOf(target)}, and you confirm each one. A Stage is never skipped.`}
             </p>`
           : null}
+        ${choosing ? artefactBlock() : null}
 
         ${unreadableNote()}
         <p class="kick-sources" data-testid="interview-source-count">

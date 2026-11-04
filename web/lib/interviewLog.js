@@ -375,7 +375,7 @@ export function createSessionLog(config = {}) {
 
     /**
      * What the stage Save sends for the log. `fieldInputs` is the session's `module.field -> inputs` and `fieldKeys` the Fields in
-     * this Save (the drafts plus those already saved by this session); `handEdited` are those the architect edited by hand. `status` is `{ who, target, state, stages, artefact, instructions, opening }` (`stages`: each Stage of the run and its state, #293; `opening`: the architect's opening message, #331).
+     * this Save (the drafts plus those already saved by this session); `handEdited` are those the architect edited by hand. `status` is `{ who, target, state, stages, artefact, artefacts, instructions, opening }` (`stages`: each Stage of the run and its state, #293; `artefacts`: the Artefact chosen for each Stage of the run, #332; `opening`: the architect's opening message, #331).
      */
     delta({ fieldInputs = {}, fieldKeys = [], status = {}, saving = false, handEdited = [] } = {}) {
       if (saving) lastAiSave = now()
@@ -398,6 +398,7 @@ export function createSessionLog(config = {}) {
           state: status.state,
           stages: status.stages,
           artefact: status.artefact,
+          ...(status.artefacts && Object.keys(status.artefacts).length ? { artefacts: { ...status.artefacts } } : {}),
           lastAiSave,
           // Each AI Save of this session on the Stage, this one included (#296); kept only once the Save has worked (`commit`), so a Save that failed and was tried again is not counted twice.
           saves: saving && lastAiSave ? [...saves.filter((t) => t !== lastAiSave), lastAiSave] : [...saves],

@@ -108,6 +108,14 @@ function requiredByArtefact(artefact, moduleId, field, gate) {
   return false
 }
 
+/** The Artefacts that can pass `stage`'s Gate, and the lightest (fewest requirements), which is pre-selected. */
+export function artefactChoices(definition, stageId) {
+  const stage = (definition?.stages ?? []).find((s) => s.id === stageId)
+  const candidates = (definition?.artefacts ?? []).filter((a) => a.gate === stage?.gate && a.satisfiesGate !== false)
+  const lightest = candidates.length ? candidates.reduce((best, a) => ((a.requires?.length ?? 0) < (best.requires?.length ?? 0) ? a : best)) : null
+  return { candidates, lightest }
+}
+
 /**
  * The Fields of `stageId` the Gate requires, as a Set of `module.field` keys: for the Artefact aimed for, or, with none
  * chosen, those every Artefact that can pass the Gate requires (the brief's own "required"). Read-only Modules are left out.
@@ -389,10 +397,9 @@ export function buildInterviewBrief({ definition, stageId, artefactId, size, sav
   const heldHere = stageModules.filter((m) => heldFor.has(m.id))
 
   // --- 4. the Artefact aimed for ---
-  const candidates = (definition.artefacts ?? []).filter((a) => a.gate === stage.gate && a.satisfiesGate !== false)
+  const { candidates, lightest } = artefactChoices(definition, stageId)
   const aimed = artefactId ? (definition.artefacts ?? []).find((a) => a.id === artefactId) : candidates.length === 1 ? candidates[0] : undefined
   if (artefactId && !aimed) throw new Error(`The Definition has no Artefact "${artefactId}"`)
-  const lightest = candidates.length > 1 ? candidates.reduce((best, a) => ((a.requires?.length ?? 0) < (best.requires?.length ?? 0) ? a : best)) : undefined
 
   const stageTitleOf = (id) => (definition.stages ?? []).find((x) => x.id === id)?.title ?? id
   const parts = new Map()

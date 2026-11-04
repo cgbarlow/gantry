@@ -21,7 +21,8 @@ export const sessionShape = z.object({
   state: z.enum(['in-progress', 'paused', 'saved', 'done', 'awaiting-approval', 'approval-queued', 'head-start']).optional().describe('This stage\'s state after this save: "saved" when the architect chose to carry on to the next stage, "paused" for a pause, "done" at the end of the run, "awaiting-approval" after request_approval on a workspace with Pull Requests. Default "in-progress".'),
   model: z.string().optional().describe('The model you are, as you report it (for example "claude-opus-4-1"). Recorded in the session status; Gantry records tokens as "not reported".'),
   who: z.string().optional().describe('The architect you are interviewing, so a session paused in the browser by them can be resumed by name.'),
-  artefact: z.string().optional().describe('The artefact id aimed for.'),
+  artefact: z.string().optional().describe('The artefact id this stage aims for. Defaults to the one "artefacts" names for it.'),
+  artefacts: z.record(z.string(), z.string()).optional().describe('The artefact each stage of the run aims for, { <stageId>: <artefactId> }, as start_interview_session gave it. Recorded in the session status, so a run resumed in the browser keeps the choices.'),
 })
 
 const slugRefShape = {

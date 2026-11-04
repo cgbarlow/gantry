@@ -95,13 +95,13 @@ export const PROVIDERS = [
   },
 ]
 
-/** Runs `fn` against a remote trio. `shared` mounts a Module in both Scope and Shape (#296); `script` is the stand-in AI's. */
-export async function withRemoteTrio(spec, fn, { shared = false, script = trioScript } = {}) {
+/** Runs `fn` against a remote trio. `shared` mounts a Module in both Scope and Shape (#296); `choice` gives Shape's Gate a second Artefact (#332); `script` is the stand-in AI's. */
+export async function withRemoteTrio(spec, fn, { shared = false, choice = false, script = trioScript } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'gantry-remote-trio-e2e-'))
   const definitionsDir = join(root, 'definitions')
   const instancesDir = join(root, 'instances')
   try {
-    writeTrio(definitionsDir, { shared })
+    writeTrio(definitionsDir, { shared, choice })
     await withFakeAnthropic(script, (aiBase, posts) =>
       withRunningServerForProvider(
         spec.provider,

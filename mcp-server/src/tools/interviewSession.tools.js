@@ -43,8 +43,8 @@ const newSessionId = () => `s-${randomBytes(3).toString('hex')}`
 
 // What the agent is handed back for a session it is in: exactly what update_instance_modules, pause_interview_session, advance_stage and
 // request_approval take as "session" (or its id).
-function sessionHandle({ id, runUntil, who, model }) {
-  return { id, runUntil, state: 'in-progress', ...(model ? { model } : {}), ...(who ? { who } : {}) }
+function sessionHandle({ id, runUntil, who, model, artefacts }) {
+  return { id, runUntil, state: 'in-progress', ...(model ? { model } : {}), ...(who ? { who } : {}), ...(artefacts && Object.keys(artefacts).length ? { artefacts } : {}) }
 }
 
 const stageIndex = (stages, id) => stages.findIndex((s) => s.id === id)
@@ -54,9 +54,11 @@ async function readBriefFor(args, context, { stage, stageState } = {}) {
   const { res: instanceRes, result: instanceError } = await callInstanceRoute(args, context, { path: '/api/instance', query: { stage } })
   if (instanceError) return { result: instanceError }
   const instance = instanceRes.body
+  const stageId = stage ?? instance.stage?.id
   const { res, result } = await callInstanceRoute(args, context, {
     path: '/api/instance/interview-brief',
-    query: { stage: stage ?? instance.stage?.id, artefact: args.artefactId, who: args.who, stageState },
+    // #332: a run's Artefact for this Stage, else the lone "artefactId".
+    query: { stage: stageId, artefact: args.artefacts?.[stageId] ?? args.artefactId, who: args.who, stageState },
   })
   if (result) return { result }
   return { instance, brief: res.body }
@@ -92,6 +94,37 @@ function notesFor(brief) {
   return notes
 }
 
+// #332: the Artefact each Stage of the run aims for, by stage id: the one "artefacts" names (for the first Stage, "artefactId" too), else the
+// lightest that can pass its Gate. `{ error }` when a choice names a Stage outside the run or an Artefact that can't pass that Stage's Gate.
+function runArtefactsFor({ stageArtefacts, stages, from, goal, artefacts = {}, artefactId }) {
+  const run = stages.slice(stageIndex(stages, from), stageIndex(stages, goal) + 1).map((s) => s.id)
+  const wanted = { ...(artefactId ? { [from]: artefactId } : {}), ...artefacts }
+  // A gantry serve from before #332 lists no candidates: a lone "artefactId" goes to the brief as it always did.
+  if (!Array.isArray(stageArtefacts)) {
+    return Object.keys(artefacts).length
+      ? { error: 'This gantry serve does not list the artefacts each stage can aim for, so "artefacts" cannot be checked. Update gantry serve, or leave "artefacts" out.' }
+      : { artefacts: {} }
+  }
+  const outside = Object.keys(wanted).filter((id) => !run.includes(id))
+  if (outside.length) return { error: `"artefacts" names ${outside.map((id) => `"${id}"`).join(', ')}, which ${outside.length === 1 ? 'is' : 'are'} not a stage of this run: ${run.join(', ')}.` }
+  const chosen = {}
+  for (const id of run) {
+    const row = stageArtefacts.find((r) => r.stageId === id)
+    const candidates = row?.candidates ?? []
+    if (wanted[id] && !candidates.some((a) => a.id === wanted[id])) {
+      const title = row?.title ?? id
+      return {
+        error: candidates.length
+          ? `"${wanted[id]}" can't pass the gate of stage "${title}" (gate: ${row?.gate ?? '?'}). Choose one of: ${candidates.map((a) => a.id).join(', ')}.`
+          : `No artefact can pass the gate of stage "${title}" (gate: ${row?.gate ?? '?'}), so it has none to aim for: leave it out of "artefacts".`,
+      }
+    }
+    const pick = wanted[id] ?? row?.lightest
+    if (pick) chosen[id] = pick
+  }
+  return { artefacts: chosen }
+}
+
 async function startInterviewSession(args, context) {
   const { runUntil, stage, model, who } = args
   const got = await readBriefFor(args, context, { stage })
@@ -101,14 +134,16 @@ async function startInterviewSession(args, context) {
   const goal = runUntil ?? target
   if (stageIndex(stages, goal) === -1) return errorResult(`"runUntil" must be a stage id of this instance: ${stages.map((s) => s.id).join(', ')}.`)
   if (stageIndex(stages, goal) < stageIndex(stages, target)) return errorResult(`"runUntil" (${goal}) comes before the stage being interviewed (${target}). A run goes forward.`)
+  const aimed = runArtefactsFor({ stageArtefacts: got.brief.stageArtefacts, stages, from: target, goal, artefacts: args.artefacts, artefactId: args.artefactId })
+  if (aimed.error) return errorResult(aimed.error)
   return okResult({
-    session: sessionHandle({ id: newSessionId(), runUntil: goal, who, model }),
+    session: sessionHandle({ id: newSessionId(), runUntil: goal, who, model, artefacts: aimed.artefacts }),
     stageVersion: got.instance.stageVersion,
     currentStageId: got.instance.currentStageId ?? got.instance.stage?.id,
     workspaceBacked: Boolean(got.instance.workspaceBacked),
     notes: notesFor(got.brief),
     ...got.brief,
-    next: 'Read the Source documents the brief lists, draft what they support, then interview the architect in your own chat. Nothing is saved until they confirm the stage summary (update_instance_modules with this session) or ask to pause (pause_interview_session).',
+    next: `Read the Source documents the brief lists, draft what they support, then interview the architect in your own chat. Nothing is saved until they confirm the stage summary (update_instance_modules with this session) or ask to pause (pause_interview_session).${goal !== target ? ' When the run moves on to a later stage, brief it with get_interview_brief, passing that stage and the artefact "session.artefacts" names for it as "artefactId".' : ''}`,
   })
 }
 
@@ -139,7 +174,7 @@ async function resumeInterviewSession(args, context) {
   const goal = runUntil ?? adopted?.target ?? got.brief.stage?.id
   if (stageIndex(stages, goal) === -1) return errorResult(`"runUntil" must be a stage id of this instance: ${stages.map((s) => s.id).join(', ')}.`)
   return okResult({
-    session: sessionHandle({ id: adopted?.session ?? newSessionId(), runUntil: goal, who: who ?? adopted?.who, model }),
+    session: sessionHandle({ id: adopted?.session ?? newSessionId(), runUntil: goal, who: who ?? adopted?.who, model, artefacts: adopted?.artefacts }),
     adopted: Boolean(adopted),
     checkStatus,
     stageVersion: got.instance.stageVersion,
@@ -194,7 +229,7 @@ export const tools = [
     name: 'get_interview_brief',
     description:
       '1. Returns the interview brief the in-app AI gets for one stage, built by the same code from the same inputs, plus a recap of the stage\'s decisions log. Follow it as Gantry\'s own AI does. ' +
-      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". "stage" (a stage id) briefs a stage other than the instance\'s current one; "artefactId" is the artefact aimed for (without it the brief says which candidates there are and you ask). ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". "stage" (a stage id) briefs a stage other than the instance\'s current one; "artefactId" is the artefact aimed for (without it the brief says which candidates there are and you ask), and one that can\'t pass the stage\'s gate is refused. "stageArtefacts" lists, for this stage and each one after it, the artefacts that can pass its gate and the lightest. ' +
       '3. "brief" is nine parts in precedence order, the earlier winning: Gantry\'s fixed interview rules, the pinned grilling and domain-modeling skills, the Definition\'s Interview instructions (definition, then stage, then module; they only add), the stage purpose and gate, each Field in scope with its guidance, word budget and options, the saved content of every module, the preferred terms, the Source documents (in whole, or a catalogue you open with read_source_document) and the decisions log so far. "parts" lists them; "fields" indexes the Fields in scope. ' +
       '4. "recap" says whether the stage is being resumed ("resuming", a one-line "line"), the open questions, every session on the stage and its state ("sessions", each with "recordedBy": "outside agent" when an agent ran it), a paused session to take over ("adoptable"), sessions still going ("others") and earlier stages\' decisions. ' +
       '5. "instructions" says what is different for an agent (question cards are web-only; ask in your own chat), and "heldModules" names the modules a drafted-ahead stage may not write yet. "stageVersion" is what you save against. ' +
@@ -212,14 +247,16 @@ export const tools = [
     description:
       '1. Starts an AI interview session for an outside agent: a "run until stage X" session in which you interview the architect in your own chat to draft the instance\'s content stage by stage. Returns the "session" (an id and the run target), the brief and recap (as get_interview_brief), "stageVersion" and "notes". ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". "runUntil" is the stage id the run is to reach (default: the stage being interviewed, a run of one stage). "stage" starts at a stage other than the current one (drafting ahead, on a workspace with Pull Requests). "model" is the model you are, as you report it; "who" the architect you are interviewing. ' +
-      '3. Nothing is written by this call: a session is started and recorded only by what you save. Pass the returned "session" to update_instance_modules (at the stage-summary confirm), pause_interview_session, advance_stage and request_approval. ' +
-      '4. In a session Gantry holds you to the in-app AI\'s rules: you never pass a gate (it refuses advance_stage until the architect confirmed and you saved with state "saved", and always on a workspace whose stages move on by Pull Request), you request approvals strictly in stage order, you do not write a module an earlier stage with an open Pull Request also mounts, and every save needs the stageVersion. Each refusal carries the reason. ' +
-      '5. Content you write stays draft; only a person marks a module agreed.',
+      '3. "artefacts" is the artefact each stage of the run aims for, as { <stageId>: <artefactId> }; a stage left out aims for its lightest (the artefact with the fewest requirements that can pass its gate). An artefact that can\'t pass that stage\'s gate, or a stage outside the run, is refused with the reason. A lone "artefactId" is the first stage\'s choice ("artefacts" wins for that stage if both name one). The returned "session.artefacts" is what each stage aims for: pass it on with the session, and brief each later stage with its artefact. ' +
+      '4. Nothing is written by this call: a session is started and recorded only by what you save. Pass the returned "session" to update_instance_modules (at the stage-summary confirm), pause_interview_session, advance_stage and request_approval. ' +
+      '5. In a session Gantry holds you to the in-app AI\'s rules: you never pass a gate (it refuses advance_stage until the architect confirmed and you saved with state "saved", and always on a workspace whose stages move on by Pull Request), you request approvals strictly in stage order, you do not write a module an earlier stage with an open Pull Request also mounts, and every save needs the stageVersion. Each refusal carries the reason. ' +
+      '6. Content you write stays draft; only a person marks a module agreed.',
     inputSchema: {
       ...slugRefShape,
       runUntil: z.string().optional().describe('The stage id the run is to reach. Defaults to the stage being interviewed.'),
       stage: z.string().optional().describe('A stage id to start at instead of the instance\'s current stage.'),
-      artefactId: z.string().optional().describe('The artefact aimed for.'),
+      artefacts: z.record(z.string(), z.string()).optional().describe('The artefact each stage of the run aims for, { <stageId>: <artefactId> }. A stage left out aims for its lightest.'),
+      artefactId: z.string().optional().describe('The artefact the first stage aims for (the same as naming it in "artefacts").'),
       model: z.string().optional().describe('The model you are, as you report it (recorded in the session status; tokens are "not reported").'),
       who: z.string().optional().describe('The architect you are interviewing.'),
     },

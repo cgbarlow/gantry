@@ -131,6 +131,63 @@ test('start_interview_session refuses a run target that is not a stage, or comes
   )
 })
 
+// #332: the Artefacts that can pass each Gate from the briefed stage on, as gantry serve lists them.
+const STAGE_ARTEFACTS = [
+  { stageId: 'shape', title: 'Shape', gate: 'g1', candidates: [{ id: 'soap', title: 'SOAP' }, { id: 'soap-full', title: 'SOAP (full)' }], lightest: 'soap' },
+  { stageId: 'design', title: 'Design', gate: 'g2', candidates: [{ id: 'ssad', title: 'SSAD' }, { id: 'sad', title: 'SAD' }], lightest: 'ssad' },
+]
+
+test('#332 start_interview_session aims each stage of the run at the artefact chosen for it, and the rest at their lightest', async () => {
+  const asked = []
+  await withClient(
+    ({ url }) => {
+      if (url.pathname === '/api/instance') return { status: 200, body: INSTANCE }
+      if (url.pathname === '/api/instance/interview-brief') {
+        asked.push(url.searchParams.get('artefact'))
+        return { status: 200, body: { ...BRIEF, stageArtefacts: STAGE_ARTEFACTS } }
+      }
+      return undefined
+    },
+    async (gantryClient) => {
+      const start = (args) => tool('start_interview_session').handler({ slug: 'my-instance', runUntil: 'design', ...args }, { gantryClient })
+      const chosen = payload(await start({ artefacts: { design: 'sad' } }))
+      assert.deepEqual(chosen.session.artefacts, { shape: 'soap', design: 'sad' }, 'a stage left out gets its lightest')
+      assert.match(chosen.next, /session\.artefacts/)
+      assert.equal(asked.at(-1), null, 'the first stage, left out, is briefed with no artefact named')
+
+      const both = payload(await start({ artefacts: { shape: 'soap-full', design: 'sad' } }))
+      assert.deepEqual(both.session.artefacts, { shape: 'soap-full', design: 'sad' })
+      assert.equal(asked.at(-1), 'soap-full', 'the first stage is briefed with its chosen artefact')
+
+      const lone = payload(await start({ artefactId: 'soap-full' }))
+      assert.deepEqual(lone.session.artefacts, { shape: 'soap-full', design: 'ssad' }, 'a lone artefactId is the first stage\'s choice')
+      assert.equal(asked.at(-1), 'soap-full')
+
+      const wrong = await start({ artefacts: { design: 'soap' } })
+      assert.equal(wrong.isError, true)
+      assert.match(payload(wrong).error, /"soap" can't pass the gate of stage "Design" \(gate: g2\)\. Choose one of: ssad, sad\./)
+      const outside = await tool('start_interview_session').handler({ slug: 'my-instance', artefacts: { design: 'sad' } }, { gantryClient })
+      assert.match(payload(outside).error, /"design", which is not a stage of this run: shape/)
+    }
+  )
+})
+
+test('#332 a lone artefactId still works against a gantry serve that lists no artefacts per stage; "artefacts" there is refused', async () => {
+  await withClient(
+    ({ url }) => {
+      if (url.pathname === '/api/instance') return { status: 200, body: INSTANCE }
+      if (url.pathname === '/api/instance/interview-brief') return { status: 200, body: BRIEF }
+      return undefined
+    },
+    async (gantryClient) => {
+      const lone = payload(await tool('start_interview_session').handler({ slug: 'my-instance', artefactId: 'soap' }, { gantryClient }))
+      assert.equal(lone.session.artefacts, undefined)
+      const refused = await tool('start_interview_session').handler({ slug: 'my-instance', artefacts: { shape: 'soap' } }, { gantryClient })
+      assert.match(payload(refused).error, /does not list the artefacts each stage can aim for/)
+    }
+  )
+})
+
 test('resume_interview_session takes over the paused session, runs Check status once first on a Provider workspace, and follows a merge', async () => {
   let checked = 0
   await withClient(
