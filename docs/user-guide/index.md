@@ -399,7 +399,7 @@ Above the modules sits a view-mode bar. It starts with the **Save** button (a di
 
 **Sources & decisions**, to the right of **Navigation ▾**, switches the page between the Stage's Fields and what you work *from*: the **Source documents**, the **Review comments** and the **Decisions log**. It keeps those three out of the way while you write, so the Fields start right under the toolbar.
 
-- **Off** (how the editor always opens; it isn't remembered from one visit to the next) shows the Fields, with the panels that tell you about the Stage's state and what to do next above them, as before: Re-open stage, a merged approval, **Out of date** and **Changed since approval**.
+- **Off** (how the editor always opens; it isn't remembered from one visit to the next) shows the Fields, with the panels that tell you about the Stage's state and what to do next above them, as before: Re-open stage, a merged approval, **Out of date**, **Changed since approval** and, in advanced mode, **Synced fields**.
 - **On** shows only the Source documents, the Review comments and the Decisions log, in that order, under the toolbar. The Fields and the panels above them are out of sight until you switch back.
 - **Nothing is lost by switching.** The Fields are only hidden: what you have typed stays, **Save** still shows that you have unsaved changes, and you can save while it is on. Switching back returns you to the place in the Fields you left.
 - **A number on the button** says how many things are waiting for you: review comment threads not yet answered, plus the Stage's open questions in the Decisions log. There is no number when nothing is waiting.

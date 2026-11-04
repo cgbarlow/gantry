@@ -5010,13 +5010,14 @@ function ReviewCommentsPanel({ instance }) {
   }
   // #304 (ADR-0066): the Review response list, made on demand from the decisions logs. Nothing is written to the Reviewed copy or committed.
   const decisionsStore = useDecisionsStore(instance)
+  const readStageLogs = async (stages) => Object.fromEntries(await Promise.all(stages.map(async (st) => [st.id, await decisionsStore.read(st.id).catch(() => null)])))
   const [response, setResponse] = useState({ phase: 'idle', message: '' })
   async function downloadResponseList() {
     setResponse({ phase: 'working', message: '' })
     try {
       const structure = await loadDefinitionStructure(instance)
       const stages = structure.stages ?? instance.stages
-      const logs = Object.fromEntries(await Promise.all(stages.map(async (st) => [st.id, await decisionsStore.read(st.id).catch(() => null)])))
+      const logs = await readStageLogs(stages)
       const modules = modulesWithStandard(structure.modules, structure.standardModules)
       const fieldTitle = (fieldKey) => {
         const [moduleId, ...rest] = String(fieldKey).split('.')
@@ -5060,7 +5061,7 @@ function ReviewCommentsPanel({ instance }) {
       if (live) reviewSummary.value = { key: instance.slug, copies: state.copies.length, unanswered: unansweredThreadCount(state.copies, logs), error: state.phase === 'error' }
     }
     if (state.copies.length === 0 || !decisionsStore) publish({})
-    else Promise.all(instance.stages.map(async (st) => [st.id, await decisionsStore.read(st.id).catch(() => null)])).then((pairs) => publish(Object.fromEntries(pairs)))
+    else readStageLogs(instance.stages).then(publish)
     return () => {
       live = false
     }
