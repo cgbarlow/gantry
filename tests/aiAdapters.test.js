@@ -284,9 +284,70 @@ test('#294 Anthropic request: originals attached to the first message are behind
   const first = withPdf.body.messages[0].content
   assert.deepEqual(first.at(-1).cache_control, { type: 'ephemeral', ttl: '1h' })
   assert.equal(first.filter((b) => b.cache_control).length, 1)
-  assert.equal(withPdf.body.messages[2].content, 'More', 'later turns carry no cache point of their own')
-  const plain = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'Start' }] })
+  assert.deepEqual(withPdf.body.messages[1].content, [{ type: 'text', text: 'ok' }], 'a message between the first and the last carries no cache point')
+  const plain = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'Start' }, { role: 'assistant', text: 'ok' }, { role: 'user', text: 'More' }] })
   assert.equal(plain.body.messages[0].content, 'Start', 'nothing attached, nothing marked')
+})
+
+// ---------- #328: the conversation is cached too ----------
+
+/** Every cache point in an Anthropic request body: the system blocks, then each message's blocks. */
+const cachePoints = (body) => [...(Array.isArray(body.system) ? body.system : []), ...body.messages.flatMap((m) => (Array.isArray(m.content) ? m.content : []))].filter((b) => b.cache_control)
+
+test('#328 Anthropic request: the last message carries a moving one-hour cache point, so the conversation so far is read from cache on the next call', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-x' })
+  const messages = [
+    { role: 'user', text: 'Start' },
+    { role: 'assistant', text: 'Reading.', toolCalls: [{ id: 'r1', name: 'read_repository_file', input: { id: 'api', path: 'a.ts' } }] },
+    { role: 'tool', toolCallId: 'r1', name: 'read_repository_file', content: 'export const A = 1' },
+  ]
+  const req = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages })
+  assert.deepEqual(req.body.messages.at(-1).content, [{ type: 'tool_result', tool_use_id: 'r1', content: 'export const A = 1', cache_control: { type: 'ephemeral', ttl: '1h' } }])
+  assert.equal(req.body.messages[1].content.some((b) => b.cache_control), false, 'only the last message moves')
+
+  const answered = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [...messages.slice(0, 2), { role: 'user', text: 'A is 1.' }] })
+  assert.deepEqual(answered.body.messages.at(-1).content, [{ type: 'text', text: 'A is 1.', cache_control: { type: 'ephemeral', ttl: '1h' } }], 'a plain message becomes one block with the point on it')
+})
+
+test('#328 Anthropic request: never more than 4 cache points, the system, the originals and the moving one together', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-x' })
+  const pdf = { mediaType: 'application/pdf', filename: 'a.pdf', data: 'AAAA' }
+  const long = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'Start', documents: [pdf] }, { role: 'assistant', text: 'ok' }, { role: 'user', text: 'More' }] })
+  assert.equal(cachePoints(long.body).length, 3)
+  assert.ok(long.body.messages.at(-1).content.at(-1).cache_control)
+  const one = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'Start', documents: [pdf] }] })
+  assert.equal(cachePoints(one.body).length, 2, 'the first message is also the last: one point covers both')
+  for (const body of [long.body, one.body]) assert.ok(cachePoints(body).length <= 4)
+})
+
+test('#328 a request that asks for no caching (a connection test, a merge) gets no moving cache point', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-x' })
+  const req = buildChatRequest(provider, { system: 'Be brief.', messages: [{ role: 'user', text: 'x' }] })
+  assert.equal(req.body.messages[0].content, 'x')
+  assert.ok(!JSON.stringify(req.body).includes('cache_control'))
+})
+
+test('#328 OpenRouter to an Anthropic model: the last message carries the moving cache point; other models and OpenAI-style Providers get nothing new', () => {
+  const claude = normaliseAiProvider({ type: 'openrouter', address: 'https://openrouter.ai/api/v1', key: 'k', model: 'anthropic/claude-x' })
+  const messages = [
+    { role: 'user', text: 'Start' },
+    { role: 'assistant', toolCalls: [{ id: 'r1', name: 'read_repository_file', input: { id: 'api', path: 'a.ts' } }] },
+    { role: 'tool', toolCallId: 'r1', name: 'read_repository_file', content: 'export const A = 1' },
+  ]
+  const req = buildChatRequest(claude, { system: SYSTEM, cachePrefix: STABLE, messages })
+  assert.deepEqual(req.body.messages.at(-1), { role: 'tool', tool_call_id: 'r1', content: [{ type: 'text', text: 'export const A = 1', cache_control: { type: 'ephemeral', ttl: '1h' } }] })
+  assert.equal(JSON.stringify(req.body).match(/cache_control/g).length, 2, 'the system and the last message')
+  const user = buildChatRequest(claude, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'x' }] })
+  assert.deepEqual(user.body.messages.at(-1).content, [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral', ttl: '1h' } }])
+  for (const provider of [
+    normaliseAiProvider({ type: 'openrouter', address: 'https://openrouter.ai/api/v1', key: 'k', model: 'meta/llama' }),
+    normaliseAiProvider({ type: 'openai', address: 'https://api.openai.com/v1', key: 'k', model: 'gpt-x' }),
+    normaliseAiProvider({ type: 'ollama', address: 'http://localhost:11434', model: 'llama' }),
+  ]) {
+    const plain = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages })
+    assert.ok(!JSON.stringify(plain.body).includes('cache_control'), provider.type)
+    assert.equal(plain.body.messages.at(-1).content, 'export const A = 1', provider.type)
+  }
 })
 
 test('#294 OpenAI-style requests are left as they are: the order of the prompt is what lets the AI Provider cache it', () => {

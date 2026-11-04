@@ -26,6 +26,8 @@
 //   * (#319, docs/adr/0072) hands the AI three read-only tools for a **code repository** Source document, `list_repository_folder`,
 //     `search_repository` and `read_repository_file`, answered by the Gantry server with the architect's own token (`context.readRepository`).
 //     Nothing of a repository is in the brief. A file read is recorded with the commit it saw, as an input of the Fields drafted next.
+//   * (#328, docs/adr/0073) shortens **old reads** in the conversation (`shortenOldReads`): once a read is more than three AI turns old its
+//     text is replaced by a one-line note naming what was read, in batches so the cached conversation keeps paying off between them.
 //
 //   * (#289) lets the architect **hand-edit** a drafted Field in the preview (`beginHandEdit` / `handEdit`). The edit is theirs from then
 //     on: Gantry's per-Field check does not run on it, it is logged as a `hand-edit` entry with the text they typed, and the Field's
@@ -58,7 +60,7 @@
 import { runTurn, runWithRecovery, ensureTested, EMPTY_USAGE } from './aiClient.js'
 import { ASK_TOOL_NAME, FALLBACK_FENCE } from './aiCards.js'
 import { getAiProvider } from './aiProviders.js'
-import { buildInterviewBrief, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
+import { buildInterviewBrief, estimateTokens, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
 import { DRAFT_TOOL, DRAFT_TOOL_NAME, DRAFT_FENCE, DRAFT_TEXT_FALLBACK_INSTRUCTIONS, checkDraft, extractDraftBlocks, isBlankValue, normaliseDraftValue, citedSourceIds, stripDraftBlocks } from './interviewDraft.js'
 import { countWords } from './targetSize.js'
 import {
@@ -81,6 +83,7 @@ import {
   inputsForDraft,
   loadAttachments,
   planSourceAccess,
+  readNote,
   runReadCall,
   sourcesForBrief,
   stripReadBlocks,
@@ -215,19 +218,79 @@ export function artefactChoices(definition, stageId) {
   return { candidates, lightest }
 }
 
+// ---------- shortening old reads (#328, docs/adr/0073) ----------
+// Every read the AI makes (a Source document, a repository file, a search) stays in the conversation and is sent again with every later
+// call. A message that holds reads says where each sits in its text, `reads: [{ at, length, label }]`; once the message is more than
+// READ_NOTE_AFTER_TURNS AI turns old (that many of the AI's replies have come after it), each read is replaced by its `readNote`. That is
+// done in batches, only when the batch saves at least READ_NOTE_MIN_SAVING tokens, because changing an early message means the cached
+// conversation from there on is written afresh. Citations, Out of date (the Fields' inputs) and the thread's "Read …" lines are untouched.
+
+/** A read is shortened once more than this many of the AI's replies have come after it, so one from the current turn never is. */
+export const READ_NOTE_AFTER_TURNS = 3
+/** About how many tokens a batch of shortening must save to be done. */
+export const READ_NOTE_MIN_SAVING = 20000
+
+/** The `reads` of a message whose whole text is one read or search result (`outcome` is what the tool returned), or nothing. */
+const readsOf = (outcome) => (outcome?.ok && outcome.label ? { reads: [{ at: 0, length: String(outcome.content).length, label: outcome.label }] } : {})
+
+/** One tool call's result as a message of the history. */
+const toolMessage = (call, outcome) => ({ role: 'tool', toolCallId: call.id, name: call.name, isError: !outcome.ok, content: outcome.content, ...readsOf(outcome) })
+
+/** Joins `parts` (`{ text, reads? }`) with `separator`, keeping where each read sits so the joined text can still be shortened. */
+function joinParts(parts, separator) {
+  let text = ''
+  const reads = []
+  parts.forEach((part, i) => {
+    if (i) text += separator
+    for (const read of part.reads ?? []) reads.push({ ...read, at: read.at + text.length })
+    text += part.text
+  })
+  return { text, ...(reads.length ? { reads } : {}) }
+}
+
+/** `message` with each of its reads replaced by the one-line note. */
+function shortenMessage(message) {
+  const key = message.role === 'tool' ? 'content' : 'text'
+  let text = String(message[key] ?? '')
+  for (const read of [...message.reads].sort((a, b) => b.at - a.at)) text = `${text.slice(0, read.at)}${readNote(read.label)}${text.slice(read.at + read.length)}`
+  const { reads: _reads, ...rest } = message
+  return { ...rest, [key]: text }
+}
+
+/**
+ * The history with its old reads shortened, when that saves enough; otherwise `messages` itself. Pure: the session keeps what it returns, so
+ * a read shortened once stays shortened and the start of the conversation is the same from call to call.
+ */
+export function shortenOldReads(messages, { afterTurns = READ_NOTE_AFTER_TURNS, minSaving = READ_NOTE_MIN_SAVING } = {}) {
+  const old = new Set()
+  let saving = 0
+  let replies = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m.reads?.length && replies > afterTurns) {
+      old.add(i)
+      const text = String((m.role === 'tool' ? m.content : m.text) ?? '')
+      for (const read of m.reads) saving += estimateTokens(text.slice(read.at, read.at + read.length)) - estimateTokens(readNote(read.label))
+    }
+    if (m.role === 'assistant') replies++
+  }
+  if (!old.size || saving < minSaving) return messages
+  return messages.map((m, i) => (old.has(i) ? shortenMessage(m) : m))
+}
+
 // A model without tool calling is shown its earlier tool calls as the blocks it would have written, and the
-// results as one message from Gantry; two messages from the same side are joined.
+// results as one message from Gantry; two messages from the same side are joined (keeping where their reads sit, #328).
 function flattenToolHistory(messages) {
   const out = []
   const push = (message) => {
     const last = out[out.length - 1]
-    if (last && last.role === 'user' && message.role === 'user' && !last.images && !message.images && !last.documents && !message.documents) last.text = `${last.text}\n\n${message.text}`
+    if (last && last.role === 'user' && message.role === 'user' && !last.images && !message.images && !last.documents && !message.documents) Object.assign(last, joinParts([last, message], '\n\n'))
     else out.push({ ...message })
   }
   let results = []
   let answers = []
   const flush = () => {
-    if (results.length) push({ role: 'user', fromGantry: true, text: `Gantry's check of your drafts:\n${results.join('\n')}` })
+    if (results.length) push({ role: 'user', fromGantry: true, ...joinParts([{ text: "Gantry's check of your drafts:" }, ...results], '\n') })
     for (const text of answers) push({ role: 'user', fromGantry: true, text })
     results = []
     answers = []
@@ -235,7 +298,7 @@ function flattenToolHistory(messages) {
   for (const m of messages) {
     if (m.role === 'tool') {
       if (m.name === ASK_TOOL_NAME) answers.push(m.content)
-      else results.push(`- ${m.content}`)
+      else results.push({ text: `- ${m.content}`, reads: (m.reads ?? []).map((read) => ({ ...read, at: read.at + 2 })) })
       continue
     }
     flush()
@@ -1230,6 +1293,7 @@ export function createInterviewSession(config = {}) {
         live = null
         textDraftFields = []
         setDraftingFields()
+        messages = shortenOldReads(messages)
         const result = await runWithRecovery(async () => {
           const provider = getAiProvider(state.providerId)
           if (!provider) throw new Error('This AI Provider no longer exists. Choose another.')
@@ -1257,10 +1321,7 @@ export function createInterviewSession(config = {}) {
           settleLive(shownText(result.text))
           messages = [...base, result.assistantMessage]
           if (!textDrafts) {
-            for (const call of result.otherToolCalls) {
-              const outcome = await resultFor(call)
-              messages.push({ role: 'tool', toolCallId: call.id, name: call.name, isError: !outcome.ok, content: outcome.content })
-            }
+            for (const call of result.otherToolCalls) messages.push(toolMessage(call, await resultFor(call)))
             if (result.otherToolCalls.some((c) => c.name === DRAFT_TOOL_NAME)) readsSinceDraft = []
           } else {
             const { drafts } = extractDraftBlocks(result.text)
@@ -1286,10 +1347,7 @@ export function createInterviewSession(config = {}) {
         if (result.kind === 'tools' && !textDrafts) {
           if (live) live.streaming = false
           messages = [...base, result.assistantMessage]
-          for (const call of result.otherToolCalls) {
-            const outcome = await resultFor(call)
-            messages.push({ role: 'tool', toolCallId: call.id, name: call.name, isError: !outcome.ok, content: outcome.content })
-          }
+          for (const call of result.otherToolCalls) messages.push(toolMessage(call, await resultFor(call)))
           // Once a round of drafts has landed, the reads before it are spent: they are inputs of those drafts, not of later ones.
           if (result.otherToolCalls.some((c) => c.name === DRAFT_TOOL_NAME)) readsSinceDraft = []
           stopDrafting()
@@ -1303,7 +1361,7 @@ export function createInterviewSession(config = {}) {
         messages = [...base, { role: 'assistant', text: result.text }]
         const notes = []
         let retry = false
-        let readsReply = ''
+        let readsReply = null
         if (textDrafts) {
           const { drafts, errors } = extractDraftBlocks(result.text)
           const requested = extractReadBlocks(result.text)
@@ -1316,7 +1374,7 @@ export function createInterviewSession(config = {}) {
           notes.push(...errors, ...requested.errors, ...logged.errors, ...outcomes.filter((o) => !o.ok).map((o) => o.content), ...logOutcomes.filter((o) => !o.ok).map((o) => o.content))
           if (round < MAX_ROUNDS - 1 && (answers.length || (notes.length && outcomes.some((o) => !o.ok) && held.size))) {
             retry = true
-            readsReply = answers.length ? `Gantry's reply to your read requests:\n\n${answers.map((a) => a.content).join('\n\n')}` : ''
+            readsReply = answers.length ? joinParts([{ text: "Gantry's reply to your read requests:" }, ...answers.map((a) => ({ text: a.content, ...readsOf(a) }))], '\n\n') : null
           }
         }
         // Question cards the model wrote that were unusable: a text-fallback model is told once; a model that keeps failing is asked in plain chat.
@@ -1332,7 +1390,7 @@ export function createInterviewSession(config = {}) {
         }
         if (retry) {
           const check = notes.length ? `Gantry's check of your drafts:\n- ${notes.join('\n- ')}` : ''
-          messages.push({ role: 'user', fromGantry: true, text: [readsReply, check].filter(Boolean).join('\n\n') })
+          messages.push({ role: 'user', fromGantry: true, ...joinParts([readsReply, check ? { text: check } : null].filter(Boolean), '\n\n') })
           emit()
           continue
         }

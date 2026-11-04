@@ -409,7 +409,8 @@ test('#331 an opening message goes with the first request as the architect\'s ow
   const first = ai.calls[0].body
   assert.equal(first.messages.length, 2, 'Gantry\'s opening, then the architect\'s')
   assert.match(userTexts(ai.calls[0])[0], /^Begin the interview\./)
-  assert.deepEqual(first.messages[1], { role: 'user', content: OPENING_WORDS }, 'word for word, as a chat message would be')
+  // #328: as the last message it carries the moving cache point, so it is one text block.
+  assert.deepEqual(first.messages[1], { role: 'user', content: [{ type: 'text', text: OPENING_WORDS, cache_control: { type: 'ephemeral', ttl: '1h' } }] }, 'word for word, as a chat message would be')
   assert.ok(!first.system.includes(OPENING_WORDS), 'never in the system prompt')
   assert.equal(userTexts(ai.calls[1]).filter((t) => t === OPENING_WORDS).length, 1, 'sent once: later turns carry it as history')
 

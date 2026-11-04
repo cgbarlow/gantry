@@ -218,7 +218,7 @@ test('#331 the opening message waits for the review round and goes with the AI\'
   const messages = ai.calls[0].body.messages
   assert.equal(messages.length, 2)
   assert.match(firstUser(ai.calls[0]), /Work through the review comments/)
-  assert.deepEqual(messages[1], { role: 'user', content: words })
+  assert.deepEqual(messages[1], { role: 'user', content: [{ type: 'text', text: words, cache_control: { type: 'ephemeral', ttl: '1h' } }] }, 'the last message, so with the moving cache point (#328)')
 })
 
 test('keep as is writes the reason in the architect’s words and nothing else; can’t settle yet is an open question with no real name in it', async () => {

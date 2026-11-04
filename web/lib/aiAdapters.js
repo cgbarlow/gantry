@@ -95,6 +95,27 @@ function markAttachmentsCacheable(wire) {
   first.content[first.content.length - 1].cache_control = { ...CACHE_CONTROL }
 }
 
+// #328: the conversation itself is cached too. A moving cache point sits on the last block of the last message, so the next call reads
+// everything up to there from the cache and pays in full only for what is new. With the system text and the originals that is three of the
+// four cache points Anthropic allows. An empty text block cannot carry one, so it goes on the last block that has something in it.
+const MAX_CACHE_POINTS = 4
+
+function countCachePoints(blocks) {
+  return blocks.filter((b) => b && typeof b === 'object' && b.cache_control).length
+}
+
+/** Puts the moving cache point on `message` (one wire message, Anthropic's or OpenAI's shape), unless `used` already fills the four. */
+function markLastMessageCacheable(message, used) {
+  if (!message || used >= MAX_CACHE_POINTS) return
+  if (typeof message.content === 'string') {
+    if (message.content) message.content = [{ type: 'text', text: message.content, cache_control: { ...CACHE_CONTROL } }]
+    return
+  }
+  if (!Array.isArray(message.content)) return
+  const block = message.content.findLast((b) => b.type !== 'text' || b.text)
+  if (block && !block.cache_control) block.cache_control = { ...CACHE_CONTROL }
+}
+
 function openAiMessages(system, messages) {
   const wire = []
   if (system) wire.push({ role: 'system', content: system })
@@ -155,7 +176,8 @@ const cachesViaOpenRouter = (provider) => provider.type === 'openrouter' && /^an
  * The streaming chat request for `provider`. `params`: `{ system, messages, tools, maxTokens }` (see the header
  * for the message shape; a tool is `{ name, description, parameters }`). The AI Provider's own settings
  * (temperature, max tokens, the Advanced set) are applied here. `cachePrefix` (#294) is the start of `system` that stays the same from turn
- * to turn; Anthropic gets a one-hour cache point after it (and after the originals attached to the first message, which are as stable).
+ * to turn; Anthropic gets a one-hour cache point after it (and after the originals attached to the first message, which are as stable),
+ * and (#328) a moving one on the last message, so the conversation so far is read from the cache on the next call.
  * Returns `{ url, method, headers, body }`.
  */
 export function buildChatRequest(provider, { system = '', cachePrefix = '', messages = [], tools = [], maxTokens } = {}) {
@@ -166,7 +188,11 @@ export function buildChatRequest(provider, { system = '', cachePrefix = '', mess
   if (provider.type === 'anthropic') {
     const body = { model: provider.model, max_tokens: outputLimit ?? DEFAULT_MAX_TOKENS, messages: anthropicMessages(messages), stream: true }
     set(body, 'system', anthropicSystem(system, cachePrefix))
-    if (cachePrefix) markAttachmentsCacheable(body.messages)
+    if (cachePrefix) {
+      markAttachmentsCacheable(body.messages)
+      const used = countCachePoints(Array.isArray(body.system) ? body.system : []) + body.messages.reduce((n, m) => n + (Array.isArray(m.content) ? countCachePoints(m.content) : 0), 0)
+      markLastMessageCacheable(body.messages.at(-1), used)
+    }
     if (tools.length) {
       body.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }))
       body.tool_choice = { type: 'auto' }
@@ -184,7 +210,11 @@ export function buildChatRequest(provider, { system = '', cachePrefix = '', mess
   }
   // OpenAI Chat Completions, and everything that speaks it.
   const body = { model: provider.model, messages: openAiMessages(system, messages), stream: true, stream_options: { include_usage: true } }
-  if (cachesViaOpenRouter(provider) && splitAtCachePoint(system, cachePrefix)) body.messages[0] = { role: 'system', content: cachedSystemBlocks(system, cachePrefix) }
+  if (cachesViaOpenRouter(provider) && splitAtCachePoint(system, cachePrefix)) {
+    body.messages[0] = { role: 'system', content: cachedSystemBlocks(system, cachePrefix) }
+    // #328: and the moving one on the last message, as for Anthropic itself. A message with no text (an assistant's tool calls only) has nowhere to carry it.
+    if (body.messages.length > 1) markLastMessageCacheable(body.messages.at(-1), 1)
+  }
   if (tools.length) {
     body.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }))
     body.tool_choice = 'auto'

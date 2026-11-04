@@ -1,0 +1,809 @@
+{
+ "about": "The shape of a long SOAP interview over a code repository and an uploaded brief (#328): each exchange is what the architect said and the AI calls that followed; each read is [kind, path or query or range, characters returned]. The test fills in the text.",
+ "repository": {
+  "id": "billing-api",
+  "title": "Billing API"
+ },
+ "document": {
+  "id": "brief",
+  "title": "Client brief",
+  "chars": 100000
+ },
+ "exchanges": [
+  {
+   "architect": null,
+   "calls": [
+    {
+     "reads": [
+      [
+       "file",
+       "README.md",
+       18000
+      ],
+      [
+       "search",
+       "MAX_ORDER",
+       3000
+      ],
+      [
+       "search",
+       "retry",
+       12000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "search",
+       "encrypt",
+       3000
+      ],
+      [
+       "doc",
+       "0-20000",
+       20000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "doc",
+       "20000-40000",
+       20000
+      ],
+      [
+       "file",
+       "src/orders/limits.ts",
+       14000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/orders/service.ts",
+       14000
+      ],
+      [
+       "file",
+       "src/orders/repository.ts",
+       24000
+      ],
+      [
+       "search",
+       "audit",
+       3000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/payments/gateway.ts",
+       24000
+      ]
+     ]
+    },
+    {
+     "drafts": [
+      "soap.objective",
+      "soap.subjective",
+      "soap.assessment"
+     ]
+    },
+    {
+     "text": "Round 1: here is what I found, and what I need from you next."
+    }
+   ]
+  },
+  {
+   "architect": "Orders over NZD 5,000 need a second approver.",
+   "calls": [
+    {
+     "reads": [
+      [
+       "file",
+       "src/payments/refunds.ts",
+       6000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/auth/session.ts",
+       6000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "doc",
+       "40000-60000",
+       20000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "doc",
+       "60000-80000",
+       20000
+      ],
+      [
+       "file",
+       "src/auth/roles.ts",
+       30000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/api/routes.ts",
+       30000
+      ],
+      [
+       "file",
+       "src/api/errors.ts",
+       6000
+      ]
+     ]
+    },
+    {
+     "drafts": [
+      "soap.objective",
+      "soap.plan",
+      "soap.assessment"
+     ]
+    },
+    {
+     "text": "Round 2: here is what I found, and what I need from you next."
+    }
+   ]
+  },
+  {
+   "architect": "Refunds go back through the same gateway, never by hand.",
+   "calls": [
+    {
+     "reads": [
+      [
+       "search",
+       "currency",
+       6000
+      ],
+      [
+       "file",
+       "src/billing/invoices.ts",
+       9000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/billing/tax.ts",
+       24000
+      ],
+      [
+       "doc",
+       "80000-100000",
+       20000
+      ],
+      [
+       "file",
+       "src/billing/currency.ts",
+       14000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "search",
+       "timeout",
+       3000
+      ],
+      [
+       "file",
+       "src/notifications/email.ts",
+       6000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "search",
+       "role",
+       3000
+      ],
+      [
+       "doc",
+       "0-20000",
+       20000
+      ],
+      [
+       "file",
+       "src/jobs/nightly.ts",
+       9000
+      ]
+     ]
+    },
+    {
+     "drafts": [
+      "soap.objective",
+      "soap.subjective"
+     ]
+    },
+    {
+     "text": "Round 3: here is what I found, and what I need from you next."
+    }
+   ]
+  },
+  {
+   "architect": "Only finance staff can see invoices; support sees order status only.",
+   "calls": [
+    {
+     "reads": [
+      [
+       "file",
+       "infra/main.tf",
+       6000
+      ],
+      [
+       "file",
+       "infra/network.tf",
+       14000
+      ],
+      [
+       "file",
+       "infra/database.tf",
+       14000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "docs/architecture.md",
+       9000
+      ],
+      [
+       "file",
+       "docs/runbook.md",
+       9000
+      ],
+      [
+       "file",
+       "config/production.yaml",
+       9000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/reporting/exports.ts",
+       18000
+      ]
+     ]
+    },
+    {
+     "drafts": [
+      "soap.objective"
+     ]
+    },
+    {
+     "text": "Round 4: here is what I found, and what I need from you next."
+    }
+   ]
+  },
+  {
+   "architect": "The nightly job must finish before 6am, when the Xero sync starts.",
+   "calls": [
+    {
+     "reads": [
+      [
+       "search",
+       "webhook",
+       12000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "search",
+       "backup",
+       12000
+      ],
+      [
+       "file",
+       "src/audit/log.ts",
+       24000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/integrations/xero.ts",
+       6000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "search",
+       "PII",
+       6000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "doc",
+       "20000-40000",
+       20000
+      ],
+      [
+       "file",
+       "README.md",
+       14000
+      ]
+     ]
+    },
+    {
+     "drafts": [
+      "soap.subjective",
+      "soap.objective"
+     ]
+    },
+    {
+     "text": "Round 5: here is what I found, and what I need from you next."
+    }
+   ]
+  },
+  {
+   "architect": "Production runs in two availability zones; the database has a standby.",
+   "calls": [
+    {
+     "reads": [
+      [
+       "search",
+       "rate limit",
+       6000
+      ],
+      [
+       "search",
+       "queue",
+       6000
+      ],
+      [
+       "file",
+       "src/orders/limits.ts",
+       6000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/orders/service.ts",
+       30000
+      ],
+      [
+       "file",
+       "src/orders/repository.ts",
+       14000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/payments/gateway.ts",
+       9000
+      ],
+      [
+       "doc",
+       "40000-60000",
+       20000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/payments/refunds.ts",
+       30000
+      ],
+      [
+       "file",
+       "src/auth/session.ts",
+       9000
+      ],
+      [
+       "doc",
+       "60000-80000",
+       20000
+      ]
+     ]
+    },
+    {
+     "drafts": [
+      "soap.subjective",
+      "soap.plan",
+      "soap.assessment"
+     ]
+    },
+    {
+     "text": "Round 6: here is what I found, and what I need from you next."
+    }
+   ]
+  },
+  {
+   "architect": "Audit records are kept for seven years.",
+   "calls": [
+    {
+     "reads": [
+      [
+       "file",
+       "src/auth/roles.ts",
+       24000
+      ],
+      [
+       "doc",
+       "80000-100000",
+       20000
+      ],
+      [
+       "file",
+       "src/api/routes.ts",
+       24000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "doc",
+       "0-20000",
+       20000
+      ],
+      [
+       "search",
+       "MAX_ORDER",
+       6000
+      ],
+      [
+       "file",
+       "src/api/errors.ts",
+       9000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/billing/invoices.ts",
+       9000
+      ]
+     ]
+    },
+    {
+     "drafts": [
+      "soap.assessment",
+      "soap.plan",
+      "soap.objective"
+     ]
+    },
+    {
+     "text": "Round 7: here is what I found, and what I need from you next."
+    }
+   ]
+  },
+  {
+   "architect": "Email goes through our own relay, not a third party.",
+   "calls": [
+    {
+     "reads": [
+      [
+       "search",
+       "retry",
+       12000
+      ],
+      [
+       "search",
+       "encrypt",
+       6000
+      ],
+      [
+       "file",
+       "src/billing/tax.ts",
+       6000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/billing/currency.ts",
+       18000
+      ],
+      [
+       "file",
+       "src/notifications/email.ts",
+       30000
+      ],
+      [
+       "search",
+       "audit",
+       12000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "search",
+       "currency",
+       12000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/jobs/nightly.ts",
+       30000
+      ],
+      [
+       "search",
+       "timeout",
+       3000
+      ],
+      [
+       "file",
+       "infra/main.tf",
+       30000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "doc",
+       "20000-40000",
+       20000
+      ]
+     ]
+    },
+    {
+     "drafts": [
+      "soap.objective",
+      "soap.subjective"
+     ]
+    },
+    {
+     "text": "Round 8: here is what I found, and what I need from you next."
+    }
+   ]
+  },
+  {
+   "architect": "Let us move on to the plan: what changes first?",
+   "calls": [
+    {
+     "reads": [
+      [
+       "search",
+       "role",
+       6000
+      ],
+      [
+       "file",
+       "infra/network.tf",
+       9000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "infra/database.tf",
+       14000
+      ],
+      [
+       "file",
+       "docs/architecture.md",
+       18000
+      ],
+      [
+       "file",
+       "docs/runbook.md",
+       14000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "search",
+       "webhook",
+       6000
+      ],
+      [
+       "doc",
+       "40000-60000",
+       20000
+      ],
+      [
+       "file",
+       "config/production.yaml",
+       6000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/reporting/exports.ts",
+       6000
+      ]
+     ]
+    },
+    {
+     "drafts": [
+      "soap.assessment",
+      "soap.subjective"
+     ]
+    },
+    {
+     "text": "Round 9: here is what I found, and what I need from you next."
+    }
+   ]
+  },
+  {
+   "architect": "Yes, the currency module is the first to go.",
+   "calls": [
+    {
+     "reads": [
+      [
+       "file",
+       "src/audit/log.ts",
+       24000
+      ],
+      [
+       "file",
+       "src/integrations/xero.ts",
+       6000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "README.md",
+       6000
+      ],
+      [
+       "doc",
+       "60000-80000",
+       20000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/orders/limits.ts",
+       18000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/orders/service.ts",
+       18000
+      ],
+      [
+       "file",
+       "src/orders/repository.ts",
+       6000
+      ]
+     ]
+    },
+    {
+     "drafts": [
+      "soap.plan"
+     ]
+    },
+    {
+     "text": "Round 10: here is what I found, and what I need from you next."
+    }
+   ]
+  },
+  {
+   "architect": "Finish with your recommendations.",
+   "calls": [
+    {
+     "reads": [
+      [
+       "doc",
+       "80000-100000",
+       20000
+      ],
+      [
+       "doc",
+       "0-20000",
+       20000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/payments/gateway.ts",
+       14000
+      ],
+      [
+       "search",
+       "backup",
+       12000
+      ],
+      [
+       "search",
+       "PII",
+       6000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
+       "src/payments/refunds.ts",
+       14000
+      ]
+     ]
+    },
+    {
+     "drafts": [
+      "soap.subjective"
+     ]
+    },
+    {
+     "text": "Round 11: here is what I found, and what I need from you next."
+    }
+   ]
+  }
+ ]
+}
