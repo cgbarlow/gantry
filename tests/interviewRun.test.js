@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { beginRun, clearRun, getRun, interviewRuns, nextStage, planRows, resumableRun, runTargets, saveOutcome, updateRun } from '../web/lib/interviewRun.js'
+import { beginRun, clearRun, getRun, interviewRuns, nextStage, planRows, resumableRun, runOpening, runTargets, saveOutcome, updateRun } from '../web/lib/interviewRun.js'
 import { applyDecisionsDelta, emptyDecisionsLog, sessionStatus } from '../web/lib/decisionsLog.js'
 import { createInterviewSession } from '../web/lib/interviewSession.js'
 
@@ -121,6 +121,16 @@ test('a finished run, a run of one Stage and a run already under way are not off
   assert.equal(resumableRun({ stages: STAGES, currentStageId: 'three', logs: { two: log('saved', 'two') } }), null, 'the previous run stopped at its own target')
   assert.equal(resumableRun({ stages: STAGES, currentStageId: 'three', logs: { two: log('saved', 'four'), three: log('saved', 'three') } }), null, 'this Stage has its own log, which says the run ended')
   assert.equal(resumableRun({ stages: STAGES, currentStageId: 'nope', logs: {} }), null)
+})
+
+test('#331 a run resumed elsewhere takes its opening message from the status block of the last Save, and none when it had none', () => {
+  const words = 'Focus on the hosting decision.'
+  let log = applyDecisionsDelta(emptyDecisionsLog('one'), { status: { session: 's-1', who: 'Alex', state: 'paused', target: 'three', opening: words } }, 'one')
+  assert.equal(runOpening(log), words)
+  log = applyDecisionsDelta(log, { status: { session: 's-2', who: 'Alex', state: 'saved', target: 'three' } }, 'one')
+  assert.equal(runOpening(log), '', 'the newest session is the run, and it had none')
+  assert.equal(runOpening(null), '')
+  assert.equal(runOpening(emptyDecisionsLog('one')), '')
 })
 
 test('the run held in the tab is replaced, changed and cleared by Instance', () => {

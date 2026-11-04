@@ -2227,7 +2227,8 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 @keyframes interview-blink { 50% { opacity: 0; } }
 .interview-page .kick { max-width: 460px; }
 .interview-page .kick label { display: block; font-size: 12px; font-weight: 600; margin: 12px 0 4px; }
-.interview-page .kick select { width: 100%; font: inherit; font-size: 13px; padding: 6px; background: var(--bg-raised); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.interview-page .kick select, .interview-page .kick textarea { width: 100%; font: inherit; font-size: 13px; padding: 6px; background: var(--bg-raised); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.interview-page .kick textarea { resize: vertical; min-height: 4.5em; box-sizing: border-box; }
 .interview-page .kick-intro { font-size: 13px; margin: 0 0 6px; }
 .interview-page .kick-row { margin: 6px 0; }
 .interview-page .kick-note, .interview-page .kick-sources { font-size: 12px; color: var(--text-muted); margin: 6px 0; }

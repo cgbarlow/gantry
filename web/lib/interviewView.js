@@ -23,13 +23,13 @@ import { modulesWithStandard } from './standardModules.js'
 import { citationSegments, isBlankValue } from './interviewDraft.js'
 import { describeInput, planSourceAccess } from './interviewSources.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
-import { logSummary } from './decisionsLog.js'
+import { OPENING_MAX, logSummary } from './decisionsLog.js'
 import { outOfDateCountByStage, findOutOfDateFields, flagsForField } from './outOfDate.js'
 import { planUpdateRound, stagesToUpdate } from './bringUpToDate.js'
 import { answeredCounts, assignChoices, planReview, reviewerLabels } from './reviewRound.js'
 import { ReviewContext, ReviewInputs, ReviewSection } from './reviewView.js'
 import { downloadReviewResponseList, hasReviewResponses, reviewResponseRows } from './reviewResponse.js'
-import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
+import { beginRun, clearRun, interviewRuns, nextStage, planRows, resumableRun, runOpening, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
 import { isRemoteInstance, lastSavedBy, openApproval, pullRequestLink, remoteRecord } from './interviewApproval.js'
@@ -321,6 +321,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const [pickedTarget, setPickedTarget] = useState(carryingOn ? run.target : null)
   const [resumeLogs, setResumeLogs] = useState(null) // the committed logs of this Stage and the one before it, which say whether a run was left part-way
   const [resumeMessage, setResumeMessage] = useState('')
+  // #331: the kickoff's optional box, sent as the architect's opening message. It starts blank on every kickoff and is never remembered;
+  // a run carries what was sent to each Stage it reaches. `startedOver` stops a Start this stage over picking up a paused session's.
+  const [opening, setOpening] = useState('')
+  const startedOver = useRef(false)
   const autoStarted = useRef(false)
   const [connecting, setConnecting] = useState(false)
   const [recovery, setRecovery] = useState(null)
@@ -632,6 +636,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const resuming = resumeNow?.resuming ? resumeNow : null
   const started = phase !== 'kickoff' && phase !== 'testing'
   const busy = phase === 'working' || phase === 'testing'
+  // Once the interview has started the box has done its job, so the next kickoff (Start this stage over included) has it blank.
+  useEffect(() => {
+    if (started) setOpening('')
+  }, [started])
   const finishing = snap?.finish === 'accepting' || snap?.finish === 'final'
   const stage = setup.status === 'ready' ? definitionNow.stages.find((s) => s.id === instance.stage.id) : null
   const readOnlyIds = new Set(stage?.readOnlyModules ?? [])
@@ -753,16 +761,19 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const stageTitleOf = (id) => stagesList.find((s) => s.id === id)?.title ?? id
 
   async function startInterview(options) {
+    // #331: the opening message is what the architect typed; else, on a Stage of a run, the run's; else, resuming the session they paused, that session's.
+    const sameRun = run && run.phase === 'running' && run.target === target
+    const words = opening.trim() || ((carryingOn || sameRun) && run.opening) || (startedOver.current ? '' : ctxRef.current?.resume?.adopt?.opening ?? '')
     // Bring up to date, a review round and a revision are not runs: they have no target Stage and never move the Instance on (#298, #303, #299).
+    // A revision has no box: its round is the Owner's comments.
     if (update || review || revise) {
-      await sessionRef.current?.start(options)
+      await sessionRef.current?.start({ ...options, opening: revise ? '' : words })
       return
     }
     // A run of one Stage is still a run: its plan and its status block say where it stands. A Stage the run carried on into carries on the same run.
-    const sameRun = run && run.phase === 'running' && run.target === target
     if (carryingOn) updateRun(instance.slug, { carryOn: null, at: instance.stage.id })
-    else beginRun(instance.slug, { target, startStageId: sameRun ? run.startStageId : instance.stage.id, providerId: providerInUse, at: instance.stage.id })
-    await sessionRef.current?.start(options)
+    else beginRun(instance.slug, { target, startStageId: sameRun ? run.startStageId : instance.stage.id, providerId: providerInUse, at: instance.stage.id, opening: words })
+    await sessionRef.current?.start({ ...options, opening: words })
   }
 
   // #295: a session that opens on a Stage with a Pull Request already open runs Check status once, so what the Provider says (merged,
@@ -822,10 +833,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       return
     }
     setPickedTarget(resume.targetStageId)
+    // #331: the run carries on with the opening message it was started with, unless the architect typed a new one here.
+    const words = opening.trim() || runOpening(resumeLogs?.[resume.fromStageId])
     if (resume.mode === 'advance' && remote) {
       // #295: a remote Stage was saved but its approval never asked for (Save and stop here, or the request failed): resuming asks for it, then the session waits for the Owner.
       const startStageId = runStartStage(stagesList, resumeLogs?.[resume.fromStageId], resume.fromStageId)
-      beginRun(instance.slug, { target: resume.targetStageId, startStageId, providerId, at: instance.stage.id })
+      beginRun(instance.slug, { target: resume.targetStageId, startStageId, providerId, at: instance.stage.id, opening: words })
       const asked = await requestApproval()
       if (!asked.ok) setResumeMessage(asked.message)
       else if (resume.targetStageId !== instance.stage.id && followingStage) await draftAhead({ phase: 'saved', approval: 'requested' }) // and the session drafts ahead while the Owner reviews (#296)
@@ -837,7 +850,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       return
     }
     const startStageId = runStartStage(stagesList, resumeLogs?.[resume.fromStageId], resume.fromStageId)
-    beginRun(instance.slug, { target: resume.targetStageId, startStageId, providerId, at: instance.stage.id, carryOn: follow ? follow.id : instance.stage.id })
+    beginRun(instance.slug, { target: resume.targetStageId, startStageId, providerId, at: instance.stage.id, carryOn: follow ? follow.id : instance.stage.id, opening: words })
     if (follow) {
       const result = await onAdvance()
       if (!result.ok) {
@@ -1077,7 +1090,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     sessions.delete(`${instance.slug}|${stageId}`)
     workingCopies.clear(`${instance.slug}|${stageId}`)
     if (run) updateRun(instance.slug, { carryOn: stageId, phase: 'running', providerId: providerInUse, at: stageId, startStageId: stageId, reopened: stageId })
-    else beginRun(instance.slug, { target, startStageId: stageId, providerId: providerInUse, at: stageId, carryOn: stageId, reopened: stageId })
+    else beginRun(instance.slug, { target, startStageId: stageId, providerId: providerInUse, at: stageId, carryOn: stageId, reopened: stageId, opening: snap?.opening ?? '' })
     let result
     try {
       result = await onReopenStage(stageId)
@@ -1172,7 +1185,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     const carries = carry && !ahead && target !== instance.stage.id && Boolean(followingStage) && Boolean(providerInUse)
     if (carries) {
       if (run) updateRun(instance.slug, { carryOn: followingStage.id, phase: 'running', providerId: providerInUse })
-      else beginRun(instance.slug, { target, startStageId: instance.stage.id, providerId: providerInUse, at: instance.stage.id, carryOn: followingStage.id })
+      else beginRun(instance.slug, { target, startStageId: instance.stage.id, providerId: providerInUse, at: instance.stage.id, carryOn: followingStage.id, opening: snap?.opening ?? '' })
     }
     let result
     try {
@@ -1218,7 +1231,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     if (!followingStage || !onDraftAhead) return
     setSaving({ ...saved, phase: 'drafting-ahead', advanceError: '' })
     if (run) updateRun(instance.slug, { carryOn: followingStage.id, phase: 'running', providerId: providerInUse })
-    else beginRun(instance.slug, { target, startStageId: instance.stage.id, providerId: providerInUse, at: instance.stage.id, carryOn: followingStage.id })
+    else beginRun(instance.slug, { target, startStageId: instance.stage.id, providerId: providerInUse, at: instance.stage.id, carryOn: followingStage.id, opening: snap?.opening ?? '' })
     let result
     try {
       result = await onDraftAhead(followingStage.id)
@@ -1506,6 +1519,23 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
               </div>
             </div>`
           : null}
+        ${revise
+          ? null
+          : html`<label for="interview-opening">Anything the AI should know before it starts? (optional)</label>
+            <textarea
+              id="interview-opening"
+              data-testid="interview-opening"
+              rows="3"
+              maxlength=${OPENING_MAX}
+              placeholder="Focus on the hosting decision; the budget is capped at NZD 1.2M"
+              value=${opening}
+              disabled=${phase === 'testing'}
+              onInput=${(e) => setOpening(e.currentTarget.value)}
+            ></textarea>
+            <p class="kick-note" data-testid="interview-opening-note">
+              Sent as your first message, in your own words${update || review ? '' : ', and on a run as the first message of every Stage'}. It steers what the AI reads and asks first, and never overrides
+              Gantry's rules or the Definition's Interview instructions.
+            </p>`}
         <button
           type="button"
           class="btn primary"
@@ -1576,7 +1606,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         ? confirmRestart
           ? html`<div class="dl-restart" data-testid="interview-restart-confirm" role="alert">
               <p class="kick-note">Start over: the AI ignores every earlier answer from now on. Saved content is not touched, and the log keeps what was said before.</p>
-              <button type="button" class="btn small" data-testid="interview-restart-yes" onClick=${() => { sessionRef.current?.startOver(); clearRun(instance.slug); setConfirmRestart(false); setSaving(null) }}>Start this stage over</button>
+              <button type="button" class="btn small" data-testid="interview-restart-yes" onClick=${() => { sessionRef.current?.startOver(); clearRun(instance.slug); startedOver.current = true; setOpening(''); setConfirmRestart(false); setSaving(null) }}>Start this stage over</button>
               <button type="button" class="btn small ghost" onClick=${() => setConfirmRestart(false)}>Keep going</button>
             </div>`
           : html`<button type="button" class="btn small ghost dl-restart" data-testid="interview-restart" disabled=${busy} onClick=${() => setConfirmRestart(true)}>Start this stage over</button>`

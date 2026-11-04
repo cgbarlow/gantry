@@ -3,8 +3,9 @@
 //
 // Three parts:
 //   * `status`   one entry per session: who, the run's target Stage, this Stage's state (and, in a run, each Stage's state), the Artefact aimed for, the last AI save,
-//                each AI Provider type and model used (with its tokens), the Interview instructions version, the skill versions.
-//                Never a key, an address or a custom name: `sessionStatus` builds an entry from a short list of known keys only.
+//                each AI Provider type and model used (with its tokens), the Interview instructions version, the skill versions, and the
+//                architect's opening message (#331), word for word. Never a key, an address or a custom name: `sessionStatus` builds an entry
+//                from a short list of known keys only.
 //   * `fields`   one record per drafted Field: what it was drafted from (Source documents and pages, earlier-Stage Fields), each
 //                with a fingerprint, and the ids of the entries that fed it. Overwritten when the Field is redrafted.
 //   * `entries`  APPEND-ONLY. Nothing here edits or deletes one: a changed answer is a new entry with `replaces`, an open question
@@ -70,6 +71,9 @@ export function safeToken(value, max = 120) {
   return text
 }
 
+/** The longest opening message (#331) the kickoff takes and a status entry keeps. */
+export const OPENING_MAX = 4000
+
 const count = (n) => (Number.isFinite(Number(n)) && Number(n) > 0 ? Math.round(Number(n)) : 0)
 
 /** One model's line in a status entry. `tokens` is null for an outside agent, whose tokens are "not reported". */
@@ -103,6 +107,10 @@ export function sessionStatus(input = {}) {
   // #307: the session was run by an outside agent over MCP (ADR-0067); the label is the only value accepted.
   if (input.recordedBy === OUTSIDE_AGENT) status.recordedBy = OUTSIDE_AGENT
   status.instructions = safeToken(input.instructions, 80) || null
+  // #331: the opening message the architect typed at the kickoff, kept word for word because the words are theirs (ADR-0064). A run carries it
+  // to every Stage, and a run or a paused session resumed in another browser takes it from here. Free text, so it is not held to `safeToken`.
+  const opening = typeof input.opening === 'string' ? input.opening.trim().slice(0, OPENING_MAX) : ''
+  if (opening) status.opening = opening
   const skills = isObject(input.skills) ? input.skills : {}
   status.skills = Object.fromEntries(Object.entries(skills).map(([id, version]) => [safeToken(id, 60), safeToken(version, 60)]).filter(([id, version]) => id && version))
   return status

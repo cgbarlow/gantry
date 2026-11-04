@@ -31,7 +31,7 @@ const readYaml = (file) => parseYAML(readFileSync(file, 'utf8'))
 const redraftScript = (body) => {
   const first = body.messages[0]
   const text = typeof first.content === 'string' ? first.content : first.content.map((b) => b.text ?? '').join('\n')
-  if (body.messages.length === 1) {
+  if (body.messages.every((m) => m.role === 'user')) {
     const field = /(m[ab]\.body|ms\.body) \([^)]*\): REDRAFT/.exec(text)?.[1]
     if (field) return { text: `Redrafting ${field}.`, tools: [{ id: `d-${field}`, input: { field, value: `Redrafted ${field} from the new brief [Brief v2](source:brief-v2).` } }] }
     return { text: 'Reading the Source documents.' }
@@ -138,6 +138,9 @@ test('server workspace: the banner opens the round on the first Stage that has f
     assert.equal(await page.locator('[data-testid="interview-run-until"]').count(), 0, 'it is not a run')
     assert.equal(await page.locator('[data-testid="interview-blocked"]').count(), 0, 'Alpha is not the current Stage, and that is fine here')
     assert.match(await page.textContent('[data-testid="interview-start"]'), /Bring up to date/)
+    // #331: the same opening box as an interview's kickoff, blank.
+    assert.equal(await page.inputValue('[data-testid="interview-opening"]'), '')
+    await page.fill('[data-testid="interview-opening"]', 'The new brief moves the deadline; keep that in mind.')
     await page.click('[data-testid="interview-start"]')
 
     // The cards come before the AI is called: one card for the one Field, Redraft recommended.
@@ -159,6 +162,8 @@ test('server workspace: the banner opens the round on the first Stage that has f
     await page.waitForSelector('[data-testid="interview-card"][data-card-type="change"]')
     assert.match(posts[0].raw, /REDRAFT/)
     assert.doesNotMatch(posts[0].raw, /Begin the interview/)
+    assert.deepEqual(posts[0].body.messages[1], { role: 'user', content: 'The new brief moves the deadline; keep that in mind.' }, 'the opening message goes with the first request, after the answers')
+    assert.deepEqual(await page.locator('[data-testid="interview-msg"][data-who="you"]').first().textContent(), 'The new brief moves the deadline; keep that in mind.')
     assert.deepEqual(await page.locator('[data-testid="interview-card"][data-card-type="change"] [data-testid="card-option"]').evaluateAll((els) => els.map((el) => el.dataset.option)), ['Keep', "Use the AI's version", 'Merge'])
     await choose(page, 'change:ma.body', "Use the AI's version")
     await page.click('[data-testid="round-submit"]')

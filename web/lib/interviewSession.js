@@ -302,9 +302,11 @@ export function createInterviewSession(config = {}) {
     update: null, // Bring up to date (#298): { mode: 'only'|'first', total, answered, reopen, deferred, elsewhere } while this session has such a round
     revise: null, // Revising a Stage the Owner sent back (#299): { total, answered, pullRequestId } while this session has its round of comment cards
     reopenRequest: null, // the architect chose the AI's offer to re-open a signed-off Stage (#299): { stageId, stageTitle }; the page carries it out
+    opening: '', // #331: what the architect typed in the kickoff's box, word for word: their opening message, which the status block records
   }
   let queuedReview = [] // review cards waiting to join the next round of a session that is going (#303)
   let updateOpening = '' // the opening a normal session gives the AI once its Bring up to date round is answered (#298)
+  let openingToSend = '' // #331: the architect's opening message until the AI's first turn carries it
   const updateCauses = new Map() // module.field -> why it was Out of date, for the note when an agreed Module goes back to draft (#298)
   let clashWaiter = null // { resolve, conflicts, entryIds }: the Save waiting on the clash cards
   let messages = []
@@ -360,6 +362,14 @@ export function createInterviewSession(config = {}) {
     const item = { id: nextId++, who, text, ...extra }
     state.thread.push(item)
     return item
+  }
+  // #331: the AI's first turn carries the architect's opening message, as their own words, right after Gantry's opening. It goes once, and
+  // only to the request that opens the conversation: a round that comes before the AI (Bring up to date, review comments) waits for it.
+  const withOpening = (list) => {
+    if (!openingToSend) return list
+    const text = openingToSend
+    openingToSend = ''
+    return [...list, { role: 'user', text }]
   }
   const architectMessages = () => messages.filter((m) => m.role === 'user' && m !== messages[0] && !m.fromGantry).map((m) => m.text)
   const architectText = () => [...messages.filter((m) => m.role === 'user' && m !== messages[0] && !m.fromGantry).map((m) => m.text), ...otherTexts].join('\n')
@@ -881,7 +891,7 @@ export function createInterviewSession(config = {}) {
       return { ok: true }
     }
     const opening = mode === 'only' ? UPDATE_OPENING : updateOpening || openingFor(context)
-    messages = [{ role: 'user', text: `${opening}\n\nThe architect's answers to the round that brings the Out of date Fields up to date:\n${updateAnswersText(results, { fieldTitle })}` }]
+    messages = withOpening([{ role: 'user', text: `${opening}\n\nThe architect's answers to the round that brings the Out of date Fields up to date:\n${updateAnswersText(results, { fieldTitle })}` }])
     await runLoop()
     return { ok: true }
   }
@@ -1460,7 +1470,7 @@ export function createInterviewSession(config = {}) {
 
 The architect's answers to the review comments:
 ${reviewAnswers.text}`
-      if (round.review) messages = [{ role: 'user', text: body }]
+      if (round.review) messages = withOpening([{ role: 'user', text: body }])
       else messages = [...messages, { role: 'user', fromGantry: true, text: body }]
       await runLoop()
       return { ok: true }
@@ -1506,8 +1516,11 @@ ${reviewAnswers.text}` : '',
       return state.providerId
     },
 
-    /** Tests the chosen AI Provider if it has not been, then opens the interview. Resolves once the first turn has finished. */
-    async start({ alongside = false } = {}) {
+    /**
+     * Tests the chosen AI Provider if it has not been, then opens the interview. Resolves once the first turn has finished. `opening` (#331) is
+     * what the architect typed in the kickoff's box: it shows in the thread as theirs and goes with the AI's first turn, never in the system prompt.
+     */
+    async start({ alongside = false, opening = '' } = {}) {
       if (state.phase !== 'kickoff') return
       state.kickoffError = null
       // #290 (ADR-0068): another session on this Stage that is not Done gets a card naming when it last saved. Carry on alongside
@@ -1560,11 +1573,16 @@ ${reviewAnswers.text}` : '',
       } else if (state.cardMode === 'chat') {
         say('sys', 'This model cannot produce question cards, so it asks in plain chat. That works, but is less reliable.')
       }
+      state.opening = String(opening ?? '').trim()
+      openingToSend = state.opening
+      // The thread shows the opening message as the architect's, where the conversation has it: after a resumed session's recap.
+      const showOpening = () => state.opening && say('you', state.opening)
       // #303: a session that is only working through review comments opens its round before the AI is called, and ends there unless an answer needs
       // writing. One that joins review comments to an interview queues the cards for the first round the AI asks.
       const rev = getContext().review
       if (rev?.items?.length && rev.mode === 'only') {
         messages = []
+        showOpening()
         openReviewRound()
         emit()
         return
@@ -1603,6 +1621,7 @@ ${reviewAnswers.text}` : '',
       } else {
         messages = [{ role: 'user', text: openingFor(getContext()) }]
       }
+      showOpening()
       if (updating) {
         // #298: the round about the Out of date Fields comes first, before the AI is called. A session that is only bringing them up to date
         // has nothing else to do; a normal one gives the AI its usual opening once the round is answered.
@@ -1613,6 +1632,7 @@ ${reviewAnswers.text}` : '',
         emit()
         return
       }
+      messages = withOpening(messages)
       recordArtefact()
       await runLoop()
     },
@@ -1906,10 +1926,12 @@ ${reviewAnswers.text}` : '',
           revise: state.revise,
           error: state.error,
           phase: state.phase,
+          opening: state.opening,
         },
         pendingChanges: [...pendingChanges],
         queuedReview,
         updateOpening,
+        openingToSend,
         updateCauses: [...updateCauses],
         kept: [...keptFields],
         authorised: [...authorised],
@@ -1945,6 +1967,7 @@ ${reviewAnswers.text}` : '',
         review: s.review ?? null,
         revise: s.revise ?? null,
         error: s.error ?? null,
+        opening: s.opening ?? '',
         kickoffError: null,
         drafting: null,
         preparing: false,
@@ -1955,6 +1978,7 @@ ${reviewAnswers.text}` : '',
       for (const [k, v] of saved.pendingChanges ?? []) pendingChanges.set(k, v)
       queuedReview = saved.queuedReview ?? []
       updateOpening = saved.updateOpening ?? ''
+      openingToSend = saved.openingToSend ?? ''
       updateCauses.clear()
       for (const [k, v] of saved.updateCauses ?? []) updateCauses.set(k, v)
       keptFields.clear()
@@ -2004,7 +2028,7 @@ ${reviewAnswers.text}` : '',
         fieldKeys: keys,
         handEdited: keys.filter((key) => state.drafts[key]?.handEdited === true),
         saving,
-        status: { who: context.actor, target: target ?? context.targetStageId ?? context.stageId, state: runState, stages: stages ?? context.runStages, artefact: context.artefactId, instructions: context.instructionsVersion },
+        status: { who: context.actor, target: target ?? context.targetStageId ?? context.stageId, state: runState, stages: stages ?? context.runStages, artefact: context.artefactId, instructions: context.instructionsVersion, opening: state.opening },
       })
     },
 
@@ -2045,6 +2069,8 @@ ${reviewAnswers.text}` : '',
       state.revise = null
       state.reopenRequest = null
       updateOpening = ''
+      state.opening = ''
+      openingToSend = ''
       updateCauses.clear()
       state.phase = 'kickoff'
       pendingChanges.clear()

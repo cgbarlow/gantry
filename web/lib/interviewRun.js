@@ -183,11 +183,20 @@ export function runStartStage(stages, log, fallback) {
   return named.length ? stages[Math.min(...named)].id : fallback
 }
 
+/**
+ * The opening message the run was started with (#331), from the status block its last Save wrote: '' when the architect typed none. A run
+ * resumed in another browser takes it from here, so each Stage it reaches still starts with the same words.
+ */
+export function runOpening(log) {
+  return latestStatus(log)?.opening ?? ''
+}
+
 // ---------- the run held in this tab ----------
 
 /**
  * The runs in this tab, by Instance slug. A run is what the Interview page of the next Stage reads to know it is carrying on:
- * `{ target, startStageId, providerId, phase: 'running'|'paused'|'done', carryOn: stageId|null }`.
+ * `{ target, startStageId, providerId, phase: 'running'|'paused'|'done', carryOn: stageId|null, opening }`. `opening` (#331) is the
+ * architect's opening message from the kickoff, which every Stage of the run starts with ('' for none).
  */
 export const interviewRuns = signal({})
 

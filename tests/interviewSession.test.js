@@ -395,3 +395,61 @@ test("#294 the snapshot carries this session's tokens: all the input, how much w
   const delta = session.decisionsDelta({ runState: 'in-progress' })
   assert.deepEqual(delta.status.models, [{ type: 'anthropic', model: 'claude-x', inputTokens: 1600, cachedTokens: 1400, outputTokens: 60 }])
 })
+
+// ---------- #331: the opening message from the kickoff ----------
+
+const OPENING_WORDS = 'Focus on the hosting decision; the budget is capped at NZD 1.2M.'
+const userTexts = (request) => request.body.messages.filter((m) => m.role === 'user').map((m) => (typeof m.content === 'string' ? m.content : m.content.map((b) => b.text ?? '').join('\n')))
+
+test('#331 an opening message goes with the first request as the architect\'s own message, after Gantry\'s opening, and shows in the thread as theirs', async () => {
+  const ai = fakeAi((request, n) => (n === 0 ? anthropicReply({ text: 'Looking at hosting first.', tools: [{ id: 't1', input: { field: 'details.risk', value: 'Medium' } }] }) : anthropicReply({ text: 'Drafted.' })))
+  const { session } = sessionWith(ai)
+  await session.start({ opening: `  ${OPENING_WORDS}  ` })
+
+  const first = ai.calls[0].body
+  assert.equal(first.messages.length, 2, 'Gantry\'s opening, then the architect\'s')
+  assert.match(userTexts(ai.calls[0])[0], /^Begin the interview\./)
+  assert.deepEqual(first.messages[1], { role: 'user', content: OPENING_WORDS }, 'word for word, as a chat message would be')
+  assert.ok(!first.system.includes(OPENING_WORDS), 'never in the system prompt')
+  assert.equal(userTexts(ai.calls[1]).filter((t) => t === OPENING_WORDS).length, 1, 'sent once: later turns carry it as history')
+
+  const snap = session.snapshot()
+  const yours = snap.thread.filter((t) => t.who === 'you')
+  assert.deepEqual(yours.map((t) => t.text), [OPENING_WORDS])
+  assert.ok(snap.thread.indexOf(yours[0]) < snap.thread.findIndex((t) => t.who === 'ai'), 'it comes before the AI\'s reply')
+  assert.equal(snap.opening, OPENING_WORDS)
+  assert.equal(session.decisionsDelta({ runState: 'in-progress' }).status.opening, OPENING_WORDS, 'the status block keeps it, for a run resumed elsewhere')
+})
+
+test('#331 an empty box changes nothing about the first request', async () => {
+  const requests = []
+  for (const opening of [undefined, '', '   \n ']) {
+    const ai = fakeAi(() => anthropicReply({ text: 'Nothing to draft.' }))
+    const { session } = sessionWith(ai)
+    await session.start(opening === undefined ? undefined : { opening })
+    requests.push(ai.calls[0].body.messages)
+    assert.equal(session.snapshot().thread.some((t) => t.who === 'you'), false)
+    assert.equal('opening' in session.decisionsDelta({ runState: 'in-progress' }).status, false)
+  }
+  assert.equal(requests[0].length, 1)
+  assert.deepEqual(requests[1], requests[0])
+  assert.deepEqual(requests[2], requests[0])
+})
+
+test('#331 Start this stage over forgets the opening message; a working copy keeps it', async () => {
+  const ai = fakeAi(() => anthropicReply({ text: 'Nothing to draft.' }))
+  const { session, context } = sessionWith(ai)
+  await session.start({ opening: OPENING_WORDS })
+
+  const copy = JSON.parse(JSON.stringify(session.exportState()))
+  const other = createInterviewSession({ providerId: session.providerId, getContext: () => context, fetchImpl: ai.fetchImpl })
+  assert.equal(other.importState(copy), true)
+  assert.equal(other.snapshot().opening, OPENING_WORDS)
+  assert.equal(other.decisionsDelta({ runState: 'paused' }).status.opening, OPENING_WORDS)
+
+  session.startOver()
+  assert.equal(session.snapshot().opening, '')
+  const before = ai.calls.length
+  await session.start()
+  assert.equal(ai.calls[before].body.messages.length, 1, 'the next start opens without it')
+})
