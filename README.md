@@ -980,6 +980,10 @@ An architect, or an outside agent over MCP, can add a **Source document** by giv
 
 **`GANTRY_SOURCE_FETCH_ALLOW_PRIVATE_URLS`** (off by default; set it to `1`, `true`, `yes` or `on`): by default the fetch **refuses private and loopback addresses** exactly as the AI relay does, at **every redirect hop** and on what a public name resolves to, so a public page can't bounce the server into its own network. Set it to let architects cite an intranet page the server can reach. It is a setting of its own: it never opens the AI relay to private addresses, and `GANTRY_AI_ALLOW_PRIVATE_URLS` never opens Source document fetches. Cloud metadata addresses (`169.254.169.254`, `metadata.google.internal` and the like) stay refused even with it on.
 
+### Code repositories as Source documents
+
+An architect, or an outside agent over MCP, can add a **code repository** on GitHub, Azure DevOps, GitLab or Bitbucket as a Source document (`docs/adr/0072-a-code-repository-is-a-source-document-read-live-through-a-pointer.md`). Nothing from the repository is stored: the Instance keeps a pointer (Provider, repository, branch, optional folders), and the server reads it live, read-only, through `POST /api/sources/repository` whenever the AI asks. It uses the token the architect gives in their browser (none for a public repository); over MCP, the token the MCP server already holds for the workspace. The server needs outbound HTTPS to those Providers (see **Outbound network**). There is no switch for it: it takes exactly the Provider addresses a workspace may use, so a self-hosted GitHub Enterprise, Azure DevOps Server or GitLab address is accepted only where the matching workspace setting already allows one.
+
 ### Health and restart
 
 The `runtime` stage declares a `HEALTHCHECK`:
