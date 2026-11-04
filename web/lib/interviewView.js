@@ -888,6 +888,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     const result = await sessionRef.current?.finishWithRecommendations()
     if (result && !result.ok && result.message) setSubmitMessage(result.message)
   }
+  // #329: Compact now, on the card or in the rail's Tokens block. With a round open it waits for the round (the session says so).
+  const compactNow = () => sessionRef.current?.compactNow()
   function openHandEdit(fieldKey) {
     const result = sessionRef.current?.beginHandEdit(fieldKey)
     if (result?.ok) setHandEditing({ key: fieldKey, error: '' })
@@ -1589,6 +1591,31 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         <dt>This stage</dt>
         <dd data-testid="interview-tokens-stage" title=${tokenBreakdown(thisStageTokens)} tabindex="0">${formatTokens(totalTokens(thisStageTokens))}</dd>
       </dl>
+      ${started && snap?.canCompact && phase !== 'paused'
+        ? snap.compactPending
+          ? html`<p class="rail-compact-note" data-testid="interview-compact-pending">${phase === 'asking' ? 'Compacts once you answer this round.' : 'Compacts when this turn ends.'}</p>`
+          : html`<button type="button" class="btn small ghost rail-compact" data-testid="interview-compact" disabled=${snap.compacting} title="Start the conversation afresh so it fits the model: the AI keeps the drafts, the decisions log and your own messages word for word, with a short summary of where things stand." onClick=${compactNow}>Compact now</button>`
+        : null}
+    </div>`
+  }
+
+  // #329 (docs/adr/0073): past about 60% of the model's context window, a card offers to compact the conversation. Not now waits until it has
+  // grown by another tenth of the window. Compacting keeps the architect's words; it forgets the AI's earlier replies and the text of its reads.
+  const compactOfferCard = () => {
+    const offer = snap?.compactOffer
+    if (!offer || busy) return null
+    const share = Math.round((offer.before / offer.window) * 100)
+    return html`<div class="qcard compact-offer" role="status" data-testid="interview-compact-offer">
+      <div class="qchip">Long conversation</div>
+      <p class="qhead">This conversation is ${formatTokens(offer.before)}, about ${share}% of what the model can take. Compact it?</p>
+      <p class="kick-note">
+        Compacting starts it afresh at about ${formatTokens(offer.after)}. The AI keeps the drafts, the decisions log and your own messages word for word, with a short summary of where things stand. It
+        forgets its earlier replies and the text of what it read, and reads again whatever it needs.${phase === 'asking' ? ' It happens once you answer this round.' : ''}
+      </p>
+      <div class="round-actions">
+        <button type="button" class="btn primary" data-testid="interview-compact-offer-now" onClick=${compactNow}>Compact now</button>
+        <button type="button" class="btn ghost" data-testid="interview-compact-offer-not-now" onClick=${() => sessionRef.current?.notNowCompact()}>Not now</button>
+      </div>
     </div>`
   }
 
@@ -2199,6 +2226,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             ${setup.status === 'error' ? html`<p class="inline-error" role="alert">${setup.message}</p>` : null}
             ${setup.status === 'ready' && !started && !(remote && awaiting && !revise) && !(waitingNow && phase === 'kickoff') && !(sentBack && sentBack.stageId === instance.currentStageId && !revise) ? kickoff() : null}
             ${setup.status === 'ready' && started ? thread() : null}
+            ${setup.status === 'ready' && started ? compactOfferCard() : null}
             ${setup.status === 'ready' && started ? roundView() : null}
             ${setup.status === 'ready' && started ? clashView() : null}
             ${setup.status === 'ready' ? pausedView() : null}
@@ -2231,7 +2259,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                 </div>`
               : null}
             ${busy && started && snap?.preparing ? html`<p class="msg sys" data-testid="interview-preparing">Preparing questions<span class="caret"></span></p>` : null}
-            ${busy && started && !snap?.drafting && !snap?.preparing && !(snap.thread[snap.thread.length - 1]?.streaming) ? html`<p class="msg sys" data-testid="interview-working">Working<span class="caret"></span></p>` : null}
+            ${busy && started && snap?.compacting ? html`<p class="msg sys" data-testid="interview-compacting">Compacting the conversation<span class="caret"></span></p>` : null}
+            ${busy && started && !snap?.drafting && !snap?.preparing && !snap?.compacting && !(snap.thread[snap.thread.length - 1]?.streaming) ? html`<p class="msg sys" data-testid="interview-working">Working<span class="caret"></span></p>` : null}
             ${reopening.message && !update ? html`<p class="inline-error" role="alert" data-testid="interview-reopen-error">${reopening.message}</p>` : null}
             ${reopening.stageId && !update ? html`<p class="msg sys" data-testid="interview-reopening" role="status">Re-opening ${stageTitleOf(reopening.stageId)}…</p>` : null}
             ${stageEnd()}

@@ -439,6 +439,15 @@ export async function callAiProvider(provider, request, { fetchImpl = globalThis
 
 const OUT_OF_CREDIT = /credit balance|insufficient[ _](funds|credit|quota|balance)|out of credits?|payment required|billing|exceeded your current quota|add (more )?credits?/i
 
+// #329: how each AI Provider words a request too long for the model's context window. Anthropic: "prompt is too long: 215000 tokens >
+// 200000 maximum", "input length and `max_tokens` exceed context limit", and `request_too_large` (413); OpenAI and the OpenAI-compatible
+// ones: `context_length_exceeded`, "This model's maximum context length is 128000 tokens" (OpenRouter, vLLM and LM Studio say much the same),
+// "exceeds the context window"; Gemini: "The input token count (1200000) exceeds the maximum number of tokens allowed"; Mistral: "too large
+// for model with 32768 maximum context length"; Ollama: "the input length exceeds the context length"; LM Studio: "Context length exceeded",
+// "greater than the context length".
+const TOO_LONG = /context_length_exceeded|request_too_large|prompt is too long|exceeds? (the )?context (length|window|limit)|maximum context length|input token count|too large for model|context (length|window) (is )?exceeded|than the context (length|window)|context overflow/i
+const TOO_LONG_STATUS = [0, 400, 413, 422]
+
 function errorCodeFromBody(body) {
   if (!body || typeof body !== 'object') return ''
   const e = body.error
@@ -451,6 +460,8 @@ function errorCodeFromBody(body) {
  *   key-rejected  401/403, or an `authentication_error`           -> ask for a key and resend
  *   out-of-credit 402, or a credit/quota message on 400/402/429  -> offer Retry
  *   rate-limited  429, 503, 529 and "overloaded"                  -> offer Retry
+ *   too-long      a 400 or 413 that says the request is longer than the model's context window (#329): the AI interview
+ *                 compacts its conversation and sends it once more (web/lib/interviewSession.js)
  *   address-refused  the relay's own refusal of a private address
  *   model-not-found  404 or a "model ... not found" message
  *   failed        anything else
@@ -471,6 +482,9 @@ export function classifyFailure(status, body, provider, { retryAfter = null } = 
   if (status === 429 || status === 503 || status === 529 || /rate_limit|overloaded/.test(code)) {
     const wait = retryAfter ? ` Try again in about ${retryAfter} second${retryAfter === 1 ? '' : 's'}.` : ''
     return new AiProviderError('rate-limited', `${name} is limiting requests right now${detail ? `: ${detail}` : '.'}${wait}`, status, { retryAfter })
+  }
+  if (TOO_LONG_STATUS.includes(status) && TOO_LONG.test(`${detail ?? ''} ${code}`)) {
+    return new AiProviderError('too-long', `${name} says the conversation is too long for the model${detail ? `: ${detail}` : '.'}`, status)
   }
   if (status === 404 || code === 'model_not_found' || (/model/i.test(detail ?? '') && /not found|does not exist|no such/i.test(detail ?? ''))) {
     return new AiProviderError('model-not-found', detail ?? `${name} doesn’t have that model.`, status)

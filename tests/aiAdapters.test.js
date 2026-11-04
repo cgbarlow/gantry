@@ -136,6 +136,11 @@ test('an error inside a stream is thrown as the failure it stands for', () => {
   assert.throws(() => parse('openai', quota), (e) => e.code === 'out-of-credit')
   const badKey = 'event: error\ndata: {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}\n\n'
   assert.throws(() => parse('anthropic', badKey), (e) => e.code === 'key-rejected')
+  // #329: a request too long for the model, refused part-way through the stream.
+  const tooLong = 'event: error\ndata: {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 215000 tokens > 200000 maximum"}}\n\n'
+  assert.throws(() => parse('anthropic', tooLong), (e) => e.code === 'too-long')
+  const contextLength = 'data: {"error":{"message":"This model\'s maximum context length is 8192 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}\n\n'
+  assert.throws(() => parse('openai', contextLength), (e) => e.code === 'too-long')
 })
 
 test('the SSE reader handles CRLF, comments, multi-line data and a final event with no blank line', () => {
