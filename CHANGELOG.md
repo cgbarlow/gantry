@@ -17,6 +17,80 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.14.0 — 2026-11-04
+
+More to draw on, and less in the way. An architect can now add a Source document from a web address,
+or point at a code repository the AI reads live. A new **Sources & decisions** button in the editor
+toolbar puts the Source documents, Review comments and Decisions log on a screen of their own, so the
+Fields aren't crowded.
+
+**What you need to do:** nothing to keep working. Adding by address is on by default and needs
+outbound HTTPS to the sites your architects cite. Code repositories need outbound HTTPS to the
+Providers they live on. Two new optional settings are described below and in the README.
+
+### Added
+
+- **Add a Source document from a web address** (#318, ADR-0071). Next to Upload, in the editor's
+  Source documents panel and on the Interview page, an architect pastes an address. The Gantry server
+  fetches it, and the browser reads it as it would an upload. A web page becomes Markdown, without its
+  images or scripts. From then on it is a Source document like any other: it can be cited, renamed,
+  downloaded, zipped and removed, on every kind of workspace. Gantry keeps a snapshot and records
+  where it came from and when, so the list shows the address and "fetched <date>". The Sources
+  appendix prints the title, the address and "retrieved <date>".
+  - **Fetch again** is always by hand. If the page hasn't changed, nothing is added ("unchanged since
+    <date>") and no commit is made. If it has, the new copy replaces the old one under its title, and
+    the Fields that drew on it are flagged **Out of date**.
+  - Each failure has its own plain message: an address that can't be reached, an error from the
+    site, a time-out after 30 seconds, over 25 MB, an unsupported type, too many redirects, and a
+    page behind a sign-in. For a sign-in page the message says to save it as a PDF and upload it.
+    Gantry never sends cookies or credentials to other sites.
+  - Outside agents over MCP get `add_source_document_from_address` and `fetch_source_document_again`,
+    which follow the same rules.
+- **A code repository as a Source document** (#319, ADR-0072). **+ Add a code repository** takes a
+  repository on GitHub, Azure DevOps, GitLab or Bitbucket, a branch (the default branch if left blank)
+  and, optionally, some folders. It is a **pointer**, not a copy: nothing from the repository is kept
+  with the Instance.
+  - **Reading.** In the AI interview the AI lists, searches and reads the repository live, skipping
+    vendored code, build output and binaries. Every citation names the file and the commit it was read
+    at.
+  - **Out of date.** A Field is flagged only when a file it actually drew on has changed, and the flag
+    names the files.
+  - **Access.** The repository is read with the architect's own token, kept in their browser like a
+    workspace token. A public repository needs none. Anyone who can't read it (a teammate, another
+    browser) sees **CAN'T READ** with a plain reason, and can give their own token with **Your token**.
+    Over MCP it is read with the token the MCP server holds for the workspace; the new tools are
+    `add_repository_source_document`, `list_repository_folder`, `search_repository` and
+    `read_repository_file`.
+  - **Download and appendix.** **Download** opens the repository on its Provider. **Download all
+    (.zip)** adds `Code repositories.txt`, which lists each repository's address, branch and cited
+    commits but no code. The Sources appendix lists the title, address, branch and commits cited.
+- **Sources & decisions toggle** (#320). A new button to the right of **Navigation** in the editor
+  toolbar.
+  - **On:** shows only the Source documents, Review comments and Decisions log under the toolbar.
+  - **Off:** shows the Fields with their status panels (Re-open stage, merged approval, Out of date,
+    Changed since approval and Synced fields).
+  - **Count:** a number on the button shows what needs attention: review comment threads not yet
+    answered, plus open questions.
+  - **When it switches:** it is off whenever the editor opens. Choosing a place in Navigation switches
+    it off, and clicking a citation switches it on. Unsaved edits and your scroll position survive any
+    number of switches. When there is nothing to show, the button is disabled and says why.
+
+### For operators
+
+- **`GANTRY_SOURCE_FETCH_DISABLED`** (new, off by default). Switches adding by address off in the
+  editor, the Interview page and MCP, for a deployment that must make no outbound requests on an
+  architect's behalf. Uploads are unaffected.
+- **`GANTRY_SOURCE_FETCH_ALLOW_PRIVATE_URLS`** (new, off by default). The fetch refuses private and
+  loopback addresses at every redirect, just as the AI relay does. Set this to let architects cite
+  intranet pages the server can reach. It is separate from `GANTRY_AI_ALLOW_PRIVATE_URLS`, and neither
+  setting opens the other. Cloud metadata addresses stay refused even with it on.
+- **Code repositories have no switch.** They accept exactly the Provider addresses a workspace may
+  use. A self-hosted GitHub Enterprise, Azure DevOps Server or GitLab address works only where the
+  matching workspace setting already allows one.
+- **The new routes `POST /api/sources/fetch` and `POST /api/sources/repository` need no sign-in**,
+  like the AI relay. Anyone who can reach the server can have it fetch a public page, up to 25 MB, or
+  read a public repository. Set `GANTRY_SOURCE_FETCH_DISABLED` if that isn't acceptable.
+
 ## 0.13.2 — 2026-11-03
 
 A fix for the newest Claude models in the AI interview. No setup changes.
