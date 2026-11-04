@@ -26,6 +26,13 @@
 //   * (#319, docs/adr/0072) hands the AI three read-only tools for a **code repository** Source document, `list_repository_folder`,
 //     `search_repository` and `read_repository_file`, answered by the Gantry server with the architect's own token (`context.readRepository`).
 //     Nothing of a repository is in the brief. A file read is recorded with the commit it saw, as an input of the Fields drafted next.
+//   * (#328, docs/adr/0073) shortens **old reads** in the conversation (`shortenOldReads`): once a read is more than three AI turns old its
+//     text is replaced by a one-line note naming what was read, in batches so the cached conversation keeps paying off between them.
+//   * (#329, docs/adr/0073) **compacts** the conversation before it outgrows the model's context window (`compactNow`, `compactConversation`):
+//     a card offers it once the input the AI Provider reported passes about 60% of the window, Compact now does it at any time, and a
+//     request the AI Provider refuses as too long is compacted without asking and sent once more. The conversation starts afresh from
+//     Gantry's opening, the AI's own "where we are" summary, the drafts and the architect's own messages word for word; the thread, the
+//     drafts, the round and the decisions log are untouched but for one line in the thread, and the summary is never logged.
 //
 //   * (#289) lets the architect **hand-edit** a drafted Field in the preview (`beginHandEdit` / `handEdit`). The edit is theirs from then
 //     on: Gantry's per-Field check does not run on it, it is logged as a `hand-edit` entry with the text they typed, and the Field's
@@ -55,10 +62,10 @@
 //     that card only when it would allow the re-open right then (`context.reopen`), and otherwise logs an open question naming the blocker.
 //
 // Nothing here saves. Drafts are an unsaved preview until the architect confirms the stage-end card.
-import { runTurn, runWithRecovery, ensureTested, EMPTY_USAGE } from './aiClient.js'
+import { runTurn, runWithRecovery, ensureTested, isTooLong, EMPTY_USAGE } from './aiClient.js'
 import { ASK_TOOL_NAME, FALLBACK_FENCE } from './aiCards.js'
-import { getAiProvider } from './aiProviders.js'
-import { buildInterviewBrief, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
+import { AiProviderError, getAiProvider } from './aiProviders.js'
+import { artefactChoices, buildInterviewBrief, estimateTokens, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
 import { DRAFT_TOOL, DRAFT_TOOL_NAME, DRAFT_FENCE, DRAFT_TEXT_FALLBACK_INSTRUCTIONS, checkDraft, extractDraftBlocks, isBlankValue, normaliseDraftValue, citedSourceIds, stripDraftBlocks } from './interviewDraft.js'
 import { countWords } from './targetSize.js'
 import {
@@ -81,6 +88,7 @@ import {
   inputsForDraft,
   loadAttachments,
   planSourceAccess,
+  readNote,
   runReadCall,
   sourcesForBrief,
   stripReadBlocks,
@@ -89,7 +97,7 @@ import { fieldsInScope } from './interviewScope.js'
 import { openQuestionsToCarry, standardDraftProblems, standardRoles, termChoices } from './interviewStandard.js'
 import { LOG_TOOL, LOG_TOOL_NAME, LOG_FENCE, LOG_TEXT_FALLBACK_INSTRUCTIONS, createSessionLog, extractLogBlocks, stripLogBlocks } from './interviewLog.js'
 import { currentLogEntries, findArchitectMessage, logSummary } from './decisionsLog.js'
-import { tokensOfModels } from './tokenUsage.js'
+import { formatTokens, tokensOfModels } from './tokenUsage.js'
 import { resumeOpening } from './interviewResume.js'
 import { conflictKey, conflictText, conflictValueFromText } from './stageVersion.js'
 import { reapprovalNames, reapprovalOf } from './interviewReapproval.js'
@@ -207,27 +215,82 @@ function splitRef(ref) {
   return { moduleId: text.slice(0, dot), fieldId: text.slice(dot + 1) }
 }
 
-/** The Artefacts that can pass `stage`'s Gate, and the lightest (fewest requirements), which is pre-selected. */
-export function artefactChoices(definition, stageId) {
-  const stage = (definition?.stages ?? []).find((s) => s.id === stageId)
-  const candidates = (definition?.artefacts ?? []).filter((a) => a.gate === stage?.gate && a.satisfiesGate !== false)
-  const lightest = candidates.length ? candidates.reduce((best, a) => ((a.requires?.length ?? 0) < (best.requires?.length ?? 0) ? a : best)) : null
-  return { candidates, lightest }
+// The Artefacts that can pass a Stage's Gate, and the lightest: kept with the brief, which names the one aimed for (#332).
+export { artefactChoices }
+
+// ---------- shortening old reads (#328, docs/adr/0073) ----------
+// Every read the AI makes (a Source document, a repository file, a search) stays in the conversation and is sent again with every later
+// call. A message that holds reads says where each sits in its text, `reads: [{ at, length, label }]`; once the message is more than
+// READ_NOTE_AFTER_TURNS AI turns old (that many of the AI's replies have come after it), each read is replaced by its `readNote`. That is
+// done in batches, only when the batch saves at least READ_NOTE_MIN_SAVING tokens, because changing an early message means the cached
+// conversation from there on is written afresh. Citations, Out of date (the Fields' inputs) and the thread's "Read …" lines are untouched.
+
+/** A read is shortened once more than this many of the AI's replies have come after it, so one from the current turn never is. */
+export const READ_NOTE_AFTER_TURNS = 3
+/** About how many tokens a batch of shortening must save to be done. */
+export const READ_NOTE_MIN_SAVING = 20000
+
+/** The `reads` of a message whose whole text is one read or search result (`outcome` is what the tool returned), or nothing. */
+const readsOf = (outcome) => (outcome?.ok && outcome.label ? { reads: [{ at: 0, length: String(outcome.content).length, label: outcome.label }] } : {})
+
+/** One tool call's result as a message of the history. */
+const toolMessage = (call, outcome) => ({ role: 'tool', toolCallId: call.id, name: call.name, isError: !outcome.ok, content: outcome.content, ...readsOf(outcome) })
+
+/** Joins `parts` (`{ text, reads? }`) with `separator`, keeping where each read sits so the joined text can still be shortened. */
+function joinParts(parts, separator) {
+  let text = ''
+  const reads = []
+  parts.forEach((part, i) => {
+    if (i) text += separator
+    for (const read of part.reads ?? []) reads.push({ ...read, at: read.at + text.length })
+    text += part.text
+  })
+  return { text, ...(reads.length ? { reads } : {}) }
+}
+
+/** `message` with each of its reads replaced by the one-line note. */
+function shortenMessage(message) {
+  const key = message.role === 'tool' ? 'content' : 'text'
+  let text = String(message[key] ?? '')
+  for (const read of [...message.reads].sort((a, b) => b.at - a.at)) text = `${text.slice(0, read.at)}${readNote(read.label)}${text.slice(read.at + read.length)}`
+  const { reads: _reads, ...rest } = message
+  return { ...rest, [key]: text }
+}
+
+/**
+ * The history with its old reads shortened, when that saves enough; otherwise `messages` itself. Pure: the session keeps what it returns, so
+ * a read shortened once stays shortened and the start of the conversation is the same from call to call.
+ */
+export function shortenOldReads(messages, { afterTurns = READ_NOTE_AFTER_TURNS, minSaving = READ_NOTE_MIN_SAVING } = {}) {
+  const old = new Set()
+  let saving = 0
+  let replies = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m.reads?.length && replies > afterTurns) {
+      old.add(i)
+      const text = String((m.role === 'tool' ? m.content : m.text) ?? '')
+      for (const read of m.reads) saving += estimateTokens(text.slice(read.at, read.at + read.length)) - estimateTokens(readNote(read.label))
+    }
+    if (m.role === 'assistant') replies++
+  }
+  if (!old.size || saving < minSaving) return messages
+  return messages.map((m, i) => (old.has(i) ? shortenMessage(m) : m))
 }
 
 // A model without tool calling is shown its earlier tool calls as the blocks it would have written, and the
-// results as one message from Gantry; two messages from the same side are joined.
+// results as one message from Gantry; two messages from the same side are joined (keeping where their reads sit, #328).
 function flattenToolHistory(messages) {
   const out = []
   const push = (message) => {
     const last = out[out.length - 1]
-    if (last && last.role === 'user' && message.role === 'user' && !last.images && !message.images && !last.documents && !message.documents) last.text = `${last.text}\n\n${message.text}`
+    if (last && last.role === 'user' && message.role === 'user' && !last.images && !message.images && !last.documents && !message.documents) Object.assign(last, joinParts([last, message], '\n\n'))
     else out.push({ ...message })
   }
   let results = []
   let answers = []
   const flush = () => {
-    if (results.length) push({ role: 'user', fromGantry: true, text: `Gantry's check of your drafts:\n${results.join('\n')}` })
+    if (results.length) push({ role: 'user', fromGantry: true, ...joinParts([{ text: "Gantry's check of your drafts:" }, ...results], '\n') })
     for (const text of answers) push({ role: 'user', fromGantry: true, text })
     results = []
     answers = []
@@ -235,7 +298,7 @@ function flattenToolHistory(messages) {
   for (const m of messages) {
     if (m.role === 'tool') {
       if (m.name === ASK_TOOL_NAME) answers.push(m.content)
-      else results.push(`- ${m.content}`)
+      else results.push({ text: `- ${m.content}`, reads: (m.reads ?? []).map((read) => ({ ...read, at: read.at + 2 })) })
       continue
     }
     flush()
@@ -259,6 +322,81 @@ function flattenToolHistory(messages) {
 }
 
 const asText = (value) => (Array.isArray(value) ? value.join('\n') : String(value ?? '')).trim()
+
+// ---------- compaction (#329, docs/adr/0073) ----------
+// A long interview, above all one over a code repository, is eventually too long for the model. Compaction starts the conversation afresh,
+// so the AI forgets some things on purpose: its earlier replies and the text of what it read go (it can read again). What it keeps is
+// Gantry's opening as it was, a note carrying its own "where we are" summary and the drafts in the preview, the architect's own messages
+// word for word (never summarised: ADR-0064), and where the conversation had got to. The brief, which is the system prompt, still carries the
+// saved content and the decisions log, every answer so far as structured facts. The summary is used only as context: it is never logged.
+
+/** The card offering to compact shows once the input the AI Provider reported for a call passes this share of the model's context window. */
+export const COMPACT_OFFER_AT = 0.6
+/** After "Not now", the card is not shown again until the reported input has grown by this share of the window. */
+export const COMPACT_ASK_AGAIN_AFTER = 0.1
+/** About how many tokens the AI's summary (at most about 2,000 words) adds, for the card's estimate of the size after. */
+const SUMMARY_TOKENS = 3000
+
+/** What the AI is asked for, in one call with no tools, just before the conversation is compacted. */
+export const SUMMARY_REQUEST =
+  'Gantry is about to start this conversation afresh, because it is getting too long for the model. Write a "where we are" summary for yourself to carry on from, of at most about 2,000 words. ' +
+  'Cover: what you learned from each Source document and code repository you read (name the document, and the paths and commits of the files); what is settled; what is still open; and what you were about to do next. ' +
+  "Gantry carries the drafts, the decisions log and the architect's own messages over word for word, so do not repeat them. Do not call a tool and write no draft, read, log or question blocks: reply with the summary only."
+
+/** About how many tokens a request of `system` and `list` is. */
+const conversationTokens = (system, list) =>
+  estimateTokens(system) + list.reduce((sum, m) => sum + estimateTokens(m.role === 'tool' ? m.content : m.text) + (m.toolCalls?.length ? estimateTokens(JSON.stringify(m.toolCalls)) : 0), 0)
+
+/** "612k" for the thread line `Conversation compacted (612k → 38k tokens)`. */
+const tokensShort = (n) => formatTokens(n).replace(/ tokens?$/, '')
+
+function compactedNote({ summary, drafts, said }) {
+  const draftText = (value) => (Array.isArray(value) ? value.map((item) => `- ${item}`).join('\n') : String(value ?? ''))
+  return [
+    'Gantry has compacted this conversation: it starts afresh here so that it fits the model. Your earlier replies and the text of what you read are no longer in it; read a Source document or a repository file again whenever you need it. ' +
+      'The brief still carries the saved content and the decisions log, with every answer so far. Carry on from where you were: do not begin the interview again, and do not ask again what is settled.',
+    summary
+      ? `## Where we are (your own summary from just before)\n\n${summary}`
+      : "## Where we are\n\nThere is no summary from you this time. Work out where things stand from the drafts, the decisions log and the architect's messages.",
+    drafts.length ? `## The drafts in the preview (not saved yet)\n\n${drafts.map(({ key, value }) => `### ${key}\n\n${draftText(value)}`).join('\n\n')}` : '',
+    said ? "## The architect's own messages\n\nWhat the architect typed in this conversation follows, oldest first, word for word." : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+/**
+ * The conversation started afresh (#329): `messages[0]` (Gantry's opening, as it was), a note from Gantry with `summary` (none when the AI
+ * couldn't write one) and `drafts` (`[{ key, value }]`), then every message the architect typed, word for word and in order, and last
+ * whatever came after the AI's last reply (the answers to a round, a note from Gantry, the results of its last tool calls, each read
+ * shortened to its note). Nothing else of the old conversation is kept. Pure.
+ */
+export function compactConversation(messages, { summary = '', drafts = [] } = {}) {
+  const [opening, ...rest] = messages
+  if (!opening) return []
+  const own = (m) => m.role === 'user' && !m.fromGantry
+  const lastReply = rest.findLastIndex((m) => m.role === 'assistant')
+  const replied = rest.slice(0, lastReply + 1)
+  const tail = rest.slice(lastReply + 1)
+  const out = [{ ...opening }, { role: 'user', fromGantry: true, text: compactedNote({ summary, drafts, said: rest.some(own) }) }]
+  for (const m of replied) if (own(m)) out.push({ role: 'user', text: m.text })
+  let gantry = tail.length ? ['Where the conversation had got to when it was compacted. Carry on from here.'] : []
+  const flush = () => {
+    if (gantry.length) out.push({ role: 'user', fromGantry: true, text: gantry.join('\n\n') })
+    gantry = []
+  }
+  for (const m of tail) {
+    if (own(m)) {
+      flush()
+      out.push({ role: 'user', text: m.text })
+      continue
+    }
+    const short = m.reads?.length ? shortenMessage(m) : m
+    gantry.push(m.role === 'tool' ? `- ${short.content}` : short.text)
+  }
+  flush()
+  return out
+}
 
 /**
  * Creates a session.
@@ -302,12 +440,20 @@ export function createInterviewSession(config = {}) {
     update: null, // Bring up to date (#298): { mode: 'only'|'first', total, answered, reopen, deferred, elsewhere } while this session has such a round
     revise: null, // Revising a Stage the Owner sent back (#299): { total, answered, pullRequestId } while this session has its round of comment cards
     reopenRequest: null, // the architect chose the AI's offer to re-open a signed-off Stage (#299): { stageId, stageTitle }; the page carries it out
+    opening: '', // #331: what the architect typed in the kickoff's box, word for word: their opening message, which the status block records
+    compactOffer: null, // #329: { before, after, window }: the card offering to compact, shown at the end of a turn past about 60% of the window
+    compactPending: false, // #329: Compact now was asked for while a round was open or the AI was busy: it is done before the next request
+    compacting: false, // #329: the AI is writing its summary and the conversation is being started afresh
   }
   let queuedReview = [] // review cards waiting to join the next round of a session that is going (#303)
   let updateOpening = '' // the opening a normal session gives the AI once its Bring up to date round is answered (#298)
+  let openingToSend = '' // #331: the architect's opening message until the AI's first turn carries it
   const updateCauses = new Map() // module.field -> why it was Out of date, for the note when an agreed Module goes back to draft (#298)
   let clashWaiter = null // { resolve, conflicts, entryIds }: the Save waiting on the clash cards
   let messages = []
+  let lastInput = 0 // #329: the input tokens the AI Provider reported for the last call, which the card measures against the context window
+  let askAgainAt = 0 // #329: after "Not now", the card waits until the reported input reaches this
+  let lastSystem = '' // #329: the system text of the last request, for the card's estimate of the size after compacting
   let nextId = 1
   let live = null // the thread item the AI is streaming into
   const bounced = new Set() // Fields already sent back once
@@ -355,11 +501,24 @@ export function createInterviewSession(config = {}) {
     decisions: { ...logSummary(log.entries()), pending: log.pending().length, session: log.sessionId },
     // #294: this session's tokens on this Stage, as the status block of the log will record them (all the AI Providers it used).
     tokens: tokensOfModels(log.usage()),
+    compactOffer: state.compactOffer ? { ...state.compactOffer } : null,
+    canCompact: canCompact(),
   })
+  // #329: there is something to compact once the AI has replied at least once.
+  const canCompact = () => messages.some((m) => m.role === 'assistant')
+  const draftList = () => Object.entries(state.drafts).map(([key, d]) => ({ key, value: d.value }))
   const say = (who, text, extra = {}) => {
     const item = { id: nextId++, who, text, ...extra }
     state.thread.push(item)
     return item
+  }
+  // #331: the AI's first turn carries the architect's opening message, as their own words, right after Gantry's opening. It goes once, and
+  // only to the request that opens the conversation: a round that comes before the AI (Bring up to date, review comments) waits for it.
+  const withOpening = (list) => {
+    if (!openingToSend) return list
+    const text = openingToSend
+    openingToSend = ''
+    return [...list, { role: 'user', text }]
   }
   const architectMessages = () => messages.filter((m) => m.role === 'user' && m !== messages[0] && !m.fromGantry).map((m) => m.text)
   const architectText = () => [...messages.filter((m) => m.role === 'user' && m !== messages[0] && !m.fromGantry).map((m) => m.text), ...otherTexts].join('\n')
@@ -881,7 +1040,7 @@ export function createInterviewSession(config = {}) {
       return { ok: true }
     }
     const opening = mode === 'only' ? UPDATE_OPENING : updateOpening || openingFor(context)
-    messages = [{ role: 'user', text: `${opening}\n\nThe architect's answers to the round that brings the Out of date Fields up to date:\n${updateAnswersText(results, { fieldTitle })}` }]
+    messages = withOpening([{ role: 'user', text: `${opening}\n\nThe architect's answers to the round that brings the Out of date Fields up to date:\n${updateAnswersText(results, { fieldTitle })}` }])
     await runLoop()
     return { ok: true }
   }
@@ -1207,35 +1366,124 @@ export function createInterviewSession(config = {}) {
     for (const [id, a] of notes) say('sys', `${titleOf(id)} is ${a.note}.`)
   }
 
+  /** One AI call's tokens count towards the session (#294), whatever it was for: a turn, a merged wording, or a compaction's summary (#329). */
+  function countUsage(provider, usage) {
+    state.usage = {
+      inputTokens: state.usage.inputTokens + usage.inputTokens,
+      outputTokens: state.usage.outputTokens + usage.outputTokens,
+      cacheReadTokens: state.usage.cacheReadTokens + usage.cacheReadTokens,
+      cacheWriteTokens: state.usage.cacheWriteTokens + usage.cacheWriteTokens,
+    }
+    if (provider) log.addUsage(provider, usage)
+  }
+
+  // ---------- compaction (#329, docs/adr/0073) ----------
+
+  /**
+   * Compacts the conversation: the AI is asked, in one call with no tools, for its "where we are" summary, and the conversation is started
+   * afresh from it (`compactConversation`). If that call fails the conversation is started afresh without it, and the thread line says so.
+   * `tooLong`: the AI Provider has just refused the conversation as too long, so the summary call sends every read as its one-line note.
+   * Only between turns or before a request: never while a tool call or a round of cards is open.
+   */
+  async function compact({ tooLong = false } = {}) {
+    const provider = getAiProvider(state.providerId)
+    if (!provider) throw new Error('This AI Provider no longer exists. Choose another.')
+    state.compacting = true
+    state.compactOffer = null
+    emit()
+    try {
+      const { system, cachePrefix, withAttachments } = await prepare(provider)
+      const before = lastInput || conversationTokens(system, messages)
+      let summary = ''
+      let failure = ''
+      try {
+        // Provider-neutral: the tool calls so far are shown as the blocks a model without tools would have written, so no tool is needed.
+        const history = tooLong ? shortenOldReads(messages, { afterTurns: -1, minSaving: 0 }) : messages
+        const request = withAttachments(flattenToolHistory([...history, { role: 'user', fromGantry: true, text: SUMMARY_REQUEST }]))
+        const result = await runWithRecovery(
+          () => runTurn(getAiProvider(state.providerId) ?? provider, { system, cachePrefix, messages: request, tools: [], askCards: false }, { fetchImpl, origin, signal: controller?.signal }),
+          handlers
+        )
+        countUsage(provider, result.usage)
+        summary = shownText(result.text).trim()
+        if (!summary) failure = 'it sent nothing back'
+      } catch (err) {
+        if (err?.name === 'AbortError') throw err
+        failure = err?.message || 'it did not answer'
+      }
+      messages = compactConversation(messages, { summary, drafts: draftList() })
+      const after = conversationTokens(system, messages)
+      lastInput = 0
+      askAgainAt = 0
+      state.compactPending = false
+      const without = failure ? `. The AI couldn't write its summary (${failure.replace(/\.$/, '')}), so it carries on from the drafts, the decisions log and your own messages` : ''
+      say('sys', `Conversation compacted (${tokensShort(before)} → ${tokensShort(after)} tokens)${without}`, { compacted: true })
+    } finally {
+      state.compacting = false
+      emit()
+    }
+  }
+
+  /** A request the AI Provider refuses as too long is compacted without asking and sent once more; a second refusal is the error. */
+  async function compactingIfTooLong(send) {
+    try {
+      return await send()
+    } catch (err) {
+      if (!isTooLong(err) || !canCompact()) throw err
+      await compact({ tooLong: true })
+      try {
+        return await send()
+      } catch (again) {
+        if (!isTooLong(again)) throw again
+        throw new AiProviderError(
+          'too-long',
+          `${again.message} Gantry compacted the conversation and sent it once more, and it is still too long. Switch to an AI Provider whose model has a larger context window, or start this stage over.`,
+          again.status
+        )
+      }
+    }
+  }
+
+  /** At the end of a turn: the card offering to compact, once the input the AI Provider reported passes about 60% of the context window. */
+  function offerCompaction() {
+    const window = getAiProvider(state.providerId)?.contextWindow
+    if (!window || !lastInput || state.compactPending || !canCompact()) return
+    if (lastInput < window * COMPACT_OFFER_AT || lastInput < askAgainAt) return
+    const after = conversationTokens(lastSystem, compactConversation(messages, { drafts: draftList() })) + SUMMARY_TOKENS
+    state.compactOffer = { before: lastInput, after: Math.min(after, lastInput), window }
+  }
+
   async function runLoop() {
     state.phase = 'working'
     state.error = null
     state.preparing = false
+    state.compactOffer = null
     controller = new AbortController()
     emit()
     let incoming = []
     let textRetried = false
     try {
+      // #329: Compact now, asked for while a round was open or the AI was busy, is done here, before the next request goes.
+      if (state.compactPending && canCompact()) await compact()
       for (let round = 0; round < MAX_ROUNDS; round++) {
         live = null
         textDraftFields = []
         setDraftingFields()
-        const result = await runWithRecovery(async () => {
-          const provider = getAiProvider(state.providerId)
-          if (!provider) throw new Error('This AI Provider no longer exists. Choose another.')
-          const { textDrafts } = capabilities(provider)
-          const { system, cachePrefix, tools, withAttachments, knownSources } = await prepare(provider)
-          const history = withAttachments(textDrafts ? flattenToolHistory(messages) : messages)
-          return runTurn(provider, { system, cachePrefix, messages: history, tools, knownSources, askCards: state.cardMode !== 'chat' }, { fetchImpl, origin, signal: controller.signal, onEvent, toolProgress: true })
-        }, handlers)
-        state.usage = {
-          inputTokens: state.usage.inputTokens + result.usage.inputTokens,
-          outputTokens: state.usage.outputTokens + result.usage.outputTokens,
-          cacheReadTokens: state.usage.cacheReadTokens + result.usage.cacheReadTokens,
-          cacheWriteTokens: state.usage.cacheWriteTokens + result.usage.cacheWriteTokens,
-        }
+        messages = shortenOldReads(messages)
+        const result = await compactingIfTooLong(() =>
+          runWithRecovery(async () => {
+            const provider = getAiProvider(state.providerId)
+            if (!provider) throw new Error('This AI Provider no longer exists. Choose another.')
+            const { textDrafts } = capabilities(provider)
+            const { system, cachePrefix, tools, withAttachments, knownSources } = await prepare(provider)
+            lastSystem = system
+            const history = withAttachments(textDrafts ? flattenToolHistory(messages) : messages)
+            return runTurn(provider, { system, cachePrefix, messages: history, tools, knownSources, askCards: state.cardMode !== 'chat' }, { fetchImpl, origin, signal: controller.signal, onEvent, toolProgress: true })
+          }, handlers)
+        )
         const provider = getAiProvider(state.providerId)
-        if (provider) log.addUsage(provider, result.usage)
+        countUsage(provider, result.usage)
+        lastInput = result.usage.inputTokens
         const textDrafts = provider ? capabilities(provider).textDrafts : false
         // The attachments go on the first message of each request and are not kept in the history, so a switch of AI Provider can decide them afresh.
         const base = (result.messages ?? messages).map((m, i) => (i === 0 ? messages[0] : m))
@@ -1247,10 +1495,7 @@ export function createInterviewSession(config = {}) {
           settleLive(shownText(result.text))
           messages = [...base, result.assistantMessage]
           if (!textDrafts) {
-            for (const call of result.otherToolCalls) {
-              const outcome = await resultFor(call)
-              messages.push({ role: 'tool', toolCallId: call.id, name: call.name, isError: !outcome.ok, content: outcome.content })
-            }
+            for (const call of result.otherToolCalls) messages.push(toolMessage(call, await resultFor(call)))
             if (result.otherToolCalls.some((c) => c.name === DRAFT_TOOL_NAME)) readsSinceDraft = []
           } else {
             const { drafts } = extractDraftBlocks(result.text)
@@ -1276,10 +1521,7 @@ export function createInterviewSession(config = {}) {
         if (result.kind === 'tools' && !textDrafts) {
           if (live) live.streaming = false
           messages = [...base, result.assistantMessage]
-          for (const call of result.otherToolCalls) {
-            const outcome = await resultFor(call)
-            messages.push({ role: 'tool', toolCallId: call.id, name: call.name, isError: !outcome.ok, content: outcome.content })
-          }
+          for (const call of result.otherToolCalls) messages.push(toolMessage(call, await resultFor(call)))
           // Once a round of drafts has landed, the reads before it are spent: they are inputs of those drafts, not of later ones.
           if (result.otherToolCalls.some((c) => c.name === DRAFT_TOOL_NAME)) readsSinceDraft = []
           stopDrafting()
@@ -1293,7 +1535,7 @@ export function createInterviewSession(config = {}) {
         messages = [...base, { role: 'assistant', text: result.text }]
         const notes = []
         let retry = false
-        let readsReply = ''
+        let readsReply = null
         if (textDrafts) {
           const { drafts, errors } = extractDraftBlocks(result.text)
           const requested = extractReadBlocks(result.text)
@@ -1306,7 +1548,7 @@ export function createInterviewSession(config = {}) {
           notes.push(...errors, ...requested.errors, ...logged.errors, ...outcomes.filter((o) => !o.ok).map((o) => o.content), ...logOutcomes.filter((o) => !o.ok).map((o) => o.content))
           if (round < MAX_ROUNDS - 1 && (answers.length || (notes.length && outcomes.some((o) => !o.ok) && held.size))) {
             retry = true
-            readsReply = answers.length ? `Gantry's reply to your read requests:\n\n${answers.map((a) => a.content).join('\n\n')}` : ''
+            readsReply = answers.length ? joinParts([{ text: "Gantry's reply to your read requests:" }, ...answers.map((a) => ({ text: a.content, ...readsOf(a) }))], '\n\n') : null
           }
         }
         // Question cards the model wrote that were unusable: a text-fallback model is told once; a model that keeps failing is asked in plain chat.
@@ -1322,7 +1564,7 @@ export function createInterviewSession(config = {}) {
         }
         if (retry) {
           const check = notes.length ? `Gantry's check of your drafts:\n- ${notes.join('\n- ')}` : ''
-          messages.push({ role: 'user', fromGantry: true, text: [readsReply, check].filter(Boolean).join('\n\n') })
+          messages.push({ role: 'user', fromGantry: true, ...joinParts([readsReply, check ? { text: check } : null].filter(Boolean), '\n\n') })
           emit()
           continue
         }
@@ -1331,7 +1573,10 @@ export function createInterviewSession(config = {}) {
       promoteHeld()
       openRound(incoming)
       if (state.finish === 'accepting') state.finish = 'done'
+      // #329: Compact now, asked for while the AI was busy, is done as soon as the turn ends with no round of cards open.
+      if (state.compactPending && !state.round && !state.clash) await compact()
       state.phase = state.round ? 'asking' : 'waiting'
+      offerCompaction()
     } catch (err) {
       if (err?.name === 'AbortError') {
         state.phase = 'waiting'
@@ -1397,13 +1642,7 @@ export function createInterviewSession(config = {}) {
     })
     try {
       const result = await runTurn(provider, { system: MERGE_SYSTEM, messages: [{ role: 'user', text: JSON.stringify(request, null, 2) }], tools: [], askCards: false }, { fetchImpl, origin, signal: controller?.signal })
-      state.usage = {
-        inputTokens: state.usage.inputTokens + result.usage.inputTokens,
-        outputTokens: state.usage.outputTokens + result.usage.outputTokens,
-        cacheReadTokens: state.usage.cacheReadTokens + result.usage.cacheReadTokens,
-        cacheWriteTokens: state.usage.cacheWriteTokens + result.usage.cacheWriteTokens,
-      }
-      log.addUsage(provider, result.usage)
+      countUsage(provider, result.usage)
       const merges = parseMerges(result.text)
       if (!stillOpen()) return
       state.clash = { ...state.clash, cards: state.clash.cards.map((c) => (merges.has(c.id) ? withMerged(c, merges.get(c.id)) : c)) }
@@ -1460,7 +1699,7 @@ export function createInterviewSession(config = {}) {
 
 The architect's answers to the review comments:
 ${reviewAnswers.text}`
-      if (round.review) messages = [{ role: 'user', text: body }]
+      if (round.review) messages = withOpening([{ role: 'user', text: body }])
       else messages = [...messages, { role: 'user', fromGantry: true, text: body }]
       await runLoop()
       return { ok: true }
@@ -1506,8 +1745,11 @@ ${reviewAnswers.text}` : '',
       return state.providerId
     },
 
-    /** Tests the chosen AI Provider if it has not been, then opens the interview. Resolves once the first turn has finished. */
-    async start({ alongside = false } = {}) {
+    /**
+     * Tests the chosen AI Provider if it has not been, then opens the interview. Resolves once the first turn has finished. `opening` (#331) is
+     * what the architect typed in the kickoff's box: it shows in the thread as theirs and goes with the AI's first turn, never in the system prompt.
+     */
+    async start({ alongside = false, opening = '' } = {}) {
       if (state.phase !== 'kickoff') return
       state.kickoffError = null
       // #290 (ADR-0068): another session on this Stage that is not Done gets a card naming when it last saved. Carry on alongside
@@ -1560,11 +1802,16 @@ ${reviewAnswers.text}` : '',
       } else if (state.cardMode === 'chat') {
         say('sys', 'This model cannot produce question cards, so it asks in plain chat. That works, but is less reliable.')
       }
+      state.opening = String(opening ?? '').trim()
+      openingToSend = state.opening
+      // The thread shows the opening message as the architect's, where the conversation has it: after a resumed session's recap.
+      const showOpening = () => state.opening && say('you', state.opening)
       // #303: a session that is only working through review comments opens its round before the AI is called, and ends there unless an answer needs
       // writing. One that joins review comments to an interview queues the cards for the first round the AI asks.
       const rev = getContext().review
       if (rev?.items?.length && rev.mode === 'only') {
         messages = []
+        showOpening()
         openReviewRound()
         emit()
         return
@@ -1603,6 +1850,7 @@ ${reviewAnswers.text}` : '',
       } else {
         messages = [{ role: 'user', text: openingFor(getContext()) }]
       }
+      showOpening()
       if (updating) {
         // #298: the round about the Out of date Fields comes first, before the AI is called. A session that is only bringing them up to date
         // has nothing else to do; a normal one gives the AI its usual opening once the round is answered.
@@ -1613,6 +1861,7 @@ ${reviewAnswers.text}` : '',
         emit()
         return
       }
+      messages = withOpening(messages)
       recordArtefact()
       await runLoop()
     },
@@ -1666,6 +1915,44 @@ ${reviewAnswers.text}` : '',
       messages = [...messages, { role: 'user', fromGantry: true, text: opened(modules, stageTitle) }]
       await runLoop()
       return { ok: true }
+    },
+
+    /**
+     * #329: Compact now, on the card or in the rail's Tokens block. Between turns it is done at once. While a round of cards is open, a Save's
+     * clash cards are up or the AI is busy, it waits and is done before the next request goes. Resolves `{ ok, queued?, message? }`.
+     */
+    async compactNow() {
+      if (!canCompact() || ['kickoff', 'testing', 'paused'].includes(state.phase)) return { ok: false, message: 'There is no conversation to compact yet.' }
+      state.compactOffer = null
+      if (state.phase !== 'waiting' || state.clash) {
+        state.compactPending = true
+        emit()
+        return { ok: true, queued: true }
+      }
+      state.phase = 'working'
+      state.error = null
+      controller = new AbortController()
+      emit()
+      try {
+        await compact()
+        state.phase = 'waiting'
+      } catch (err) {
+        state.phase = err?.name === 'AbortError' ? 'waiting' : 'error'
+        if (state.phase === 'error') {
+          state.compactPending = true
+          state.error = { message: err?.message || 'The conversation could not be compacted.', code: err?.code ?? null }
+        }
+      } finally {
+        emit()
+      }
+      return { ok: true }
+    },
+
+    /** #329: "Not now" on the card: it is not shown again until the conversation has grown by another tenth of the model's context window. */
+    notNowCompact() {
+      askAgainAt = lastInput + (getAiProvider(state.providerId)?.contextWindow ?? 0) * COMPACT_ASK_AGAIN_AFTER
+      state.compactOffer = null
+      emit()
     },
 
     /** Carries on after a failure (the history is intact: the architect's last message is already in it). */
@@ -1906,10 +2193,15 @@ ${reviewAnswers.text}` : '',
           revise: state.revise,
           error: state.error,
           phase: state.phase,
+          opening: state.opening,
+          compactOffer: state.compactOffer,
+          compactPending: state.compactPending,
         },
+        compaction: { lastInput, askAgainAt },
         pendingChanges: [...pendingChanges],
         queuedReview,
         updateOpening,
+        openingToSend,
         updateCauses: [...updateCauses],
         kept: [...keptFields],
         authorised: [...authorised],
@@ -1945,16 +2237,23 @@ ${reviewAnswers.text}` : '',
         review: s.review ?? null,
         revise: s.revise ?? null,
         error: s.error ?? null,
+        opening: s.opening ?? '',
+        compactOffer: s.compactOffer ?? null,
+        compactPending: s.compactPending === true,
+        compacting: false,
         kickoffError: null,
         drafting: null,
         preparing: false,
       })
       messages = saved.messages ?? []
+      lastInput = saved.compaction?.lastInput ?? 0
+      askAgainAt = saved.compaction?.askAgainAt ?? 0
       nextId = saved.nextId ?? nextId
       pendingChanges.clear()
       for (const [k, v] of saved.pendingChanges ?? []) pendingChanges.set(k, v)
       queuedReview = saved.queuedReview ?? []
       updateOpening = saved.updateOpening ?? ''
+      openingToSend = saved.openingToSend ?? ''
       updateCauses.clear()
       for (const [k, v] of saved.updateCauses ?? []) updateCauses.set(k, v)
       keptFields.clear()
@@ -2004,7 +2303,7 @@ ${reviewAnswers.text}` : '',
         fieldKeys: keys,
         handEdited: keys.filter((key) => state.drafts[key]?.handEdited === true),
         saving,
-        status: { who: context.actor, target: target ?? context.targetStageId ?? context.stageId, state: runState, stages: stages ?? context.runStages, artefact: context.artefactId, instructions: context.instructionsVersion },
+        status: { who: context.actor, target: target ?? context.targetStageId ?? context.stageId, state: runState, stages: stages ?? context.runStages, artefact: context.artefactId, artefacts: context.runArtefacts, instructions: context.instructionsVersion, opening: state.opening },
       })
     },
 
@@ -2030,6 +2329,10 @@ ${reviewAnswers.text}` : '',
       log.addRestart()
       state.resumed = null
       messages = []
+      lastInput = 0
+      askAgainAt = 0
+      state.compactOffer = null
+      state.compactPending = false
       state.thread = []
       state.drafts = {}
       state.fieldInputs = {}
@@ -2045,6 +2348,8 @@ ${reviewAnswers.text}` : '',
       state.revise = null
       state.reopenRequest = null
       updateOpening = ''
+      state.opening = ''
+      openingToSend = ''
       updateCauses.clear()
       state.phase = 'kickoff'
       pendingChanges.clear()

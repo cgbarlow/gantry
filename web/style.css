@@ -2227,9 +2227,15 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 @keyframes interview-blink { 50% { opacity: 0; } }
 .interview-page .kick { max-width: 460px; }
 .interview-page .kick label { display: block; font-size: 12px; font-weight: 600; margin: 12px 0 4px; }
-.interview-page .kick select { width: 100%; font: inherit; font-size: 13px; padding: 6px; background: var(--bg-raised); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.interview-page .kick select, .interview-page .kick textarea { width: 100%; font: inherit; font-size: 13px; padding: 6px; background: var(--bg-raised); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.interview-page .kick textarea { resize: vertical; min-height: 4.5em; box-sizing: border-box; }
 .interview-page .kick-intro { font-size: 13px; margin: 0 0 6px; }
 .interview-page .kick-row { margin: 6px 0; }
+/* #332: Artefact for each Stage: one row per Stage of the run; a row with nothing to choose is ghosted. */
+.interview-page .kick-artefacts { border: 0; padding: 0; margin: 12px 0 0; min-width: 0; }
+.interview-page .kick-artefacts legend { font-size: 12px; font-weight: 600; padding: 0; margin: 0 0 4px; }
+.interview-page .kick-artefact-row label { font-weight: 400; margin: 6px 0 2px; }
+.interview-page .kick-artefacts select:disabled { opacity: .6; cursor: not-allowed; }
 .interview-page .kick-note, .interview-page .kick-sources { font-size: 12px; color: var(--text-muted); margin: 6px 0; }
 .interview-page .kick .btn.primary { margin-top: 12px; }
 .interview-page .warn { font-size: 12px; padding: 6px 10px; margin-top: 6px; border-left: 3px solid var(--stamp-error-bg); background: var(--bg-raised); }
@@ -2340,6 +2346,9 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-rail .rail-tokens dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; margin: 0; font-size: 13px; }
 .interview-rail .rail-tokens dt { color: var(--text-muted); }
 .interview-rail .rail-tokens dd { margin: 0; font-family: var(--font-mono); font-size: 12px; text-align: right; cursor: help; }
+/* #329: Compact now in the Tokens block, or the note that it waits for the round. */
+.interview-rail .rail-tokens .rail-compact { margin-top: 8px; }
+.interview-rail .rail-tokens .rail-compact-note { margin: 8px 0 0; font-size: 12px; color: var(--text-muted); }
 .interview-rail .runplan .rp-note { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-align: right; }
 /* Remote workspaces (#295): a Stage waiting for its Pull Request to be approved, or queued behind an earlier one, and the row you click to Check status. */
 .interview-rail .runplan li { flex-wrap: wrap; }

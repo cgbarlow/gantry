@@ -359,6 +359,29 @@ test('a normal session starts with the round, then gives the AI its usual openin
   assert.match(text, /KEPT as it is/)
 })
 
+test('#331 the opening message waits for the round: it goes with the AI\'s first request, after the answers, whether the session only brings Fields up to date or carries on', async () => {
+  const words = 'The hosting decision matters most; redraft with that in mind.'
+  const userTexts = (request) => request.body.messages.filter((m) => m.role === 'user').map((m) => (typeof m.content === 'string' ? m.content : m.content.map((b) => b.text ?? '').join('\n')))
+  for (const mode of ['only', 'first']) {
+    const ai = fakeAi(() => anthropicReply({ text: 'Redrafting.' }))
+    const { session } = sessionWith(ai, { update: { mode } })
+    await session.start({ opening: words })
+    assert.equal(ai.calls.length, 0, `${mode}: the round still comes before the AI`)
+    assert.deepEqual(session.snapshot().thread.filter((t) => t.who === 'you').map((t) => t.text), [words], `${mode}: the thread shows it as the architect's`)
+    // Chat is refused while the round is open (that is unchanged), and the working copy keeps the opening message waiting.
+    const copy = JSON.parse(JSON.stringify(session.exportState()))
+    const resumed = sessionWith(ai, { update: { mode } }).session
+    assert.equal(resumed.importState(copy), true)
+    resumed.choose('update:details.summary', 'Redraft')
+    resumed.choose('update:details.notes', 'Keep')
+    await resumed.submitRound()
+    const texts = userTexts(ai.calls[0])
+    assert.equal(texts.length, 2, `${mode}: Gantry's opening with the answers, then the architect's words`)
+    assert.match(texts[0], /REDRAFT/)
+    assert.equal(texts[1], words)
+  }
+})
+
 test('a normal session with nothing flagged starts as it always did, and says which documents are New since the last interview', async () => {
   const ai = fakeAi(() => anthropicReply({ text: 'Reading.' }))
   const { session } = sessionWith(ai, { update: null, sources: manifest({ removedAt: undefined }).slice(0, 1), newSince: [{ id: 'workshop', title: 'Workshop notes' }] })

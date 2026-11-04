@@ -136,6 +136,11 @@ test('an error inside a stream is thrown as the failure it stands for', () => {
   assert.throws(() => parse('openai', quota), (e) => e.code === 'out-of-credit')
   const badKey = 'event: error\ndata: {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}\n\n'
   assert.throws(() => parse('anthropic', badKey), (e) => e.code === 'key-rejected')
+  // #329: a request too long for the model, refused part-way through the stream.
+  const tooLong = 'event: error\ndata: {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 215000 tokens > 200000 maximum"}}\n\n'
+  assert.throws(() => parse('anthropic', tooLong), (e) => e.code === 'too-long')
+  const contextLength = 'data: {"error":{"message":"This model\'s maximum context length is 8192 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}\n\n'
+  assert.throws(() => parse('openai', contextLength), (e) => e.code === 'too-long')
 })
 
 test('the SSE reader handles CRLF, comments, multi-line data and a final event with no blank line', () => {
@@ -223,6 +228,17 @@ test('OpenAI request: Chat Completions with tool_choice auto, streamed usage and
   assert.deepEqual(req.body.messages[3], { role: 'tool', tool_call_id: 'c1', content: 'Cost' })
 })
 
+test('OpenAI request: two user messages in a row (an opening message, a compacted conversation) go as one turn, so roles alternate', () => {
+  const provider = normaliseAiProvider({ type: 'ollama', model: 'm' })
+  const plain = buildChatRequest(provider, { system: 'S', messages: [{ role: 'user', text: 'Gantry opens.' }, { role: 'user', text: 'Focus on hosting.' }, { role: 'assistant', text: 'OK' }, { role: 'user', text: 'Next.' }] })
+  assert.deepEqual(plain.body.messages.map((m) => m.role), ['system', 'user', 'assistant', 'user'])
+  assert.equal(plain.body.messages[1].content, 'Gantry opens.\n\nFocus on hosting.')
+  const withPicture = buildChatRequest(provider, { messages: [{ role: 'user', text: 'Gantry opens.', images: [{ mediaType: 'image/png', data: 'AAAA' }] }, { role: 'user', text: 'Focus on hosting.' }] })
+  assert.deepEqual(withPicture.body.messages.map((m) => m.role), ['user'])
+  assert.deepEqual(withPicture.body.messages[0].content.map((b) => b.type), ['text', 'image_url', 'text'])
+  assert.equal(withPicture.body.messages[0].content[2].text, 'Focus on hosting.')
+})
+
 test('OpenRouter is sent require_parameters so tools are not silently dropped', () => {
   const provider = normaliseAiProvider({ type: 'openrouter', address: 'https://openrouter.ai/api/v1', key: 'k', model: 'x/y', advanced: { topK: 40, reasoningEffort: 'high' } })
   const withTools = buildChatRequest(provider, { messages: [{ role: 'user', text: 'x' }], tools: [TOOL] })
@@ -284,9 +300,125 @@ test('#294 Anthropic request: originals attached to the first message are behind
   const first = withPdf.body.messages[0].content
   assert.deepEqual(first.at(-1).cache_control, { type: 'ephemeral', ttl: '1h' })
   assert.equal(first.filter((b) => b.cache_control).length, 1)
-  assert.equal(withPdf.body.messages[2].content, 'More', 'later turns carry no cache point of their own')
-  const plain = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'Start' }] })
+  assert.deepEqual(withPdf.body.messages[1].content, [{ type: 'text', text: 'ok' }], 'a message between the first and the last carries no cache point')
+  const plain = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'Start' }, { role: 'assistant', text: 'ok' }, { role: 'user', text: 'More' }] })
   assert.equal(plain.body.messages[0].content, 'Start', 'nothing attached, nothing marked')
+})
+
+// ---------- #328: the conversation is cached too ----------
+
+/** Every cache point in an Anthropic request body: the system blocks, then each message's blocks. */
+const cachePoints = (body) => [...(Array.isArray(body.system) ? body.system : []), ...body.messages.flatMap((m) => (Array.isArray(m.content) ? m.content : []))].filter((b) => b.cache_control)
+
+test('#328 Anthropic request: the last message carries a moving one-hour cache point, so the conversation so far is read from cache on the next call', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-x' })
+  const messages = [
+    { role: 'user', text: 'Start' },
+    { role: 'assistant', text: 'Reading.', toolCalls: [{ id: 'r1', name: 'read_repository_file', input: { id: 'api', path: 'a.ts' } }] },
+    { role: 'tool', toolCallId: 'r1', name: 'read_repository_file', content: 'export const A = 1' },
+  ]
+  const req = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages })
+  assert.deepEqual(req.body.messages.at(-1).content, [{ type: 'tool_result', tool_use_id: 'r1', content: 'export const A = 1', cache_control: { type: 'ephemeral', ttl: '1h' } }])
+  assert.equal(req.body.messages[1].content.some((b) => b.cache_control), false, 'only the last message moves')
+
+  const answered = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [...messages.slice(0, 2), { role: 'user', text: 'A is 1.' }] })
+  assert.deepEqual(answered.body.messages.at(-1).content, [{ type: 'text', text: 'A is 1.', cache_control: { type: 'ephemeral', ttl: '1h' } }], 'a plain message becomes one block with the point on it')
+})
+
+test('#328 Anthropic request: never more than 4 cache points, the system, the originals and the moving one together', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-x' })
+  const pdf = { mediaType: 'application/pdf', filename: 'a.pdf', data: 'AAAA' }
+  const long = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'Start', documents: [pdf] }, { role: 'assistant', text: 'ok' }, { role: 'user', text: 'More' }] })
+  assert.equal(cachePoints(long.body).length, 3)
+  assert.ok(long.body.messages.at(-1).content.at(-1).cache_control)
+  const one = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'Start', documents: [pdf] }] })
+  assert.equal(cachePoints(one.body).length, 2, 'the first message is also the last: one point covers both')
+  for (const body of [long.body, one.body]) assert.ok(cachePoints(body).length <= 4)
+})
+
+test('#328 a request that asks for no caching (a connection test, a merge) gets no moving cache point', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-x' })
+  const req = buildChatRequest(provider, { system: 'Be brief.', messages: [{ role: 'user', text: 'x' }] })
+  assert.equal(req.body.messages[0].content, 'x')
+  assert.ok(!JSON.stringify(req.body).includes('cache_control'))
+})
+
+test('#328 OpenRouter to an Anthropic model: the last message carries the moving cache point; other models and OpenAI-style Providers get nothing new', () => {
+  const claude = normaliseAiProvider({ type: 'openrouter', address: 'https://openrouter.ai/api/v1', key: 'k', model: 'anthropic/claude-x' })
+  const messages = [
+    { role: 'user', text: 'Start' },
+    { role: 'assistant', toolCalls: [{ id: 'r1', name: 'read_repository_file', input: { id: 'api', path: 'a.ts' } }] },
+    { role: 'tool', toolCallId: 'r1', name: 'read_repository_file', content: 'export const A = 1' },
+  ]
+  const req = buildChatRequest(claude, { system: SYSTEM, cachePrefix: STABLE, messages })
+  assert.deepEqual(req.body.messages.at(-1), { role: 'tool', tool_call_id: 'r1', content: [{ type: 'text', text: 'export const A = 1', cache_control: { type: 'ephemeral', ttl: '1h' } }] })
+  assert.equal(JSON.stringify(req.body).match(/cache_control/g).length, 2, 'the system and the last message')
+  const user = buildChatRequest(claude, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'x' }] })
+  assert.deepEqual(user.body.messages.at(-1).content, [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral', ttl: '1h' } }])
+  for (const provider of [
+    normaliseAiProvider({ type: 'openrouter', address: 'https://openrouter.ai/api/v1', key: 'k', model: 'meta/llama' }),
+    normaliseAiProvider({ type: 'openai', address: 'https://api.openai.com/v1', key: 'k', model: 'gpt-x' }),
+    normaliseAiProvider({ type: 'ollama', address: 'http://localhost:11434', model: 'llama' }),
+  ]) {
+    const plain = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages })
+    assert.ok(!JSON.stringify(plain.body).includes('cache_control'), provider.type)
+    assert.equal(plain.body.messages.at(-1).content, 'export const A = 1', provider.type)
+  }
+})
+
+// Anthropic walks back at most 20 positions from a cache point to find an earlier entry. A reply that makes many tool calls at once adds a
+// block per call and per result, so the previous call's moving point would be out of reach; a bridge point goes where it was.
+const burst = (n, prefix = 'b') => {
+  const calls = Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, name: 'search_repository', input: { id: 'api', query: `q${i}` } }))
+  return [{ role: 'assistant', text: 'Searching.', toolCalls: calls }, ...calls.map((c) => ({ role: 'tool', toolCallId: c.id, name: c.name, content: `matches for ${c.input.query}` }))]
+}
+const opening = [
+  { role: 'user', text: 'Start' },
+  { role: 'assistant', text: 'Reading.', toolCalls: [{ id: 'r1', name: 'read_repository_file', input: { id: 'api', path: 'a.ts' } }] },
+  { role: 'tool', toolCallId: 'r1', name: 'read_repository_file', content: 'export const A = 1' },
+]
+
+test('#328 Anthropic request: after a reply with many tool calls at once, a bridge point sits where the previous call’s moving point was', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-x' })
+  const previous = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: opening })
+  const previousPoint = previous.body.messages.at(-1).content.at(-1)
+  assert.ok(previousPoint.cache_control, 'the previous call put its moving point on the read of a.ts')
+
+  const req = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [...opening, ...burst(9)] })
+  const points = cachePoints(req.body)
+  assert.equal(points.length, 3, 'the system, the bridge and the moving point')
+  assert.deepEqual(req.body.messages[2].content.at(-1), previousPoint, 'the bridge is exactly where the previous call wrote the cache')
+  assert.ok(req.body.messages.at(-1).content.at(-1).cache_control, 'the moving point is on the last result')
+
+  const few = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [...opening, ...burst(7)] })
+  assert.equal(cachePoints(few.body).length, 2, 'seven calls add 15 blocks: the moving point can still find the previous one, so no bridge')
+})
+
+test('#328 Anthropic request: the bridge after the architect’s next message, and never a fifth cache point', () => {
+  const provider = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-x' })
+  // The previous call ended at the read of a.ts; the AI then searched in a burst and replied, and the architect answered.
+  const messages = [...opening, ...burst(10), { role: 'assistant', text: 'Here is what I found.' }, { role: 'user', text: 'Thanks.' }]
+  const req = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: messages.slice(0, -2) })
+  assert.ok(req.body.messages[2].content.at(-1).cache_control, 'the call after the burst bridges to a.ts')
+  const after = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages })
+  assert.equal(cachePoints(after.body).length, 2, 'the call after the reply is two blocks on from the previous one: no bridge')
+
+  const pdf = { mediaType: 'application/pdf', filename: 'a.pdf', data: 'AAAA' }
+  const withPdf = [{ ...opening[0], documents: [pdf] }, ...opening.slice(1), ...burst(12)]
+  const full = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: withPdf })
+  assert.equal(cachePoints(full.body).length, 4, 'the system, the originals, the bridge and the moving point')
+  assert.ok(full.body.messages[2].content.at(-1).cache_control)
+  const first = buildChatRequest(provider, { system: SYSTEM, cachePrefix: STABLE, messages: [{ role: 'user', text: 'Start', documents: [pdf] }, ...burst(12)] })
+  assert.ok(cachePoints(first.body).length <= 4, 'a bridge onto the originals’ own block adds no point')
+})
+
+test('#328 OpenRouter to an Anthropic model: the same bridge after many tool calls at once; other models get nothing', () => {
+  const claude = normaliseAiProvider({ type: 'openrouter', address: 'https://openrouter.ai/api/v1', key: 'k', model: 'anthropic/claude-x' })
+  const req = buildChatRequest(claude, { system: SYSTEM, cachePrefix: STABLE, messages: [...opening, ...burst(9)] })
+  assert.deepEqual(req.body.messages[3], { role: 'tool', tool_call_id: 'r1', content: [{ type: 'text', text: 'export const A = 1', cache_control: { type: 'ephemeral', ttl: '1h' } }] })
+  assert.equal(JSON.stringify(req.body).match(/cache_control/g).length, 3, 'the system, the bridge and the last message')
+  const llama = normaliseAiProvider({ type: 'openrouter', address: 'https://openrouter.ai/api/v1', key: 'k', model: 'meta/llama' })
+  assert.ok(!JSON.stringify(buildChatRequest(llama, { system: SYSTEM, cachePrefix: STABLE, messages: [...opening, ...burst(9)] }).body).includes('cache_control'))
 })
 
 test('#294 OpenAI-style requests are left as they are: the order of the prompt is what lets the AI Provider cache it', () => {

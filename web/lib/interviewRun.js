@@ -6,10 +6,12 @@
 //   * the **run plan** the left rail draws: one row per Stage with its state (`planRows`);
 //   * what a stage-end Save means for the run, and what the status block of the decisions log records (`saveOutcome`);
 //   * working out from the committed decisions logs whether a run was paused or interrupted (`resumableRun`);
+//   * the Artefact each Stage of the run aims for, chosen at the kickoff (`artefactRows`, #332);
 //   * the run held in this tab, so the Interview page of the next Stage knows it is carrying on (`interviewRuns`).
 // The interview of each Stage is its own session (web/lib/interviewSession.js) with its own decisions log; the run is only what
 // joins them.
 import { signal } from '@preact/signals'
+import { artefactChoices } from './interviewBrief.js'
 
 /** The states a row of the run plan can be in. `beyond` is a Stage after the target, which the run never reaches. */
 export const PLAN_STATES = Object.freeze(['done', 'drafting', 'drafting-ahead', 'awaiting-confirmation', 'awaiting-approval', 'approval-queued', 'waiting-for-approval', 'waiting', 'paused', 'beyond', 'revising'])
@@ -183,11 +185,73 @@ export function runStartStage(stages, log, fallback) {
   return named.length ? stages[Math.min(...named)].id : fallback
 }
 
+/**
+ * The opening message the run was started with (#331), from the status block its last Save wrote: '' when the architect typed none. A run
+ * resumed in another browser takes it from here, so each Stage it reaches still starts with the same words.
+ */
+export function runOpening(log) {
+  return latestStatus(log)?.opening ?? ''
+}
+
+/**
+ * The kickoff's "Artefact for each Stage" (#332): one row per Stage of the run, from the current Stage to the target, in order. Each row has the
+ * Artefacts that can pass that Stage's Gate and the one the Stage aims for: the architect's pick, else the one the run already chose for it (the
+ * run in this tab, or the status block of its last Save), else the lightest. A pick that can't pass the Gate is not used. A Stage with no
+ * candidate has no Artefact to aim for, and its interview goes as it did before there was a choice.
+ *
+ * @param {object} input
+ * @param {object} input.definition  the Definition, with `stages` (each with its `gate`) and `artefacts`
+ * @param {{id: string, title?: string, gate?: string}[]} input.stages  every Stage of the Instance
+ * @param {string} input.currentStageId
+ * @param {string} input.targetStageId  the run's target (the current Stage, or none ahead of it, is a run of one Stage)
+ * @param {Record<string, string>} [input.picked]  what the architect chose on this kickoff, by Stage id
+ * @param {Record<string, string>} [input.remembered]  what the run already chose, by Stage id
+ * @returns {{id: string, title: string, gate: string, candidates: object[], lightest: object|null, chosen: object|null}[]}
+ */
+export function artefactRows({ definition, stages, currentStageId, targetStageId, picked = {}, remembered = {} }) {
+  const currentAt = indexOf(stages, currentStageId)
+  if (currentAt === -1) return []
+  const targetAt = Math.max(indexOf(stages, targetStageId), currentAt)
+  return stages.slice(currentAt, targetAt + 1).map((stage) => {
+    const { candidates, lightest } = artefactChoices(definition, stage.id)
+    const candidate = (id) => candidates.find((a) => a.id === id)
+    const gate = stage.gate ?? (definition?.stages ?? []).find((s) => s.id === stage.id)?.gate ?? ''
+    return { id: stage.id, title: stage.title ?? stage.id, gate, candidates, lightest, chosen: candidate(picked[stage.id]) ?? candidate(remembered[stage.id]) ?? lightest }
+  })
+}
+
+/** The Artefact each row aims for, by Stage id: what the run record and the status block keep (#332). A Stage with none is left out. */
+export const chosenArtefacts = (rows) => Object.fromEntries(rows.filter((row) => row.chosen).map((row) => [row.id, row.chosen.id]))
+
+/**
+ * The Artefact chosen for each Stage of the run (#332), from the status block its last Save wrote on `stageId`: `{}` when it names none. A log
+ * written before there was a choice per Stage still says what this Stage aimed for. A run, or a paused session, resumed in another browser
+ * takes them from here.
+ */
+export function runArtefacts(log, stageId) {
+  const status = latestStatus(log)
+  if (!status) return {}
+  return { ...(status.artefacts ?? {}), ...(stageId && status.artefact ? { [stageId]: status.artefact } : {}) }
+}
+
+/**
+ * The Artefact each Stage aims for when **Resume the run** carries a paused run on (#332): what the run chose, from the status block of
+ * `fromStageId` (the Stage it was paused on), unless the architect chose another on this kickoff. The kickoff is between sessions, so its rows
+ * can be changed there, as Run until can; while a session is running they can't. A Stage the run never chose for (Run until now reaches it)
+ * aims for its lightest, and the Stages behind this one keep the run's choice.
+ */
+export function resumedArtefacts({ definition, stages, currentStageId, targetStageId, picked = {}, log, fromStageId }) {
+  const chose = runArtefacts(log, fromStageId)
+  return { ...chose, ...chosenArtefacts(artefactRows({ definition, stages, currentStageId, targetStageId, picked, remembered: chose })) }
+}
+
 // ---------- the run held in this tab ----------
 
 /**
  * The runs in this tab, by Instance slug. A run is what the Interview page of the next Stage reads to know it is carrying on:
- * `{ target, startStageId, providerId, phase: 'running'|'paused'|'done', carryOn: stageId|null }`.
+ * `{ target, startStageId, providerId, phase: 'running'|'paused'|'done', carryOn: stageId|null, opening, artefacts }`. `opening` (#331) is the
+ * architect's opening message from the kickoff, which every Stage of the run starts with ('' for none). `artefacts` (#332) is the Artefact
+ * chosen for each Stage of the run, by Stage id, which that Stage aims for when the run reaches it.
  */
 export const interviewRuns = signal({})
 

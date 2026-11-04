@@ -276,7 +276,8 @@ test('a picture is left out for a model that can\'t read images, and listed as u
   const { session } = sessionWith(ai, { provider: anthropic({ readsImages: false }), sources: [{ id: 'brief', title: 'Client brief', filename: 'brief.md', size: 10, text: 'Faster claims.' }, pic], readOriginal: async () => PNG })
   await session.start()
   const first = ai.calls[0].body.messages[0]
-  assert.equal(typeof first.content, 'string', 'no image block')
+  // #328: the only message is also the last, so it carries the moving cache point as one text block.
+  assert.deepEqual(first.content.map((b) => b.type), ['text'], 'no image block')
   assert.match(ai.calls[0].body.system, /whiteboard\.png\): UNREADABLE \(it is a picture and this model can't read images\)/)
   assert.ok(session.snapshot().thread.some((t) => t.unreadable === 'whiteboard' && /Can't be read \(claude-x\): Whiteboard/.test(t.text)))
 })
@@ -286,7 +287,7 @@ test('switching to a model that reads images sends the picture from then on', as
   const blind = anthropic({ readsImages: false })
   const { session } = sessionWith(ai, { provider: blind, sources: [pic], readOriginal: async () => PNG })
   await session.start()
-  assert.equal(typeof ai.calls[0].body.messages[0].content, 'string')
+  assert.deepEqual(ai.calls[0].body.messages[0].content.map((b) => b.type), ['text'])
   const sighted = providers.addAiProvider({ name: 'Sighted', type: 'anthropic', address: 'https://api.anthropic.com', key: 'k2', model: 'claude-y' })
   tested(sighted.id, { readsImages: true })
   assert.deepEqual(await session.setProvider(sighted.id), { ok: true })

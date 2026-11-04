@@ -140,6 +140,7 @@ test('server workspace: the review round asks one card per unresolved thread, an
     assert.equal(await page.locator('[data-testid="interview-run-until"]').count(), 0, 'it is not a run')
     assert.match(await page.textContent('[data-testid="interview-review-count"]'), /^9 review questions/)
     assert.match(await page.textContent('[data-testid="interview-start"]'), /Work through review comments/)
+    assert.equal(await page.inputValue('[data-testid="interview-opening"]'), '', 'the same opening box as an interview\'s kickoff (#331), blank')
 
     // The rail lists the one thread Word resolved, collapsed, and can reopen it.
     const resolved = page.getByTestId('interview-review-resolved')

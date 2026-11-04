@@ -195,6 +195,19 @@ test('a fact the architect typed is kept word for word, against the Field it fed
   assert.equal(toolResults(ai.calls[2]).find((r) => r.tool_use_id === 'l1').is_error ?? false, false)
 })
 
+test('#331 a fact from the opening message typed at the kickoff is kept word for word, the same as one typed in chat', async () => {
+  const opening = 'Focus on the hosting decision; the budget is capped at NZD 1.2M.'
+  const ai = fakeAi((request, n) => {
+    if (n === 0) return anthropicReply({ tools: [logCall('l1', { kind: 'fact', quote: 'capped at NZD 1.2M', fields: ['details.notes'] }), draftCall('d1', 'details.notes', 'The budget is capped at NZD 1.2M.')] })
+    return quiet()
+  })
+  const { session } = sessionWith(ai)
+  await session.start({ opening })
+  const facts = session.snapshot().decisions.latest.filter((e) => e.kind === 'fact')
+  assert.deepEqual(facts.map((f) => [f.words, f.fields]), [[opening, ['details.notes']]])
+  assert.equal(toolResults(ai.calls[1]).find((r) => r.tool_use_id === 'l1').is_error ?? false, false)
+})
+
 test('thanks and "go on" are never kept, and the AI cannot log words the architect did not type', async () => {
   const ai = fakeAi((request, n) => {
     if (n === 0) return quiet()

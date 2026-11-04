@@ -236,6 +236,41 @@ test('each failure says what to do: key, credit, rate limit, address and model',
   assert.equal((await fail(jsonRes(502, { error: 'ai_unreachable', message: 'could not reach' }))).code, 'failed')
 })
 
+// #329: a request too long for the model is told apart from any other 400, whoever words it, so the interview can compact and send it again.
+test('a refusal of a request as too long for the model is "too-long", from every AI Provider, and is not retried as a sampling refusal', async () => {
+  const p = anthropic({ temperature: 0.3 })
+  const failOf = async (res, provider = p) => {
+    const ai = fakeAi(() => res)
+    const err = await client.runTurn(provider, { messages: [{ role: 'user', text: 'go' }] }, { fetchImpl: ai.fetchImpl }).then(
+      () => assert.fail('should have failed'),
+      (e) => e
+    )
+    return { err, calls: ai.calls.length }
+  }
+  const anthropicTooLong = await failOf(jsonRes(400, { type: 'error', error: { type: 'invalid_request_error', message: 'prompt is too long: 215000 tokens > 200000 maximum' } }))
+  assert.equal(anthropicTooLong.err.code, 'too-long')
+  assert.ok(client.isTooLong(anthropicTooLong.err))
+  assert.match(anthropicTooLong.err.message, /Work Anthropic says the conversation is too long for the model: prompt is too long/)
+  assert.equal(anthropicTooLong.calls, 1, 'not sent again without its temperature: that would not make it shorter')
+
+  const o = openai()
+  const tooLong = [
+    jsonRes(400, { type: 'error', error: { type: 'invalid_request_error', message: 'input length and `max_tokens` exceed context limit: 190000 + 21333 > 200000, decrease input length or `max_tokens` and try again' } }),
+    jsonRes(413, { type: 'error', error: { type: 'request_too_large', message: 'Request exceeds the maximum allowed number of bytes.' } }),
+    jsonRes(400, { error: { message: "This model's maximum context length is 128000 tokens. However, your messages resulted in 130112 tokens.", type: 'invalid_request_error', param: 'messages', code: 'context_length_exceeded' } }),
+    jsonRes(400, { error: { message: "This endpoint's maximum context length is 200000 tokens. However, you requested about 250000 tokens.", code: 400 } }),
+    jsonRes(400, { error: { message: 'The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).', status: 'INVALID_ARGUMENT' } }),
+    jsonRes(400, { object: 'error', message: 'Prompt contains 40000 tokens and 0 draft tokens, too large for model with 32768 maximum context length', type: 'invalid_request_message_error' }),
+    jsonRes(400, { error: { message: 'the input length exceeds the context length' } }),
+  ]
+  for (const res of tooLong) assert.equal((await failOf(res, o)).err.code, 'too-long')
+  for (const res of [jsonRes(400, { error: { message: 'messages: field required' } }), jsonRes(429, { error: { message: 'Request too large for gpt-x on tokens per min (TPM): Limit 30000, Requested 50000.', code: 'rate_limit_exceeded' } })]) {
+    const { err } = await failOf(res, o)
+    assert.notEqual(err.code, 'too-long')
+    assert.ok(!client.isTooLong(err))
+  }
+})
+
 test('a failure in the middle of a stream is the same kind of failure', async () => {
   const p = anthropic()
   const ai = fakeAi(() => sse(fixture('anthropic-error.sse')))

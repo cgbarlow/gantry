@@ -119,6 +119,49 @@ describe('the interview brief an outside agent gets', () => {
       assert.match(body.brief, /recorded by an outside agent/)
     })
   })
+
+  test('#332 lists the artefacts each stage from this one on can aim for, and refuses one that cannot pass the stage\'s gate', async () => {
+    await withInstance(async (base) => {
+      const body = await json(await call(base, 'GET', '/api/instance/interview-brief'))
+      assert.deepEqual(
+        body.stageArtefacts.map((s) => [s.stageId, s.candidates.map((a) => a.id), s.lightest]),
+        [
+          ['shape', ['soap', 'soap-full'], 'soap'],
+          ['hld-define', ['hld'], 'hld'],
+          ['detailed-design', ['sad', 'ssad'], 'ssad'],
+          ['handover', ['as-built'], 'as-built'],
+        ]
+      )
+      const aimed = await json(await call(base, 'GET', '/api/instance/interview-brief?artefact=soap-full'))
+      assert.equal(aimed.artefact.id, 'soap-full')
+      const wrong = await call(base, 'GET', '/api/instance/interview-brief?artefact=sad')
+      assert.equal(wrong.status, 400)
+      assert.match((await wrong.json()).error, /"sad" can't pass the gate of stage "SOAP" \(gate: business-case\)\. Choose one of: soap, soap-full\./)
+    })
+  })
+
+  test('#332 a session\'s save records the artefact its run chose for each stage, and the stage\'s own one, for a browser that resumes it', async () => {
+    await withInstance(async (base, folder) => {
+      const { instance, moduleId, a } = await firstTwoFields(base)
+      const res = await call(base, 'PUT', '/api/instance/modules', {
+        modules: { [moduleId]: { fields: { [a]: 'A first draft.' } } },
+        baseVersion: instance.stageVersion,
+        session: session({ state: 'paused', runUntil: 'detailed-design', artefacts: { shape: 'soap', 'hld-define': 'hld', 'detailed-design': 'sad' } }),
+        entries: [],
+      })
+      assert.equal(res.status, 200, await res.clone().text())
+      const log = parseYaml(readFileSync(join(folder, 'interview', `${instance.stage.id}.yaml`), 'utf8'))
+      assert.deepEqual(log.status[0].artefacts, { shape: 'soap', 'hld-define': 'hld', 'detailed-design': 'sad' })
+      assert.equal(log.status[0].artefact, 'soap', 'the stage aims for the one its run chose for it')
+      const brief = await json(await call(base, 'GET', '/api/instance/interview-brief?who=a.architect'))
+      assert.deepEqual(brief.recap.adoptable.artefacts, { shape: 'soap', 'hld-define': 'hld', 'detailed-design': 'sad' }, 'a session taken over keeps them')
+      assert.equal(brief.recap.adoptable.artefact, 'soap', 'and what its own stage aimed for')
+      assert.deepEqual(brief.recap.runArtefacts, { shape: 'soap', 'hld-define': 'hld', 'detailed-design': 'sad' })
+      // The next stage, once the run reaches it (after a merge, say), reads the run's choices from the stage before it.
+      const next = await json(await call(base, 'GET', '/api/instance/interview-brief?stage=hld-define'))
+      assert.deepEqual(next.recap.runArtefacts, { shape: 'soap', 'hld-define': 'hld', 'detailed-design': 'sad' })
+    })
+  })
 })
 
 describe('a Save in a session', () => {

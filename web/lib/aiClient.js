@@ -5,7 +5,8 @@
 //   * `runTurn`      a whole turn: stream it, show text and a "preparing questions" placeholder as they come,
 //                    then decide what it was (question cards, an invalid card, or chat) with the one-retry rule;
 //   * `testConnection` / `testAndStore` / `ensureTested`  what Test connection checks, and keeping the result;
-//   * `runWithRecovery`  a rejected key asks for a key and resends; a rate limit or no credit offers Retry.
+//   * `runWithRecovery`  a rejected key asks for a key and resends; a rate limit or no credit offers Retry;
+//   * `isTooLong`    a refusal of a request too long for the model, which the interview answers by compacting (#329).
 //
 // Calls reach the AI Provider through `callAiProvider` (web/lib/aiProviders.js): straight from the browser for
 // a local model on this computer, otherwise through `gantry serve`'s relay. No DOM here, so the unit tests
@@ -40,13 +41,20 @@ async function callWithoutRefusedSampling(provider, params, options) {
   const res = await callAiProvider(first, buildChatRequest(first, params), options)
   if (res.ok) return res
   const failure = await failureFromResponse(res, provider)
-  if (skip || failure.status !== 400 || !SAMPLING_REFUSAL.test(failure.message) || !hasSampling(provider)) throw failure
+  // #329: a request too long for the model is a 400 too, and no sampling setting will fix it: the interview compacts and sends it again.
+  if (skip || isTooLong(failure) || failure.status !== 400 || !SAMPLING_REFUSAL.test(failure.message) || !hasSampling(provider)) throw failure
   REFUSES_SAMPLING.add(samplingKey(provider))
   const bare = withoutSampling(provider)
   const again = await callAiProvider(bare, buildChatRequest(bare, params), options)
   if (!again.ok) throw await failureFromResponse(again, provider)
   return again
 }
+
+/**
+ * #329 (docs/adr/0073): true for an AI Provider's refusal of a request as too long for the model's context window (Anthropic's "prompt is
+ * too long", OpenAI's `context_length_exceeded` and the equivalents, classified in web/lib/aiProviders.js), as opposed to any other 400.
+ */
+export const isTooLong = (err) => err instanceof AiProviderError && err.code === 'too-long'
 
 /**
  * One streamed call. An async generator of the internal events (text, tool-start, tool-call, usage, done).

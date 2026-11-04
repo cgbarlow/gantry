@@ -204,6 +204,23 @@ test('a revision sends the AI the comment as Reviewer N, never a real name, and 
   assert.equal(entry.words, 'Ben is right: add Risk too.')
 })
 
+test('#331 the opening message waits for the review round and goes with the AI\'s first request, after the answers', async () => {
+  const words = 'Reviewer 2 speaks for the delivery team; weigh that.'
+  const ai = fakeAi((request, n) => (n === 0 ? anthropicReply({ text: 'Revising.' }) : anthropicReply({ text: 'Done.' })))
+  const { session } = sessionWith(ai)
+  await session.start({ opening: words })
+  assert.equal(ai.calls.length, 0, 'the round still comes before the AI')
+  let snap = session.snapshot()
+  assert.deepEqual(snap.thread.filter((t) => t.who === 'you').map((t) => t.text), [words])
+  for (const c of snap.round.cards) session.choose(c.id, c.options.find((o) => [REVIEW_CHOICES.keep, REVIEW_CHOICES.note].includes(o.label)).label)
+  session.choose(cardWith(snap, 'Add the team').id, REVIEW_CHOICES.revise)
+  assert.equal((await session.submitRound()).ok, true)
+  const messages = ai.calls[0].body.messages
+  assert.equal(messages.length, 2)
+  assert.match(firstUser(ai.calls[0]), /Work through the review comments/)
+  assert.deepEqual(messages[1], { role: 'user', content: [{ type: 'text', text: words, cache_control: { type: 'ephemeral', ttl: '1h' } }] }, 'the last message, so with the moving cache point (#328)')
+})
+
 test('keep as is writes the reason in the architect’s words and nothing else; can’t settle yet is an open question with no real name in it', async () => {
   const ai = fakeAi(() => anthropicReply({ text: 'unexpected' }))
   const { session } = sessionWith(ai)

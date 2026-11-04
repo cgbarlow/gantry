@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { beginRun, clearRun, getRun, interviewRuns, nextStage, planRows, resumableRun, runTargets, saveOutcome, updateRun } from '../web/lib/interviewRun.js'
+import { artefactRows, beginRun, chosenArtefacts, clearRun, getRun, interviewRuns, nextStage, planRows, resumableRun, resumedArtefacts, runArtefacts, runOpening, runTargets, saveOutcome, updateRun } from '../web/lib/interviewRun.js'
 import { applyDecisionsDelta, emptyDecisionsLog, sessionStatus } from '../web/lib/decisionsLog.js'
 import { createInterviewSession } from '../web/lib/interviewSession.js'
 
@@ -121,6 +121,89 @@ test('a finished run, a run of one Stage and a run already under way are not off
   assert.equal(resumableRun({ stages: STAGES, currentStageId: 'three', logs: { two: log('saved', 'two') } }), null, 'the previous run stopped at its own target')
   assert.equal(resumableRun({ stages: STAGES, currentStageId: 'three', logs: { two: log('saved', 'four'), three: log('saved', 'three') } }), null, 'this Stage has its own log, which says the run ended')
   assert.equal(resumableRun({ stages: STAGES, currentStageId: 'nope', logs: {} }), null)
+})
+
+test('#331 a run resumed elsewhere takes its opening message from the status block of the last Save, and none when it had none', () => {
+  const words = 'Focus on the hosting decision.'
+  let log = applyDecisionsDelta(emptyDecisionsLog('one'), { status: { session: 's-1', who: 'Alex', state: 'paused', target: 'three', opening: words } }, 'one')
+  assert.equal(runOpening(log), words)
+  log = applyDecisionsDelta(log, { status: { session: 's-2', who: 'Alex', state: 'saved', target: 'three' } }, 'one')
+  assert.equal(runOpening(log), '', 'the newest session is the run, and it had none')
+  assert.equal(runOpening(null), '')
+  assert.equal(runOpening(emptyDecisionsLog('one')), '')
+})
+
+// #332: a Definition whose Stages have one candidate, two, or none at their Gates.
+const CHOICE_DEFINITION = {
+  stages: [
+    { id: 'one', title: 'One', gate: 'g1' },
+    { id: 'two', title: 'Two', gate: 'g2' },
+    { id: 'three', title: 'Three', gate: 'g3' },
+    { id: 'four', title: 'Four', gate: 'g4' },
+  ],
+  artefacts: [
+    { id: 'brief', title: 'Brief', gate: 'g1', requires: ['a'] },
+    { id: 'full', title: 'Full', gate: 'g2', requires: ['a', 'b', 'c'] },
+    { id: 'light', title: 'Light', gate: 'g2', requires: ['a'] },
+    { id: 'no-pass', title: 'No pass', gate: 'g3', satisfiesGate: false },
+  ],
+}
+
+test('#332 the kickoff has one Artefact row per Stage of the run, labelled with its gate, each aiming for the lightest unless another is chosen', () => {
+  const stages = CHOICE_DEFINITION.stages
+  const one = artefactRows({ definition: CHOICE_DEFINITION, stages, currentStageId: 'one', targetStageId: 'one' })
+  assert.deepEqual(one.map((r) => [r.id, r.gate, r.chosen?.id]), [['one', 'g1', 'brief']], 'a run of one Stage still has its row')
+  const rows = artefactRows({ definition: CHOICE_DEFINITION, stages, currentStageId: 'one', targetStageId: 'three' })
+  assert.deepEqual(rows.map((r) => [r.id, r.title, r.gate, r.candidates.map((a) => a.id), r.lightest?.id ?? null, r.chosen?.id ?? null]), [
+    ['one', 'One', 'g1', ['brief'], 'brief', 'brief'],
+    ['two', 'Two', 'g2', ['full', 'light'], 'light', 'light'],
+    ['three', 'Three', 'g3', [], null, null],
+  ])
+  assert.deepEqual(chosenArtefacts(rows), { one: 'brief', two: 'light' }, 'a Stage no Artefact can pass is left out')
+
+  const picked = artefactRows({ definition: CHOICE_DEFINITION, stages, currentStageId: 'one', targetStageId: 'two', picked: { two: 'full' } })
+  assert.equal(picked[1].chosen.id, 'full')
+  const remembered = artefactRows({ definition: CHOICE_DEFINITION, stages, currentStageId: 'two', targetStageId: 'two', remembered: { two: 'full' } })
+  assert.equal(remembered[0].chosen.id, 'full', 'what the run already chose')
+  const both = artefactRows({ definition: CHOICE_DEFINITION, stages, currentStageId: 'two', targetStageId: 'two', picked: { two: 'light' }, remembered: { two: 'full' } })
+  assert.equal(both[0].chosen.id, 'light', "the architect's pick on this kickoff wins")
+  const wrong = artefactRows({ definition: CHOICE_DEFINITION, stages, currentStageId: 'one', targetStageId: 'two', picked: { one: 'full', two: 'brief' } })
+  assert.deepEqual(chosenArtefacts(wrong), { one: 'brief', two: 'light' }, 'an Artefact that cannot pass the Gate is not used')
+  assert.deepEqual(artefactRows({ definition: CHOICE_DEFINITION, stages, currentStageId: 'three', targetStageId: 'one' }).map((r) => r.id), ['three'], 'a target behind the current Stage is a run of one')
+  assert.deepEqual(artefactRows({ definition: CHOICE_DEFINITION, stages, currentStageId: 'nope', targetStageId: 'two' }), [])
+})
+
+test('#332 the status block keeps the Artefact chosen for each Stage of the run, and a run resumed elsewhere reads them back', () => {
+  const status = sessionStatus({ session: 's-1', target: 'two', artefact: 'brief', artefacts: { one: 'brief', two: 'full', 'bad id': 'x', three: 'https://example.com' } })
+  assert.deepEqual(status.artefacts, { one: 'brief', two: 'full' }, 'Stage and Artefact ids only')
+  assert.equal(sessionStatus({ session: 's-1' }).artefacts, undefined, 'none when no run chose any')
+
+  let log = applyDecisionsDelta(emptyDecisionsLog('one'), { status: { session: 's-1', who: 'Alex', state: 'paused', target: 'two', artefact: 'brief', artefacts: { one: 'brief', two: 'full' } } }, 'one')
+  assert.deepEqual(runArtefacts(log, 'one'), { one: 'brief', two: 'full' })
+  log = applyDecisionsDelta(emptyDecisionsLog('two'), { status: { session: 's-0', who: 'Alex', state: 'paused', target: 'two', artefact: 'full' } }, 'two')
+  assert.deepEqual(runArtefacts(log, 'two'), { two: 'full' }, 'a log from before the choice per Stage still says what its Stage aimed for')
+  assert.deepEqual(runArtefacts(null, 'one'), {})
+
+  const session = createInterviewSession({ providerId: 'p', getContext: () => ({ stageId: 'two', actor: 'a.architect', artefactId: 'full', runArtefacts: { one: 'brief', two: 'full' }, targetStageId: 'two' }) })
+  const sent = session.decisionsDelta({ runState: 'paused', saving: true }).status
+  assert.equal(sent.artefact, 'full', 'the Stage records the Artefact it aims for')
+  assert.deepEqual(sent.artefacts, { one: 'brief', two: 'full' })
+})
+
+test('#332 Resume the run keeps the Artefact the run chose for each Stage, unless the architect chooses another on the kickoff', () => {
+  const stages = CHOICE_DEFINITION.stages
+  // Paused on One after its Save, in a run to Two that chose the heavier Artefact for Two.
+  const log = applyDecisionsDelta(emptyDecisionsLog('one'), { status: { session: 's-1', who: 'Alex', state: 'paused', target: 'two', artefact: 'brief', artefacts: { one: 'brief', two: 'full' } } }, 'one')
+  const resume = (extra) => resumedArtefacts({ definition: CHOICE_DEFINITION, stages, currentStageId: 'two', targetStageId: 'two', log, fromStageId: 'one', ...extra })
+  assert.deepEqual(resume(), { one: 'brief', two: 'full' }, 'the run carries on aiming Two at what it chose, not the lightest')
+  // The kickoff is between sessions: its rows can still be changed, as Run until can.
+  assert.deepEqual(resume({ picked: { two: 'light' } }), { one: 'brief', two: 'light' }, "the architect's pick on the resume kickoff wins")
+  assert.deepEqual(resume({ picked: { two: 'brief' } }), { one: 'brief', two: 'full' }, 'a pick that cannot pass the Gate is not used')
+  // Run until moved on to a Stage the run never chose for: it aims for its lightest; one with no candidate has none.
+  assert.deepEqual(resume({ targetStageId: 'four' }), { one: 'brief', two: 'full' })
+  const further = resumedArtefacts({ definition: { ...CHOICE_DEFINITION, artefacts: [...CHOICE_DEFINITION.artefacts, { id: 'last', gate: 'g4' }] }, stages, currentStageId: 'two', targetStageId: 'four', log, fromStageId: 'one' })
+  assert.deepEqual(further, { one: 'brief', two: 'full', four: 'last' })
+  assert.deepEqual(resumedArtefacts({ definition: CHOICE_DEFINITION, stages, currentStageId: 'two', targetStageId: 'two', log: null, fromStageId: 'one' }), { two: 'light' }, 'no log: the lightest')
 })
 
 test('the run held in the tab is replaced, changed and cleared by Instance', () => {

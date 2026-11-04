@@ -137,10 +137,10 @@ these tools are thin calls to it.
 
 | Tool | What it does |
 | --- | --- |
-| `get_interview_brief` | The interview brief for a stage (`brief`, nine parts in precedence order: Gantry's rules, the pinned skills, Interview instructions, the stage, Fields in scope, saved content, preferred terms, Source documents, the decisions log so far), built by the same code as the in-app AI's, plus a `recap` of the stage's log, the `heldModules` of a drafted-ahead stage and the `stageVersion` to save against. Read-only. |
-| `start_interview_session` | Starts a "run until stage X" session: returns the `session` to pass on (an id, `runUntil`, state), the brief and recap, `stageVersion` and `notes` (another session still going on the stage, held modules). Writes nothing. |
+| `get_interview_brief` | The interview brief for a stage (`brief`, nine parts in precedence order: Gantry's rules, the pinned skills, Interview instructions, the stage, Fields in scope, saved content, preferred terms, Source documents, the decisions log so far), built by the same code as the in-app AI's, plus a `recap` of the stage's log, the `heldModules` of a drafted-ahead stage and the `stageVersion` to save against. `artefactId` is the artefact aimed for, refused if it can't pass the stage's gate; `stageArtefacts` lists, for this stage and each one after it, the artefacts that can pass its gate and the lightest. Read-only. |
+| `start_interview_session` | Starts a "run until stage X" session: returns the `session` to pass on (an id, `runUntil`, state, and `artefacts`, the artefact each stage of the run aims for), the brief and recap, `stageVersion` and `notes` (another session still going on the stage, held modules). `artefacts` picks an artefact per stage (see below). Writes nothing. |
 | `pause_interview_session` | Saves the entries, the session status (state `paused`) and, if `modules` are passed, the drafts so far, in one commit. |
-| `resume_interview_session` | Resumes from the last commit, whichever side paused: runs Check status once first on a workspace whose stage has a Pull Request, then returns the brief and recap and takes over the paused session (`who` or `session` picks it). The committed log wins. |
+| `resume_interview_session` | Resumes from the last commit, whichever side paused: runs Check status once first on a workspace whose stage has a Pull Request, then returns the brief and recap and takes over the paused session (`who` or `session` picks it), keeping the artefact its run chose for each stage. The committed log wins. |
 | `update_instance_modules` | Takes `session`, `entries` and `stageVersion`. The stage-summary confirm is its one save: the content, the entries and the status in one commit. |
 | `advance_stage`, `request_approval` | Take `session` so Gantry can hold the agent to the in-app AI's rules. |
 | `get_review_response_list` | The Review response list as a Word document (`docxBase64`), built on demand from the stages' logs. |
@@ -150,7 +150,18 @@ these tools are thin calls to it.
 recorded only by what the agent saves (its entries and a status line in the stage's `interview/<stage>.yaml`), so a session paused
 in the browser resumes with `resume_interview_session` and one paused here resumes in the browser, which recaps from the same log.
 
-**Saving.** Pass `session` (`id`, `runUntil`, `state`, `model`, `who`) and `entries` to `update_instance_modules` at the stage-summary
+**An artefact for each stage.** `start_interview_session` takes `artefacts: { <stageId>: <artefactId> }`, the artefact each stage of
+the run aims for, as the browser's kickoff does with **Artefact for each Stage**. A stage left out aims for its lightest (the artefact
+with the fewest requirements that can pass its gate), and so does the brief the call hands back for the first stage. An artefact
+that can't pass that stage's gate, or a stage outside the run, is refused with the reason. A lone `artefactId` still works, as the
+first stage's choice. The returned `session.artefacts` says what each stage aims for: brief each later stage with
+`get_interview_brief` and that stage's artefact as `artefactId`, and pass the session on as it is, so each save records the stage's
+artefact and the run's choices, and a run resumed in the browser keeps them. `resume_interview_session` keeps them too, whichever
+side paused (from the session it takes over, else the latest status on the stage or the one before it, as after a merge), and
+hands back a brief that aims the resumed stage at its own. Like the browser's kickoff on a resume, it takes `artefacts` or
+`artefactId` to choose again; a stage the run never chose for aims for its lightest.
+
+**Saving.** Pass `session` (`id`, `runUntil`, `state`, `model`, `who`, `artefacts`) and `entries` to `update_instance_modules` at the stage-summary
 confirm. `stageVersion` is required in a session (a save without it is refused with `code: "stage_version_required"`; a stale one with
 `stage_changed`, as outside a session). Entries have the shape the browser's log has (`answer`, `fact`, `open-question`, `term`,
 `saved-content`, `source-update`, `review-answered`, ...). Gantry assigns each its `id`, time and session, stamps it

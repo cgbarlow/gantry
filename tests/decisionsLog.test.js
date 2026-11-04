@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   DecisionsLogError,
+  OPENING_MAX,
   appendEntries,
   applyDecisionsDelta,
   assertAppendOnly,
@@ -119,6 +120,18 @@ test('a status entry keeps only known keys: nothing that looks like a key, an ad
   assert.deepEqual(status.models, [{ type: 'anthropic', model: 'claude-x', inputTokens: 10, cachedTokens: 4, outputTokens: 2 }])
   const text = JSON.stringify(status)
   for (const secret of ['SECRET', 'private.example', 'Custom name', 'My team AI']) assert.ok(!text.includes(secret), `${secret} is not in the status`)
+})
+
+test('#331 a status entry keeps the architect\'s opening message word for word, and none when they typed nothing', () => {
+  const words = 'Focus on the hosting decision; the budget is capped at NZD 1.2M.\nAsk about https://intranet first.'
+  const status = sessionStatus({ session: 's-1', who: 'Alex', opening: `  ${words}  ` })
+  assert.equal(status.opening, words, 'trimmed, and otherwise as typed: it is the architect\'s words, not a token')
+  assert.equal('opening' in sessionStatus({ session: 's-1', opening: '   ' }), false)
+  assert.equal('opening' in sessionStatus({ session: 's-1' }), false)
+  assert.equal('opening' in sessionStatus({ session: 's-1', opening: { text: 'x' } }), false, 'only text is kept')
+  assert.equal(sessionStatus({ session: 's-1', opening: 'x'.repeat(OPENING_MAX + 50) }).opening.length, OPENING_MAX)
+  const log = applyDecisionsDelta(emptyDecisionsLog('shape'), { status: { session: 's-1', who: 'Alex', opening: words } }, 'shape')
+  assert.equal(parseDecisionsLog(serializeDecisionsLog(log), 'shape').status[0].opening, words, 'it survives the file')
 })
 
 test('an outside agent\'s model is recorded with its tokens as "not reported"', () => {

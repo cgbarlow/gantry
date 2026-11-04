@@ -22,6 +22,9 @@
 //      the last drafts with the Source documents the draft cites, and the session keeps them as the Field's inputs (the
 //      `fields` part of the decisions log, ADR-0064; #288 commits it). The fingerprint is of the text the AI saw, so a
 //      document that changes later can be told apart (#297).
+//
+//   4. SHORTENING (#328, docs/adr/0073). Every read and search result also carries a `label`, `{ title, where, commit?, chars }`, which
+//      names it in the one-line `readNote` its text is replaced by in the conversation once it is a few AI turns old.
 import { citedSourceIds } from './interviewDraft.js'
 import { findSourceCitations, sourceCitationFor } from './sourceCitations.js'
 import { fingerprintText, formatBytes, sourceFileExtension, sourceFileKind } from './sourceDocuments.js'
@@ -112,7 +115,8 @@ const repositoryTitle = (doc) => doc.title || doc.id
 /**
  * Runs one repository tool call. `lookup(id)` returns the Source document as the session knows it; `reader(entry)` the reader the Gantry
  * server answers through (web/lib/sourceRepositoryClient.js): `{ list, search, read }`. Resolves `{ ok, content, read? }`, never rejects:
- * `content` goes back to the AI, and a file read is recorded as `read`, `{ source, title, range, path, commit, fingerprint, chars }`.
+ * `content` goes back to the AI, and a file read is recorded as `read`, `{ source, title, range, path, commit, fingerprint, chars }`. A file read
+ * and a search also carry `label`, which names them for their `readNote` once they are old (#328).
  */
 export async function runRepositoryCall(name, input, { lookup, reader }) {
   const id = String(input?.id ?? '')
@@ -131,7 +135,8 @@ export async function runRepositoryCall(name, input, { lookup, reader }) {
       const { commit, query, matches, filesSearched, truncated } = await repo.search({ query: input?.query, path: input?.path })
       const lines = matches.map((m) => (m.line ? `- ${m.path}:${m.line}: ${m.text}` : `- ${m.path} (its name matches)`))
       const tail = truncated ? `\n\n[Stopped after ${filesSearched} files. Search under a folder, or for something more exact, to see the rest.]` : ''
-      return { ok: true, content: `[${title} · search "${query}" · commit ${commit} · ${filesSearched} files searched]\n\n${lines.length ? lines.join('\n') : 'No matches.'}${tail}` }
+      const content = `[${title} · search "${query}" · commit ${commit} · ${filesSearched} files searched]\n\n${lines.length ? lines.join('\n') : 'No matches.'}${tail}`
+      return { ok: true, content, label: { title, where: `search "${query}"${input?.path ? ` under ${input.path}` : ''}`, commit, chars: content.length } }
     }
     if (name === READ_REPOSITORY_TOOL_NAME) {
       const { commit, path, text } = await repo.read({ path: input?.path })
@@ -143,6 +148,7 @@ export async function runRepositoryCall(name, input, { lookup, reader }) {
         ok: true,
         content: `[${title} · ${path} · commit ${commit} · ${result.label}]\nCite it as ${cite}\n\n${result.text}${footer}`,
         read: { source: doc.id, title, range: path, path, commit, fingerprint: fingerprintText(result.text), chars: result.text.length },
+        label: { title, where: result.from === 0 && !result.truncated ? path : `${path} (${result.label})`, commit, chars: result.text.length },
       }
     }
     return { ok: false, content: `There is no tool called ${name}.` }
@@ -434,7 +440,7 @@ export function readSourceText(text, range, { maxChars = MAX_READ_CHARS } = {}) 
 /**
  * Runs one `read_source_document` call. `lookup(id)` returns the document as the session knows it (`{ id, title, text, ... }`)
  * or undefined; `access` is that document's plan entry. Returns `{ ok, content, read? }`: `content` goes back to the AI; on
- * success `read` is the record of an input, `{ source, title, range, fingerprint, chars }`.
+ * success `read` is the record of an input, `{ source, title, range, fingerprint, chars }`, and `label` names it for its `readNote` (#328).
  */
 export function runReadCall({ id, range }, { lookup, access }) {
   const doc = lookup(String(id ?? ''))
@@ -454,7 +460,18 @@ export function runReadCall({ id, range }, { lookup, access }) {
     ok: true,
     content: `${header}\n\n${result.text}${footer}`,
     read: { source: doc.id, title, range: range && String(range).trim() ? result.label.replace(/ \(the first.*$/, '') : result.from === 0 && result.to === result.total ? null : result.label, fingerprint: fingerprintText(result.text), chars: result.text.length },
+    label: { title, where: result.label, chars: result.text.length },
   }
+}
+
+// ---------- shortening old reads (#328) ----------
+
+/**
+ * The one line a read's text is replaced by in the conversation once it is old: what was read, where, at which commit, and how long it
+ * was, so the AI knows what it no longer has in front of it and can read it again. `label` is a read or search result's `label`.
+ */
+export function readNote({ title, where, commit, chars }) {
+  return `[Read earlier: ${title}${where ? ` ${where}` : ''}${commit ? ` at ${commit}` : ''}, ${Number(chars ?? 0).toLocaleString('en-US')} characters. Read it again if you need it.]`
 }
 
 // ---------- inputs ----------
