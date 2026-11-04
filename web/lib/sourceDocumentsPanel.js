@@ -675,7 +675,9 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                     <td>${isFetchedSource(entry) ? `fetched ${formatWhen(entry.origin.fetchedAt)}` : formatWhen(entry.uploadedAt)}${entry.uploadedBy ? html`<br /><span class="muted">${entry.uploadedBy}</span>` : null}</td>
                     <td>
                       ${isRepositorySource(entry)
-                        ? access[entry.id]?.ok === false
+                        ? access[entry.id]?.ok === false && access[entry.id].code === 'rate-limited'
+                          ? html`<span class="stamp review" data-testid="source-repository-stamp" title="The Provider's limit on reads is used up for now: a token with Your token raises it">LIMIT REACHED</span>`
+                          : access[entry.id]?.ok === false
                           ? html`<span class="stamp review" data-testid="source-repository-stamp" title="This browser can't read the repository: give a token that can with Your token">CAN'T READ</span>`
                           : html`<span class="stamp agreed" data-testid="source-repository-stamp" title="Nothing from the repository is kept: the AI reads it live, and each read records the commit it saw">READ LIVE</span>`
                         : entry.text

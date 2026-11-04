@@ -128,7 +128,12 @@ const opened = (modules, stageTitle) =>
 
 /** #319: the thread line for a code repository read refused for a reason the architect has to act on (web/lib/interviewSources.js). */
 export function repositoryBlockedLine({ title, code, message }) {
-  const fix = code === 'no-access' ? ' Give a token that can read it with "Your token" on its row in the Source documents list, then carry on.' : ''
+  const fix =
+    code === 'no-access'
+      ? ' Give a token that can read it with "Your token" on its row in the Source documents list, then carry on.'
+      : code === 'rate-limited'
+        ? ' To carry on now, give a token with "Your token" on its row in the Source documents list.'
+        : ''
   return `Can't read the code repository ${title}: ${message}${fix} The AI is told so and won't rely on it.`
 }
 

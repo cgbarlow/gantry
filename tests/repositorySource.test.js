@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { createInstance } from '../lib/instance.js'
 import { createRepositoryReader } from '../lib/repositorySource.js'
 import { resolveContentStore } from '../lib/providerRegistry.js'
+import { RateLimitError, rateLimitFrom } from '../lib/providerErrors.js'
 import { createFakeGitHubServer } from './helpers/fakeGitHubServer.js'
 import { createFakeAzureDevOpsServer } from './helpers/fakeAzureDevOpsServer.js'
 import { createFakeBitbucketServer } from './helpers/fakeBitbucketServer.js'
@@ -66,6 +67,67 @@ describe('reading a repository through the Provider clients', () => {
       assert.equal((await reader.check()).branch, 'main')
       assert.equal((await reader.read({ path: 'src/orders/limits.ts' })).text, 'export const MAX_ORDER_NZD = 5000\n')
     }))
+
+  // #325: GitHub lets a server read only 60 times an hour without a token, so a public repository must spend little of that, and running
+  // out must say so rather than claim the repository can't be read.
+  test('a public GitHub repository read with no token takes its files from the raw-file address, and a search lists the repository once', () => {
+    const apiLog = []
+    const contentLog = []
+    return withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: CODE, anonymousRead: true, apiLog, contentLog }), async (baseUrl) => {
+      const reader = createRepositoryReader(github(baseUrl), null, { allowBaseUrl: true, rawBaseUrl: `${baseUrl}/raw` })
+      const read = await reader.read({ path: 'src/orders/limits.ts' })
+      assert.equal(read.text, 'export const MAX_ORDER_NZD = 5000\n')
+      assert.equal(read.citationQuery, `?path=src/orders/limits.ts&commit=${read.commit}`)
+      assert.ok(!apiLog.some((line) => line.includes('/contents/')), 'the file never comes through the API')
+
+      apiLog.length = 0
+      const found = await reader.search({ query: 'orderservice' })
+      assert.deepEqual(found.matches, [{ path: 'src/orders/service.ts', line: 1, text: 'export class OrderService {' }], 'node_modules and dist are still not searched')
+      assert.deepEqual((await reader.search({ query: 'limits' })).matches, [{ path: 'src/orders/limits.ts' }], 'a file name still matches')
+      assert.equal(apiLog.filter((line) => line.includes('/git/trees/')).length, 2, 'one listing of the whole repository per search')
+      assert.ok(!apiLog.some((line) => line.includes('/contents')), 'no folder is listed and no file is read through the API')
+      assert.ok(contentLog.every((entry) => entry.via === 'raw-host'))
+      await assert.rejects(reader.read({ path: 'src/orders/missing.ts' }), /There is no file src\/orders\/missing\.ts/)
+    })
+  })
+
+  test('a search narrowed to folders, or to a path, searches only there when it lists the whole repository at once', () =>
+    withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: CODE }), async (baseUrl) => {
+      const narrowed = createRepositoryReader(github(baseUrl, { folders: ['src/orders'] }), TOKEN, { allowBaseUrl: true })
+      assert.deepEqual((await narrowed.search({ query: 'resource' })).matches, [], 'infra/ is outside the pointer')
+      const reader = createRepositoryReader(github(baseUrl), TOKEN, { allowBaseUrl: true })
+      assert.deepEqual((await reader.search({ query: 'resource', path: 'src' })).matches, [], 'infra/ is outside the path searched')
+      assert.deepEqual((await reader.search({ query: 'resource', path: 'infra' })).matches.map((m) => m.path), ['infra/main.tf'])
+    }))
+
+  test('a used-up rate limit says so, with when it resets, and is never "you can\'t read it"', () =>
+    withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: CODE, anonymousRead: true, apiRequestLimit: 2 }), async (baseUrl) => {
+      const reader = createRepositoryReader(github(baseUrl), null, { allowBaseUrl: true })
+      await reader.check()
+      await assert.rejects(reader.list(), (err) => {
+        assert.equal(err.code, 'rate-limited')
+        assert.equal(err.status, 429)
+        assert.equal(
+          err.message,
+          'GitHub limits how much this Gantry server can read without a token, and that limit is used up until 08:00 UTC. acme/billing-api is fine; a token raises the limit (for a public repository any GitHub token will do), or try again then.'
+        )
+        return true
+      })
+      await assert.rejects(createRepositoryReader(github(baseUrl), TOKEN, { allowBaseUrl: true }).check(), /GitHub's limit on reads with your token is used up until 08:00 UTC/)
+    }))
+
+  test('every Provider\'s rate-limit answer is told apart from a rejected token', () => {
+    const answer = (status, headers = {}) => ({ status, headers: new Headers(headers) })
+    const github403 = rateLimitFrom(answer(403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1800000000' }), 'github')
+    assert.ok(github403 instanceof RateLimitError)
+    assert.equal(github403.resetAt.toISOString(), '2027-01-15T08:00:00.000Z')
+    assert.ok(rateLimitFrom(answer(403, { 'retry-after': '60' }), 'github'), "GitHub's secondary limit")
+    assert.ok(rateLimitFrom(answer(429, { 'ratelimit-reset': '1800000000' }), 'gitlab').resetAt instanceof Date, "GitLab's 429")
+    assert.equal(rateLimitFrom(answer(429), 'atlassian').resetAt, null, 'a 429 with no reset time')
+    assert.equal(rateLimitFrom(answer(403), 'github'), null, 'a plain 403 is a rejected token')
+    assert.equal(rateLimitFrom(answer(403, { 'x-ratelimit-remaining': '12' }), 'github'), null, 'requests left: a rejected token')
+    assert.equal(rateLimitFrom(answer(401), 'azure-devops'), null)
+  })
 
   test('a self-hosted address is taken only where this server takes one for a workspace', () => {
     assert.throws(() => createRepositoryReader(github('https://ghe.internal/api/v3'), TOKEN, { allowBaseUrl: false }), /doesn't take a self-hosted GitHub address/)
