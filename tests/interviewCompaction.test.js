@@ -281,7 +281,8 @@ for (const [name, provider, tooLong, reply] of [
     assert.ok(summaryTexts.at(-1).text.includes(SUMMARY_REQUEST))
     const retried = textsOf(ai.calls[3].raw)
     assert.ok(retried.some((m) => m.text.includes(SUMMARY)))
-    assert.equal(retried.at(-1).text, CHAT, "the architect's message is what it answers")
+    // An OpenAI-style wire joins the compacted conversation's user messages into one turn, so the architect's message ends it.
+    assert.ok(retried.at(-1).text.endsWith(CHAT), "the architect's message is what it answers")
     assert.ok(!JSON.stringify(ai.calls[3].raw.messages).includes('Here is what I found.'))
     const snap = session.snapshot()
     assert.equal(snap.phase, 'waiting')
