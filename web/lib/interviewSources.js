@@ -159,7 +159,7 @@ export async function runRepositoryCall(name, input, { lookup, reader }) {
  * can't with the token this browser holds), the Gantry server or the Provider can't be reached, or the branch is gone. The interview tells
  * the architect these, as well as the AI; a bad path or a skipped file is the AI's to sort out.
  */
-export const REPOSITORY_BLOCKED_CODES = Object.freeze(['no-access', 'server-unreachable', 'unreachable', 'no-branch', 'base-url-not-allowed'])
+export const REPOSITORY_BLOCKED_CODES = Object.freeze(['no-access', 'rate-limited', 'server-unreachable', 'unreachable', 'no-branch', 'base-url-not-allowed'])
 
 // ---------- the text fallback ----------
 

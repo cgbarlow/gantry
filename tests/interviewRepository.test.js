@@ -13,7 +13,8 @@ globalThis.localStorage = {
   removeItem: (k) => map.delete(k),
 }
 const providers = await import('../web/lib/aiProviders.js')
-const { createInterviewSession } = await import('../web/lib/interviewSession.js')
+const { createInterviewSession, repositoryBlockedLine } = await import('../web/lib/interviewSession.js')
+const { REPOSITORY_BLOCKED_CODES } = await import('../web/lib/interviewSources.js')
 const { loadInterviewSkills } = await import('../web/lib/interviewSkills.js')
 
 beforeEach(() => {
@@ -183,4 +184,12 @@ test('an existing pointer this architect cannot read: the thread says so plainly
   assert.match(blocked[0].text, /Give a token that can read it with "Your token" on its row in the Source documents list/)
   assert.deepEqual(snap.thread.filter((t) => t.read), [], 'nothing was read, so nothing is recorded as read')
   assert.ok(!snap.thread.some((t) => /vendored/.test(t.text)), "a skipped path is the AI's to sort out, not the architect's")
+})
+
+// #325: a Provider's used-up rate limit reaches the thread as itself, with a token offered as the way to carry on now.
+test('a used-up rate limit is told to the architect in the thread, with a token as the way to carry on now', () => {
+  const line = repositoryBlockedLine({ title: 'gantry', code: 'rate-limited', message: 'GitHub limits how much this Gantry server can read without a token, and that limit is used up until 08:00 UTC.' })
+  assert.match(line, /^Can't read the code repository gantry: GitHub limits how much this Gantry server can read without a token/)
+  assert.match(line, /To carry on now, give a token with "Your token" on its row in the Source documents list\. The AI is told so and won't rely on it\.$/)
+  assert.ok(REPOSITORY_BLOCKED_CODES.includes('rate-limited'), 'it is shown to the architect, not only to the AI')
 })

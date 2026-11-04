@@ -305,6 +305,8 @@ describe('Out of date for a repository: only a real change to a file a Field dre
     assert.match(line, /was not checked for changes, so the Fields that drew on it may be out of date: You can't read the GitHub repository acme\/billing-api without a token\./)
     assert.match(line, /Give a token that can read it with "Your token" on its row in Source documents\./)
     assert.doesNotMatch(uncheckedRepositoryLine({ title: 'Billing API', code: 'server-unreachable', reason: 'The server is down.' }), /Your token/, 'a token is offered only when access is the problem')
+    // #325: a used-up rate limit offers a token too, as what raises the limit.
+    assert.match(uncheckedRepositoryLine({ title: 'Billing API', code: 'rate-limited', reason: 'GitHub limits how much…' }), /A token given with "Your token" on its row in Source documents raises the limit\.$/)
   })
 
   test("over MCP, get_instance's Out of date names a repository it could not compare, with the reason", async () => {

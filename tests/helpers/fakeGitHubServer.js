@@ -89,8 +89,15 @@ export function createFakeGitHubServer({
   // #319: a public repository, which anyone can read with no token at all. A request with no Authorization header may then GET; a
   // request with a wrong PAT is still refused, and every write still needs a valid one.
   anonymousRead = false,
+  // #325: GitHub's token-less rate limit. After `apiRequestLimit` API requests (raw-file reads don't count, as on the real service) every
+  // further API request is answered 403 with `x-ratelimit-remaining: 0`, as real GitHub answers it. `apiLog`, when an array, gets each
+  // API request's `METHOD path`, so a test can count what a read cost.
+  apiRequestLimit = null,
+  apiLog,
 } = {}) {
   const issues = new Map() // number -> issue object
+  let apiRequestCount = 0
+  const rateLimitResetEpoch = 1_800_000_000 // 2027-01-15T08:00:00Z
   const issueIdToNumber = new Map() // internal id -> number
   const subIssues = new Map() // parent number -> Set<child number>
   const labelDefs = new Map() // name -> { name, color, description }
@@ -176,6 +183,29 @@ export function createFakeGitHubServer({
       res.end(JSON.stringify(body))
     }
 
+    // #325: raw.githubusercontent.com's shape, `/raw/{owner}/{repo}/{ref}/{path}`: a public repository's file with no token, outside the API.
+    const rawPrefix = `/raw/${owner}/${repository}/`
+    if (req.method === 'GET' && pathname.startsWith(rawPrefix)) {
+      const [ref, ...rest] = pathname.slice(rawPrefix.length).split('/')
+      const store = branches.get(ref) ?? (commits.get(ref) ? trees.get(commits.get(ref).treeSha) : undefined)
+      const content = anonymousRead ? store?.get(`/${rest.join('/')}`) : undefined
+      if (!content) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' })
+        res.end('404: Not Found')
+        return
+      }
+      contentLog?.push({ path: rest.join('/'), via: 'raw-host' })
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.end(content)
+      return
+    }
+    apiLog?.push(`${req.method} ${pathname}`)
+    if (apiRequestLimit !== null && (apiRequestCount += 1) > apiRequestLimit) {
+      res.writeHead(403, { 'Content-Type': 'application/json', 'x-ratelimit-limit': '60', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(rateLimitResetEpoch) })
+      res.end(JSON.stringify({ message: 'API rate limit exceeded (fake)' }))
+      return
+    }
+
     const auth = req.headers['authorization'] ?? ''
     const [, providedPat] = auth.match(/^Bearer (.+)$/) ?? []
     const validPats = Array.isArray(validPat) ? validPat : [validPat]
@@ -227,6 +257,24 @@ export function createFakeGitHubServer({
         return json(404, { message: `Not Found (fake: "${owner}" is not an organization)` })
       }
       return json(200, orgMembers.map(({ login, id }) => ({ login, id })))
+    }
+
+    // #325: GET /repos/{owner}/{repo}/git/trees/{ref}?recursive=1 — every file and folder at a branch or commit, in one answer.
+    const treeMatch = req.method === 'GET' && pathname.match(new RegExp(`^${repoBasePath}/git/trees/(.+)$`))
+    if (treeMatch) {
+      const ref = treeMatch[1]
+      const store = branches.get(ref) ?? (commits.get(ref) ? trees.get(commits.get(ref).treeSha) : trees.get(ref))
+      if (!store) return json(404, { message: 'Not Found (fake: no such tree)' })
+      const folders = new Set()
+      const tree = []
+      for (const [path, content] of store) {
+        const clean = path.replace(/^\/+/, '')
+        const parts = clean.split('/')
+        for (let i = 1; i < parts.length; i++) folders.add(parts.slice(0, i).join('/'))
+        tree.push({ path: clean, type: 'blob', size: content.length })
+      }
+      for (const folder of folders) tree.push({ path: folder, type: 'tree' })
+      return json(200, { sha: ref, tree: tree.sort((a, b) => a.path.localeCompare(b.path)), truncated: false })
     }
 
     // Contents API — GET /repos/{owner}/{repo}/contents/{path}?ref={branch}, one route for both a

@@ -315,7 +315,12 @@ export function outOfDateBannerLines(flags) {
  * the Fields that drew on it were not checked, and why: `Billing API was not checked for changes: You can't read … without a token. …`.
  */
 export function uncheckedRepositoryLine({ title, code, reason }) {
-  const fix = code === 'no-access' ? ' Give a token that can read it with "Your token" on its row in Source documents.' : ''
+  const fix =
+    code === 'no-access'
+      ? ' Give a token that can read it with "Your token" on its row in Source documents.'
+      : code === 'rate-limited'
+        ? ' A token given with "Your token" on its row in Source documents raises the limit.'
+        : ''
   return `${title} was not checked for changes, so the Fields that drew on it may be out of date: ${reason}${fix}`
 }
 
