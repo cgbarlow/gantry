@@ -23,7 +23,9 @@
 //      `fields` part of the decisions log, ADR-0064; #288 commits it). The fingerprint is of the text the AI saw, so a
 //      document that changes later can be told apart (#297).
 import { citedSourceIds } from './interviewDraft.js'
+import { findSourceCitations, sourceCitationFor } from './sourceCitations.js'
 import { fingerprintText, formatBytes, sourceFileExtension, sourceFileKind } from './sourceDocuments.js'
+import { isRepositorySource, shortCommit } from './sourceRepository.js'
 
 export { fingerprintText }
 
@@ -64,6 +66,101 @@ export const READ_TEXT_FALLBACK_INSTRUCTIONS =
   '{"id":"document-id","range":"pages 3-5"} (range is optional; "section: Heading text" and "start-end" character offsets also work). ' +
   'Gantry replies with the text in its next message. Read what you need before you draft from it.'
 
+/** #319: the same, for a code repository: list a folder, search, or read a file, each in a read block. */
+export const REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS =
+  `To read a code repository, write a fenced code block tagged ${READ_FENCE} containing {"id":"repository-id","list":"folder/path"} to list a folder ` +
+  '("" for the top), {"id":"repository-id","search":"text"} to search it, or {"id":"repository-id","path":"file/path"} to read a file. Gantry replies in its next message.'
+
+// ---------- code repositories (#319, docs/adr/0072) ----------
+// A code repository is read live with three read-only tools, never pasted into the brief. Each read records the commit it saw, which is what a
+// citation of the file names. The Gantry server does the reading (lib/repositorySource.js), skipping vendored code, build output and binaries.
+
+export const LIST_REPOSITORY_TOOL_NAME = 'list_repository_folder'
+export const SEARCH_REPOSITORY_TOOL_NAME = 'search_repository'
+export const READ_REPOSITORY_TOOL_NAME = 'read_repository_file'
+export const REPOSITORY_TOOL_NAMES = Object.freeze([LIST_REPOSITORY_TOOL_NAME, SEARCH_REPOSITORY_TOOL_NAME, READ_REPOSITORY_TOOL_NAME])
+
+/** What the brief says about reading a repository, the same for the in-app AI and an outside agent (whose MCP tools have the same names). */
+export const REPOSITORY_TOOLS_TEXT =
+  `Read it with \`${LIST_REPOSITORY_TOOL_NAME}\` (a folder's files), \`${SEARCH_REPOSITORY_TOOL_NAME}\` (file names and text) and \`${READ_REPOSITORY_TOOL_NAME}\` (one file). ` +
+  'Vendored code, build output and binaries are always skipped. Every read names the commit it saw: cite a fact from a file as ' +
+  '`[title, path](source:<id>?path=<path>&commit=<commit>)`, exactly as the read gives it, so the citation says which code it came from.'
+
+const repositoryId = { type: 'string', description: 'The Source document id of the code repository.' }
+
+/** The tools as the model is told about them. */
+export const REPOSITORY_TOOLS = Object.freeze([
+  {
+    name: LIST_REPOSITORY_TOOL_NAME,
+    description: "List the files and folders in a folder of a code repository Source document, at its branch's latest commit. Leave out the path for the top of the repository.",
+    parameters: { type: 'object', properties: { id: repositoryId, path: { type: 'string', description: 'Optional: a folder path from the root, such as "services/orders".' } }, required: ['id'] },
+  },
+  {
+    name: SEARCH_REPOSITORY_TOOL_NAME,
+    description: 'Search a code repository Source document for text (case-insensitive) in its file names and contents. Returns matching files and lines; read a file before you rely on it.',
+    parameters: { type: 'object', properties: { id: repositoryId, query: { type: 'string', description: 'The text to look for, at least two characters.' }, path: { type: 'string', description: 'Optional: search only under this folder.' } }, required: ['id', 'query'] },
+  },
+  {
+    name: READ_REPOSITORY_TOOL_NAME,
+    description: `Read one file of a code repository Source document at its branch's latest commit. One read returns at most ${MAX_READ_CHARS.toLocaleString('en-US')} characters; give a "start-end" range to read on. Gantry records the file and commit as an input of the Fields you then draft.`,
+    parameters: { type: 'object', properties: { id: repositoryId, path: { type: 'string', description: 'The file path from the root of the repository.' }, range: { type: 'string', description: 'Optional: "start-end" character offsets, or "section: Heading" in a Markdown file.' } }, required: ['id', 'path'] },
+  },
+])
+
+const repositoryTitle = (doc) => doc.title || doc.id
+
+/**
+ * Runs one repository tool call. `lookup(id)` returns the Source document as the session knows it; `reader(entry)` the reader the Gantry
+ * server answers through (web/lib/sourceRepositoryClient.js): `{ list, search, read }`. Resolves `{ ok, content, read? }`, never rejects:
+ * `content` goes back to the AI, and a file read is recorded as `read`, `{ source, title, range, path, commit, fingerprint, chars }`.
+ */
+export async function runRepositoryCall(name, input, { lookup, reader }) {
+  const id = String(input?.id ?? '')
+  const doc = lookup(id)
+  if (!doc) return { ok: false, content: `There is no Source document "${id}". Use the id of a code repository from the brief.` }
+  if (!isRepositorySource(doc)) return { ok: false, content: `"${repositoryTitle(doc)}" (${doc.id}) is not a code repository. Read it with \`${READ_TOOL_NAME}\` or from the brief.` }
+  const title = repositoryTitle(doc)
+  try {
+    const repo = reader(doc)
+    if (name === LIST_REPOSITORY_TOOL_NAME) {
+      const { commit, path, entries } = await repo.list({ path: input?.path })
+      const lines = entries.map((e) => `- ${e.path}${e.isFolder ? '/' : ''}`)
+      return { ok: true, content: `[${title} · ${path || 'top of the repository'} · commit ${commit}]\n\n${lines.length ? lines.join('\n') : '(nothing here that Gantry reads)'}` }
+    }
+    if (name === SEARCH_REPOSITORY_TOOL_NAME) {
+      const { commit, query, matches, filesSearched, truncated } = await repo.search({ query: input?.query, path: input?.path })
+      const lines = matches.map((m) => (m.line ? `- ${m.path}:${m.line}: ${m.text}` : `- ${m.path} (its name matches)`))
+      const tail = truncated ? `\n\n[Stopped after ${filesSearched} files. Search under a folder, or for something more exact, to see the rest.]` : ''
+      return { ok: true, content: `[${title} · search "${query}" · commit ${commit} · ${filesSearched} files searched]\n\n${lines.length ? lines.join('\n') : 'No matches.'}${tail}` }
+    }
+    if (name === READ_REPOSITORY_TOOL_NAME) {
+      const { commit, path, text } = await repo.read({ path: input?.path })
+      const result = readSourceText(text, input?.range)
+      if (!result.ok) return { ok: false, content: `${title}, ${path}: ${result.error}` }
+      const cite = sourceCitationFor(doc, { path, commit })
+      const footer = result.truncated ? `\n\n[Stopped at ${trimEnd(result.to)} of ${trimEnd(result.total)} characters. Carry on with range "${result.to}-${Math.min(result.total, result.to + MAX_READ_CHARS)}".]` : ''
+      return {
+        ok: true,
+        content: `[${title} · ${path} · commit ${commit} · ${result.label}]\nCite it as ${cite}\n\n${result.text}${footer}`,
+        read: { source: doc.id, title, range: path, path, commit, fingerprint: fingerprintText(result.text), chars: result.text.length },
+      }
+    }
+    return { ok: false, content: `There is no tool called ${name}.` }
+  } catch (err) {
+    const message = err?.message ?? 'it could not be read'
+    // #319: a refusal the architect has to act on (no access, no server, a branch that has gone) is also theirs to see, not only the AI's.
+    const blocked = REPOSITORY_BLOCKED_CODES.includes(err?.code) ? { blocked: { source: doc.id, title, code: err.code, message } } : {}
+    return { ok: false, content: `${title}: ${message}`, ...blocked }
+  }
+}
+
+/**
+ * #319: the refusals of a repository read that come from where the architect stands, not from what the AI asked: they can't read it (or
+ * can't with the token this browser holds), the Gantry server or the Provider can't be reached, or the branch is gone. The interview tells
+ * the architect these, as well as the AI; a bad path or a skipped file is the AI's to sort out.
+ */
+export const REPOSITORY_BLOCKED_CODES = Object.freeze(['no-access', 'server-unreachable', 'unreachable', 'no-branch', 'base-url-not-allowed'])
+
 // ---------- the text fallback ----------
 
 const FENCE = new RegExp('```[ \\t]*' + READ_FENCE + '[ \\t]*\\r?\\n([\\s\\S]*?)```', 'g')
@@ -83,7 +180,16 @@ export function extractReadBlocks(text) {
     try {
       const parsed = JSON.parse(match[1])
       for (const item of Array.isArray(parsed) ? parsed : [parsed]) {
-        if (item && typeof item.id === 'string') reads.push({ id: item.id, range: typeof item.range === 'string' ? item.range : undefined })
+        // #319: a read of a code repository names a `path` to read, or asks to `list` a folder or `search` for text.
+        if (item && typeof item.id === 'string') {
+          reads.push({
+            id: item.id,
+            range: typeof item.range === 'string' ? item.range : undefined,
+            ...(typeof item.path === 'string' ? { path: item.path } : {}),
+            ...(typeof item.list === 'string' ? { list: item.list } : {}),
+            ...(typeof item.search === 'string' ? { search: item.search } : {}),
+          })
+        }
         else errors.push('A read block needs {"id": "document-id"}.')
       }
     } catch (err) {
@@ -142,6 +248,11 @@ export function planSourceAccess({ sources, provider }) {
 
   for (const source of sources ?? []) {
     if (!source || typeof source.id !== 'string' || source.removedAt) continue
+    // #319: a code repository is read with its own tools, never in the brief or attached.
+    if (isRepositorySource(source)) {
+      plan.set(source.id, { how: 'repository', kind: 'repository' })
+      continue
+    }
     const kind = sourceFileKind(source.filename)
     if (kind === 'image') {
       if (readsImages) attach(source, 'image', IMAGE_MEDIA_TYPES[sourceFileExtension(source.filename)] ?? 'image/png')
@@ -348,7 +459,7 @@ export function runReadCall({ id, range }, { lookup, access }) {
 
 // ---------- inputs ----------
 
-const sameInput = (a, b) => a.source === b.source && (a.range ?? null) === (b.range ?? null)
+const sameInput = (a, b) => a.source === b.source && (a.range ?? null) === (b.range ?? null) && (a.commit ?? null) === (b.commit ?? null)
 
 /**
  * The inputs of a draft: every read made since the last drafts, then each Source document the draft cites that was not already
@@ -357,10 +468,18 @@ const sameInput = (a, b) => a.source === b.source && (a.range ?? null) === (b.ra
 export function inputsForDraft({ reads, value, sources }) {
   const inputs = []
   for (const read of reads) {
-    const input = { source: read.source, title: read.title, range: read.range ?? null, fingerprint: read.fingerprint }
+    const input = { source: read.source, title: read.title, range: read.range ?? null, ...(read.path ? { path: read.path, commit: read.commit } : {}), fingerprint: read.fingerprint }
     if (!inputs.some((i) => sameInput(i, input))) inputs.push(input)
   }
   const text = Array.isArray(value) ? value.join('\n') : String(value ?? '')
+  // #319: a citation of a file of a code repository is an input of that file at the commit it names.
+  for (const cite of findSourceCitations(text)) {
+    if (!cite.path || !cite.commit) continue
+    const doc = (sources ?? []).find((s) => s.id === cite.id)
+    if (!doc || !isRepositorySource(doc)) continue
+    const input = { source: cite.id, title: doc.title || cite.id, range: cite.path, path: cite.path, commit: cite.commit, fingerprint: null }
+    if (!inputs.some((i) => sameInput(i, input))) inputs.push(input)
+  }
   for (const id of [...new Set(citedSourceIds(text))]) {
     if (inputs.some((i) => i.source === id)) continue
     const doc = (sources ?? []).find((s) => s.id === id)
@@ -370,7 +489,7 @@ export function inputsForDraft({ reads, value, sources }) {
   return inputs
 }
 
-/** One input as a short phrase: `Client brief (pages 3–5)`. */
+/** One input as a short phrase: `Client brief (pages 3–5)`, or for a code repository `Billing API (src/orders.ts at 3f2a9c1)`. */
 export function describeInput(input) {
-  return `${input.title || input.source}${input.range ? ` (${input.range})` : ''}`
+  return `${input.title || input.source}${input.range ? ` (${input.range}${input.commit ? ` at ${shortCommit(input.commit)}` : ''})` : ''}`
 }

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseYAML } from 'yaml'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { showFields, showSourcesAndDecisions } from './helpers/referenceView.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { serializeDecisionsLog } from '../web/lib/decisionsLog.js'
 import { wordDocument } from './helpers/sourceFixtures.js'
@@ -35,6 +36,7 @@ async function withPage(fn) {
 }
 
 const openPanel = async (page) => {
+  await showSourcesAndDecisions(page)
   const panel = page.locator('[data-testid="source-documents"]')
   await panel.waitFor({ timeout: 15_000 })
   if (!(await panel.evaluate((el) => el.open))) await panel.locator('[data-testid="source-documents-summary"]').click()
@@ -128,6 +130,7 @@ test('server workspace: a replaced, re-read or removed Source document flags exa
         assert.equal(manifest.find((e) => e.id === 'client-brief').replaces, undefined)
 
         // The banner, and a mark on each Field that drew on or cites the Client brief (and no other).
+        await showFields(page)
         const banner = page.locator('[data-testid="out-of-date-banner"]')
         await banner.waitFor()
         assert.equal(await bannerLines(page).count(), 1)
@@ -139,6 +142,7 @@ test('server workspace: a replaced, re-read or removed Source document flags exa
 
         // Reading the Minutes again to different text flags the Field drafted from them.
         writeFileSync(join(dir, 'sources', 'Minutes.md'), '# Minutes\n\nGo-live moved to June.\n')
+        await showSourcesAndDecisions(page)
         await rowFor(panel, 'Minutes').getByRole('button', { name: 'Extract text again' }).click()
         await page.waitForFunction(() => document.querySelectorAll('[data-testid="out-of-date-line"]').length === 2)
         assert.match(await bannerLines(page).nth(1).textContent(), /^1 Field drew on Minutes, now read again with different text:/)
@@ -202,6 +206,7 @@ test('local workspace: replacing a Source document flags the Fields that cite it
       await panel.locator('[data-testid="source-replaces"]').selectOption({ label: 'This replaces… Client brief' })
       await input.setInputFiles(mdFile('Client brief v2.md', '# Client brief v2\n\nMedian time to payment is 11 days.\n'))
       await panel.locator('tr[data-source-id="client-brief"] [data-testid="source-replaced-by"]').waitFor()
+      await showFields(page)
       await page.locator('[data-testid="out-of-date-banner"]').waitFor()
       assert.match(await bannerLines(page).textContent(), /^1 Field drew on Client brief, now replaced by Client brief v2:/)
       assert.deepEqual(await page.locator('[data-testid="field-out-of-date"]').evaluateAll((els) => els.map((el) => el.dataset.field)), ['background.problem'])

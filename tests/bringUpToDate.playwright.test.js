@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseYAML } from 'yaml'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { showFields, showSourcesAndDecisions } from './helpers/referenceView.js'
 import { GITHUB_OWNER, GITHUB_REPOSITORY, ORGANIZATION, PROJECT, REPOSITORY, withRunningServer, withRunningServerForProvider } from './helpers/lifecycle.js'
 import { createInstance } from '../lib/instance.js'
 import { createAzureDevOpsClient } from '../lib/azureDevOpsClient.js'
@@ -73,6 +74,7 @@ function instanceFolder(instancesDir) {
 }
 
 const openPanel = async (page) => {
+  await showSourcesAndDecisions(page)
   const panel = page.locator('[data-testid="source-documents"]')
   await panel.waitFor({ timeout: 15_000 })
   if (!(await panel.evaluate((el) => el.open))) await panel.locator('[data-testid="source-documents-summary"]').click()
@@ -120,6 +122,7 @@ test('server workspace: the banner opens the round on the first Stage that has f
     await upload(panel, 'Brief v2.md', '# Brief v2\n\nAlpha claims take 11 days.\n')
 
     // Two Fields drew on the Brief, one on each Stage: Alpha's `ma.body` and Beta's `mb.body`. Beta is the current Stage.
+    await showFields(page)
     const banner = page.locator('[data-testid="out-of-date-banner"]')
     await banner.waitFor()
     assert.match(await page.locator('[data-testid="out-of-date-line"]').textContent(), /^2 Fields drew on Brief, now replaced by Brief v2:/)
@@ -221,6 +224,7 @@ test('server workspace: a removed document offers keep, re-cite and redraft with
     await panel.locator('[data-testid="source-documents-confirm-remove"]').click()
     await page.waitForFunction(() => /Notes, now removed/.test(document.querySelector('[data-testid="out-of-date-banner"]')?.textContent ?? ''))
 
+    await showFields(page)
     await page.click('[data-testid="bring-up-to-date"]')
     await page.waitForSelector('[data-testid="interview-update-intro"]')
     assert.match(await page.textContent('[data-testid="interview-update-count"]'), /^1 Field on Beta is Out of date/)
@@ -274,6 +278,7 @@ test('server workspace: a normal interview starts with the round when flags are 
     const panel2 = await openPanel(page)
     await panel2.locator('[data-testid="source-replaces"]').selectOption({ label: 'This replaces… Brief' })
     await upload(panel2, 'Brief v2.md', '# Brief v2\n\nAlpha claims take 11 days.\n')
+    await showFields(page)
     await page.waitForSelector('[data-testid="out-of-date-banner"]')
 
     await page.goto(`${base}/instance/${SLUG}?interview=1`)
@@ -365,6 +370,7 @@ test('local workspace: Bring up to date reads and writes through the folder: a k
         await panel.locator('tr[data-source-id="client-brief"]').waitFor()
         await panel.locator('[data-testid="source-replaces"]').selectOption({ label: 'This replaces… Client brief' })
         await input.setInputFiles(mdFile('Client brief v2.md', '# Client brief v2\n\nMedian time to payment is 11 days.\n'))
+        await showFields(page)
         await page.locator('[data-testid="out-of-date-banner"]').waitFor()
         await page.click('[data-testid="bring-up-to-date"]')
 
@@ -481,6 +487,7 @@ for (const spec of REMOTE_PROVIDERS) {
             await upload(panel, 'Brief.md', '# Brief\n\nAlpha claims take 12 days.\n')
             await panel.locator('[data-testid="source-replaces"]').selectOption({ label: 'This replaces… Brief' })
             await upload(panel, 'Brief v2.md', '# Brief v2\n\nAlpha claims take 11 days.\n')
+            await showFields(page)
             await page.waitForSelector('[data-testid="out-of-date-banner"]')
             assert.match(await page.locator('[data-testid="out-of-date-line"]').textContent(), /^2 Fields drew on Brief, now replaced by Brief v2:/)
             await page.click('[data-testid="bring-up-to-date"]')

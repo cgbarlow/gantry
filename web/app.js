@@ -75,15 +75,18 @@ import {
   getFileLastModified,
 } from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
-import { SourceDocumentsPanel, openSourceDocument } from './lib/sourceDocumentsPanel.js'
-import { citedSourceIds } from './lib/sourceCitations.js'
+import { SourceDocumentsPanel, openRepository, openSourceDocument } from './lib/sourceDocumentsPanel.js'
+import { citedCommits, citedSourceIds } from './lib/sourceCitations.js'
+import { parseSourceAddress, shortCommit } from './lib/sourceRepository.js'
+import { repositoryReaderFor } from './lib/sourceRepositoryClient.js'
 import { InterviewPage, clearInterviewSessions, unsavedDraftModules } from './lib/interviewView.js'
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
 import { createLocalDecisionsStore, createServerDecisionsStore, planLocalDecisions } from './lib/decisionsStore.js'
 import { approvalStatusLine } from './lib/interviewApproval.js'
 import { sentBackOf } from './lib/prRevision.js'
 import { DecisionsLogPanel } from './lib/decisionsLogPanel.js'
-import { flagsForField, outOfDateBannerLines, outOfDateCountByStage, outOfDateFieldNote } from './lib/outOfDate.js'
+import { NOTHING_HERE_YET, decisionsLogCounts, decisionsSummary, referenceToggleState, referenceView, reviewSummary } from './lib/referenceView.js'
+import { flagsForField, outOfDateBannerLines, outOfDateCountByStage, outOfDateFieldNote, uncheckedRepositoryLine } from './lib/outOfDate.js'
 import { loadOutOfDate, outOfDateState, sourceListTick } from './lib/outOfDateState.js'
 import { firstFlaggedStage } from './lib/bringUpToDate.js'
 import { createServerSourceClient } from './lib/serverSourceDocuments.js'
@@ -122,6 +125,7 @@ import {
 import { REVIEWED_COPY_MAX_BYTES } from './lib/reviewedCopy.js'
 import { describeReview } from './lib/reviewManifest.js'
 import { downloadReviewResponseList } from './lib/reviewResponse.js'
+import { unansweredThreadCount } from './lib/reviewRound.js'
 import { modulesWithStandard } from './lib/standardModules.js'
 import {
   parseKeyDecisions,
@@ -382,13 +386,13 @@ async function buildLocalComputePayload(instance) {
     moduleFiles[moduleId] = await readLocalTextFile(handle, `gantry-workspace/${slug}/modules/${entry.name}`)
   }
   const payload = { definitionId: instance.definition, definitionVersion: instance.localDefinitionVersion, instanceYaml, moduleFiles }
-  // #281: a render prints the title of each Source document the content cites, and the Sources appendix lists them. Only the manifest entries of the ones cited go (their title, filename and dates), and only when something cites one: a Source document and its text never leave the folder.
+  // #281: a render prints the title of each Source document the content cites, and the Sources appendix lists them. Only the manifest entries of the ones cited go (their title, filename and dates, #318 a fetched one's origin, #319 a code repository's pointer), and only when something cites one: a Source document and its text never leave the folder.
   const citedSources = citedSourceIds(Object.values(moduleFiles).join('\n'))
   if (citedSources.length) {
     const { entries: sourceEntries } = await createLocalSourceStore(handle, slug).list()
     payload.sources = sourceEntries
       .filter((e) => citedSources.includes(e.id))
-      .map(({ id, filename, title, uploadedAt, removedAt }) => ({ id, filename, title, uploadedAt, removedAt }))
+      .map(({ id, filename, title, uploadedAt, removedAt, origin, repository }) => ({ id, filename, title, uploadedAt, removedAt, origin, repository }))
   }
   // #224: the instance's own Logo, which the render puts in its documents' page header, rides along
   // as an asset at the path its instance.yaml names (`assets/instance-logo.png`).
@@ -938,10 +942,14 @@ function renderPreview(node, text) {
 const sourceIndex = signal(null) // null: this kind of workspace keeps no Source documents (yet), so a citation is left as the words it holds
 const sourceOpener = { open: null }
 
+// #319: what follows `source:` in a citation, taken apart: `{ id, path?, commit? }` (a repository citation names a file and a commit).
+const citedRef = (ref) => parseSourceAddress(`source:${ref}`) ?? { id: ref }
+
 function activateSourceCitations(node) {
   const index = sourceIndex.value
   for (const link of node.querySelectorAll('a[href^="source:"]')) {
-    const id = link.getAttribute('href').slice('source:'.length)
+    const ref = link.getAttribute('href').slice('source:'.length)
+    const { id, path, commit } = citedRef(ref)
     if (index === null) {
       const plain = document.createElement('span')
       plain.className = 'source-citation unavailable'
@@ -953,8 +961,8 @@ function activateSourceCitations(node) {
     const entry = index[id]
     if (entry && !entry.removed) {
       link.classList.add('source-citation')
-      link.dataset.sourceId = id
-      link.title = `Open the Source document "${entry.title}"`
+      link.dataset.sourceId = ref
+      link.title = entry.repository ? `Open ${path ?? 'the repository'} in "${entry.title}"${commit ? ` as it was at ${shortCommit(commit)}` : ''}` : `Open the Source document "${entry.title}"`
       link.removeAttribute('target')
       continue
     }
@@ -970,8 +978,15 @@ function activateSourceCitations(node) {
     const link = event.target.closest?.('a.source-citation')
     if (!link || !node.contains(link)) return
     event.preventDefault()
-    sourceOpener.open?.(link.dataset.sourceId)
+    openCitedSource(link.dataset.sourceId)
   }
+}
+
+// #320: a citation leads into the Source documents panel, so the Sources & decisions toggle switches on (and goes to the panel) before the
+// document opens; a document that cannot be opened says so in that panel.
+function openCitedSource(id) {
+  showReferencePanels('[data-testid="source-documents-section"]')
+  sourceOpener.open?.(id)
 }
 
 // ---------- Instance-scoped state ----------
@@ -1910,7 +1925,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
     const splitEditableCompartment = new Compartment()
     const wrapCompartment = new Compartment()
     const visualCompartment = new Compartment()
-    const visualLayer = () => visualMode({ renderMarkdown: renderPreview, historyView: () => view, sourceDocument: (id) => (sourceIndex.value === null ? { unavailable: true } : sourceIndex.value[id]), openSourceDocument: (id) => sourceOpener.open?.(id) })
+    const visualLayer = () => visualMode({ renderMarkdown: renderPreview, historyView: () => view, sourceDocument: (ref) => (sourceIndex.value === null ? { unavailable: true } : sourceIndex.value[citedRef(ref).id]), openSourceDocument: (ref) => openCitedSource(ref) })
     let hideToolbarTimer = null
     const state = EditorState.create({
       doc: field.value ?? '',
@@ -4449,7 +4464,8 @@ function AdvanceStagePanel({ instance }) {
 // Uses the shared Dropdown component, lists every module <h2> and every <h3>
 // subsection heading (field title, including custom sections) in document
 // order. Now rendered inside ViewModeToolbar to the right of the artefact
-// selector. Selecting an entry smooth-scrolls the heading and closes the menu.
+// selector. Selecting an entry smooth-scrolls the heading and closes the menu;
+// with Sources & decisions on (#320) it switches that off first.
 // Hidden when the stage has no headings (edge case).
 function StageNavigation({ modules, visibleFieldIds }) {
   const [open, setOpen] = useState(false)
@@ -4457,8 +4473,10 @@ function StageNavigation({ modules, visibleFieldIds }) {
   if (!headings.length) return null
   function handleSelect(id) {
     setOpen(false)
-    const el = document.getElementById(id)
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    showFields(() => {
+      const el = document.getElementById(id)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
   }
   return html`
     <div class="stage-navigation">
@@ -4485,6 +4503,73 @@ function StageNavigation({ modules, visibleFieldIds }) {
         )}
       <//>
     </div>
+  `
+}
+
+// ---------- Sources & decisions (#320, web/lib/referenceView.js) ----------
+// The toolbar toggle that swaps the Stage's Fields for its reference panels (Source documents, Review comments, Decisions log) and back.
+// Both sides stay mounted and are only hidden, so nothing typed in a Field is lost by switching.
+
+// Where the Fields were scrolled to when the toggle went on: switching it off again returns there.
+let fieldsScrollY = 0
+
+// Runs `fn` once the signal change just made is drawn (Preact queues its render as a microtask).
+const afterRender = (fn) => setTimeout(fn, 0)
+
+const toolbarHeight = () => document.querySelector('.toolbar')?.offsetHeight ?? 0
+
+// Switches the toggle on. `target` is a selector for the panel to go to (a link into one of them); without one the panels come up under the
+// toolbar if the page was scrolled past it.
+function showReferencePanels(target = null) {
+  if (!referenceView.peek()) {
+    fieldsScrollY = window.scrollY
+    referenceView.value = true
+  }
+  afterRender(() => {
+    const el = (target && document.querySelector(target)) || document.getElementById('reference-panels')
+    if (!el) return
+    const top = el.getBoundingClientRect().top
+    if (target || top < toolbarHeight()) window.scrollTo({ top: Math.max(0, top + window.scrollY - toolbarHeight()) })
+  })
+}
+
+// Switches the toggle off. `then` runs once the Fields are drawn again (to go to one of them); without it the page returns to where the
+// architect left the Fields.
+function showFields(then = null) {
+  if (!referenceView.peek()) {
+    then?.()
+    return
+  }
+  referenceView.value = false
+  afterRender(then ?? (() => window.scrollTo({ top: fieldsScrollY })))
+}
+
+// The toggle itself, to the right of Navigation. Its count is what needs attention: the review comment threads still unanswered plus the
+// Stage's open questions. With nothing in any of the three panels it is disabled rather than showing an empty view.
+function ReferenceToggle({ instance }) {
+  const on = referenceView.value
+  const review = reviewSummary.value
+  const decisions = decisionsSummary.value
+  const { count, disabled } = referenceToggleState({
+    sourcesOffered: offersSourceDocuments(instance),
+    review: review.key === instance.slug ? review : null,
+    decisions: decisions.key === `${instance.slug}|${instance.stage.id}` ? decisions : null,
+  })
+  const title = on ? 'Back to the Fields' : disabled ? NOTHING_HERE_YET : 'Show the Source documents, Review comments and Decisions log in place of the Fields'
+  return html`
+    <button
+      type="button"
+      class=${'btn small reference-toggle' + (on ? ' active' : '')}
+      data-testid="reference-toggle"
+      aria-pressed=${on}
+      disabled=${disabled && !on}
+      title=${title}
+      onClick=${() => (on ? showFields() : showReferencePanels())}
+    >
+      Sources & decisions${count > 0
+        ? html` <span class="reference-count" data-testid="reference-count">${count}<span class="visually-hidden"> need attention</span></span>`
+        : null}
+    </button>
   `
 }
 
@@ -4925,13 +5010,14 @@ function ReviewCommentsPanel({ instance }) {
   }
   // #304 (ADR-0066): the Review response list, made on demand from the decisions logs. Nothing is written to the Reviewed copy or committed.
   const decisionsStore = useDecisionsStore(instance)
+  const readStageLogs = async (stages) => Object.fromEntries(await Promise.all(stages.map(async (st) => [st.id, await decisionsStore.read(st.id).catch(() => null)])))
   const [response, setResponse] = useState({ phase: 'idle', message: '' })
   async function downloadResponseList() {
     setResponse({ phase: 'working', message: '' })
     try {
       const structure = await loadDefinitionStructure(instance)
       const stages = structure.stages ?? instance.stages
-      const logs = Object.fromEntries(await Promise.all(stages.map(async (st) => [st.id, await decisionsStore.read(st.id).catch(() => null)])))
+      const logs = await readStageLogs(stages)
       const modules = modulesWithStandard(structure.modules, structure.standardModules)
       const fieldTitle = (fieldKey) => {
         const [moduleId, ...rest] = String(fieldKey).split('.')
@@ -4966,6 +5052,20 @@ function ReviewCommentsPanel({ instance }) {
       live = false
     }
   }, [key])
+  // #320: what the Sources & decisions toggle counts: the threads no Stage's decisions log has answered yet.
+  const logTick = decisionsLogTick.value
+  useEffect(() => {
+    if (state.phase === 'loading') return undefined
+    let live = true
+    const publish = (logs) => {
+      if (live) reviewSummary.value = { key: instance.slug, copies: state.copies.length, unanswered: unansweredThreadCount(state.copies, logs), error: state.phase === 'error' }
+    }
+    if (state.copies.length === 0 || !decisionsStore) publish({})
+    else readStageLogs(instance.stages).then(publish)
+    return () => {
+      live = false
+    }
+  }, [state, decisionsStore, logTick])
 
   if (state.phase === 'error') return html`<p class="review-note" data-testid="review-copies-error">Couldn't list the Reviewed copies: ${state.error}</p>`
   if (state.copies.length === 0) return null
@@ -5061,13 +5161,11 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   }
 
   return html`
-    <main id="modules" data-view-mode=${viewMode.value}>
+    <main id="modules" data-view-mode=${viewMode.value} hidden=${referenceView.value}>
       <${ReopenStagePanel} instance=${instance} />
       <${MergedApprovalPanel} instance=${instance} />
       <${OutOfDatePanel} instance=${instance} />
       <${ChangedSinceApprovalPanel} instance=${instance} />
-      <${ReviewCommentsPanel} instance=${instance} />
-      <${DecisionsLogSection} instance=${instance} />
       ${advancedMode.value
         ? html`<${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />`
         : null}
@@ -5145,10 +5243,16 @@ function DecisionsLogSection({ instance }) {
   useEffect(() => {
     if (!store) return undefined
     let live = true
+    const summaryKey = `${instance.slug}|${instance.stage.id}`
+    const show = (found) => {
+      if (!live) return
+      setLog(found)
+      decisionsSummary.value = { key: summaryKey, ...decisionsLogCounts(found) } // #320: the Sources & decisions toggle's count
+    }
     store
       .read(instance.stage.id)
-      .then((found) => live && setLog(found))
-      .catch(() => live && setLog(null))
+      .then(show)
+      .catch(() => show(null))
     return () => {
       live = false
     }
@@ -5176,6 +5280,10 @@ async function loadStageModulesOf(instance, stage) {
   return (await loadInstance(instance.slug, stage.id)).modules
 }
 
+// #319 (docs/adr/0072): how Out of date asks whether the files a Field drew on in a code repository have changed since the commit it recorded:
+// the Gantry server compares them, with the architect's own token for that repository.
+const compareRepository = (entry, reads) => repositoryReaderFor(entry.repository).compare(reads)
+
 // #297: the Fields of this Instance that drew on a Source document that has since changed (removed, replaced, or read again with different text), and the documents added since the last interview. The watcher works them out on opening and again after every Source document change and Save (nothing polls); the editor's banner and Field marks, the Source documents panel and the Interview page read what it found.
 function OutOfDateWatcher({ instance }) {
   const sourceStore = useSourceStore(instance)
@@ -5195,9 +5303,10 @@ function OutOfDateWatcher({ instance }) {
       currentStageId: instance.stage.id,
       currentModules: instance.modules,
       loadStageModules: (stage) => loadStageModulesOf(instance, stage),
+      compareRepository,
     })
       .then((result) => live && (outOfDateState.value = { key, ...result }))
-      .catch(() => live && (outOfDateState.value = { key, flags: [], newSince: [], sources: [] }))
+      .catch(() => live && (outOfDateState.value = { key, flags: [], newSince: [], sources: [], unchecked: [] }))
     return () => {
       live = false
     }
@@ -5208,15 +5317,15 @@ function OutOfDateWatcher({ instance }) {
 // What the watcher last found for the Instance and Stage on screen (nothing for another one's).
 function useOutOfDate(instance) {
   const state = outOfDateState.value
-  return state.key === `${instance.slug}|${instance.stage.id}` ? state : { key: '', flags: [], newSince: [], sources: [] }
+  return state.key === `${instance.slug}|${instance.stage.id}` ? state : { key: '', flags: [], newSince: [], sources: [], unchecked: [] }
 }
 
 // The editor's banner: one line per changed document, such as "4 Fields drew on Client brief, now replaced", with the way to bring them up to date (the Interview page, which works on the current Stage of a local or server workspace).
 function OutOfDatePanel({ instance }) {
-  const { flags } = useOutOfDate(instance)
+  const { flags, unchecked = [] } = useOutOfDate(instance)
   const location = useLocation()
   const lines = outOfDateBannerLines(flags)
-  if (lines.length === 0) return null
+  if (lines.length === 0 && unchecked.length === 0) return null
   // #298: "Bring up to date" opens the Interview page on just the flagged Fields, stage by stage in order. A local or server workspace begins at
   // the first Stage that has any; a remote one can only write its current Stage, so it goes there.
   const stageIds = (instance.stages ?? []).map((s) => s.id)
@@ -5253,6 +5362,12 @@ function OutOfDatePanel({ instance }) {
               ? html`<span class="ood-fields" title=${reason}>Bring up to date from the Interview page (${reason})</span>`
               : html`<a class="btn small" href=${`${here.pathname}${here.search}`} data-testid="bring-up-to-date" onClick=${bringUpToDate}>Bring up to date</a>`}
             <span class="ood-fields">${line.fields.map(fieldName).join(', ')}</span>
+          </li>`
+        )}
+        ${unchecked.map(
+          // #319: a code repository that could not be compared (most often: no access from this browser) is named, never silently skipped.
+          (u) => html`<li key=${`unchecked|${u.source}`} data-source=${u.source} data-change="unchecked">
+            <span data-testid="out-of-date-unchecked">${uncheckedRepositoryLine(u)}</span>
           </li>`
         )}
       </ul>
@@ -5390,18 +5505,21 @@ function SourceDocumentsSection({ instance }) {
   // #281: what the editor's preview needs to show a citation (the panel tells us each time it lists) and how to open one.
   const onList = useCallback((list) => {
     const index = {}
-    for (const e of list.entries) index[e.id] = { title: e.title, filename: e.filename, removed: Boolean(e.removedAt) }
+    for (const e of list.entries) index[e.id] = { title: e.title, filename: e.filename, removed: Boolean(e.removedAt), ...(e.repository ? { repository: e.repository } : {}) }
     known.current = index
     sourceIndex.value = index
   }, [])
   useEffect(() => {
     if (!store) return undefined
-    sourceOpener.open = async (id) => {
+    sourceOpener.open = async (ref) => {
+      const { id, path, commit } = citedRef(ref)
       const entry = known.current[id]
       if (!entry || entry.removed) return
       try {
         setNotice('')
-        await openSourceDocument(store, { id, ...entry })
+        // #319: a repository citation opens the file it names on the Provider, as it was at the commit it names.
+        if (entry.repository) openRepository(entry, { path, commit })
+        else await openSourceDocument(store, { id, ...entry })
       } catch (err) {
         setNotice(err.message)
       }
@@ -5412,7 +5530,7 @@ function SourceDocumentsSection({ instance }) {
     }
   }, [store])
   if (!store) return null
-  return html`<div class="source-documents-wrap">
+  return html`<div class="source-documents-wrap" data-testid="source-documents-section">
     <${SourceDocumentsPanel}
       store=${store}
       actor=${instance.assignee ?? ''}
@@ -5420,6 +5538,7 @@ function SourceDocumentsSection({ instance }) {
       commitNote=${instance.workspaceBacked ? "Each upload, rename, new text read and removal is saved straight away as its own commit on this Stage's branch. It does not wait for Save." : ''}
       onList=${onList}
       newSince=${newSinceIds}
+      citedCommits=${(id) => instance.modules.flatMap((m) => (m.fields ?? []).flatMap((f) => citedCommits(Array.isArray(f.value) ? f.value.join('\n') : String(f.value ?? ''), id)))}
       archiveName=${`${String(instance.name || instance.slug || 'Instance').replace(/[\\/:*?"<>|]/g, ' ').trim()} - Source documents.zip`}
     />
     ${notice ? html`<p class="inline-error" role="alert" data-testid="source-document-open-error">${notice}</p>` : null}
@@ -5583,13 +5702,14 @@ function ViewModeToolbar({
             `
           : null}
         <${StageNavigation} modules=${navModules} visibleFieldIds=${visibleFieldIds} />
+        <${ReferenceToggle} instance=${instance} />
       </div>
       <div class="toolbar-actions">
         <button type="button" class=${'btn small' + (wrap.value ? ' active' : '')} aria-pressed=${wrap.value} onClick=${() => (wrap.value = !wrap.value)}>Wrap</button>
         <button type="button" class="btn" onClick=${onClearAllFields}>Clear all fields</button>
         <button type="button" class="btn primary" onClick=${afterUnsavedCheck(() => setRenderOpen(true))}>Render</button>
         ${requestApprovalSlug
-          ? html`<button type="button" class="btn request-approval-btn" onClick=${scrollToApprovalPanel}>Review / Sign-off</button>`
+          ? html`<button type="button" class="btn request-approval-btn" onClick=${() => showFields(scrollToApprovalPanel)}>Review / Sign-off</button>`
           : null}
       </div>
     </div>
@@ -5932,6 +6052,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       loadError.value = null
       localGrantNeeded.value = false
       localDirHandle.value = null
+      referenceView.value = false // #320: every editor opens on the Fields
     })
 
     // A local-workspace instance (ADR-0029) is opened at
@@ -6884,7 +7005,14 @@ function ModuleEditorPage({ slug: routeRef }) {
       onClearAllFields=${clearAllFields}
       requestApprovalSlug=${advancedMode.value && instance.workspaceBacked ? instance.slug : null}
     />
-    ${offersSourceDocuments(instance) ? html`<${OutOfDateWatcher} instance=${instance} /><${SourceDocumentsSection} instance=${instance} />` : null}
+    ${offersSourceDocuments(instance) ? html`<${OutOfDateWatcher} instance=${instance} />` : null}
+    <div class="reference-panels" id="reference-panels" data-testid="reference-panels" hidden=${!referenceView.value}>
+      ${offersSourceDocuments(instance) ? html`<${SourceDocumentsSection} instance=${instance} />` : null}
+      <div class="reference-panels-body">
+        <${ReviewCommentsPanel} key=${instance.stage.id} instance=${instance} />
+        <${DecisionsLogSection} key=${instance.stage.id} instance=${instance} />
+      </div>
+    </div>
     <${StageScreen}
       key=${instance.stage.id}
       instance=${instance}

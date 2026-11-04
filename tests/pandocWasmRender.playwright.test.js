@@ -97,6 +97,8 @@ test('the pandoc-wasm binary begins loading as soon as gantry opens — before a
     try {
       const page = await browser.newPage()
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      // The browser keeps only 250 resource timings by default, and Gantry's own modules alone come close to that on first load.
+      await page.addInitScript(() => performance.setResourceTimingBufferSize(2000))
       await page.goto(`${base}/`)
       // No click, no navigation to an instance, no Preview/Render — warm-load is fired from
       // web/app.js's own module-scope boot sequence.

@@ -27,9 +27,19 @@ export function createServerSourceClient(slug, fetchForInstance) {
       const { entries, totalBytes, warning } = await parse(await fetchForInstance(path()), 'Failed to load Source documents')
       return { entries, totalBytes, warning }
     },
-    async upload({ filename, bytes, text, title, uploadedBy, replaces }) {
-      const res = await fetchForInstance(path(), { method: 'POST', ...json({ filename, dataBase64: bytesToBase64(bytes), text, title, uploadedBy, replaces }) })
+    async upload({ filename, bytes, text, title, uploadedBy, replaces, origin }) {
+      const res = await fetchForInstance(path(), { method: 'POST', ...json({ filename, dataBase64: bytesToBase64(bytes), text, title, uploadedBy, replaces, origin }) })
       return parse(res, 'Failed to upload')
+    },
+    /** #319: a pointer to a code repository, `{ repository, title?, uploadedBy? }`. Only the manifest entry is written. */
+    async addRepository({ repository, title, uploadedBy }) {
+      return parse(await fetchForInstance(path(), { method: 'POST', ...json({ repository, title, uploadedBy }) }), 'Failed to add the repository')
+    },
+    /** #318: **Fetch again** for a document fetched from a web address. The server compares the bytes, so the text is read here first (`extract()`) and sent along; identical bytes come back `{ unchanged: true, entry }` and add nothing. */
+    async fetchAgain(id, { filename, bytes, text, uploadedBy, origin }, { extract } = {}) {
+      const read = extract ? await extract() : text
+      const res = await fetchForInstance(path(`/${encodeURIComponent(id)}/fetch-again`), { method: 'POST', ...json({ filename, dataBase64: bytesToBase64(bytes), text: read, uploadedBy, origin }) })
+      return parse(res, 'Failed to fetch it again')
     },
     async rename(id, title) {
       return (await parse(await fetchForInstance(path(`/${encodeURIComponent(id)}`), { method: 'PATCH', ...json({ title }) }), 'Failed to rename')).entry

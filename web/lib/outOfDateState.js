@@ -10,6 +10,6 @@ import { signal } from '@preact/signals'
 export const sourceListTick = signal(0)
 
 /** The latest result for the Instance on screen: `{ key, flags, newSince, sources }`. */
-export const outOfDateState = signal({ key: '', flags: [], newSince: [], sources: [] })
+export const outOfDateState = signal({ key: '', flags: [], newSince: [], sources: [], unchecked: [] })
 
 export { loadOutOfDate } from './outOfDateLoad.js'

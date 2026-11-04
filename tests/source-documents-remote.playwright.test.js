@@ -9,6 +9,7 @@ import { registerInstance } from '../lib/instanceRegistry.js'
 import { stageBranchName } from '../lib/stageBranch.js'
 import { parseSourceManifest } from '../web/lib/sourceDocuments.js'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { showSourcesAndDecisions } from './helpers/referenceView.js'
 import { GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_VALID_PAT, ORGANIZATION, PROJECT, REPOSITORY, VALID_PAT, withRunningServerForProvider } from './helpers/lifecycle.js'
 import { wordDocument } from './helpers/sourceFixtures.js'
 
@@ -59,6 +60,7 @@ for (const [providerId, provider] of Object.entries(PROVIDERS)) {
             await page.addInitScript((pat) => localStorage.setItem('gantry:ado-pat', pat), provider.pat)
 
             await page.goto(`${base}/instance/${SLUG}`)
+            await showSourcesAndDecisions(page)
             const panel = page.locator('[data-testid="source-documents"]')
             await panel.waitFor({ timeout: 30_000 })
             await panel.locator('[data-testid="source-documents-summary"]').click()
@@ -92,6 +94,7 @@ for (const [providerId, provider] of Object.entries(PROVIDERS)) {
 
             // Reload: the list comes back from the committed manifest, and Download hands back the original.
             await page.reload()
+            await showSourcesAndDecisions(page)
             const again = page.locator('[data-testid="source-documents"]')
             await again.waitFor({ timeout: 30_000 })
             await again.locator('[data-testid="source-documents-summary"]').click()

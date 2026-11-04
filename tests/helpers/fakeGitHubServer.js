@@ -86,6 +86,9 @@ export function createFakeGitHubServer({
   // #263: when an array, every request that actually serves a file's bytes (inline or raw) appends
   // `{ path, via }` to it — how a test proves a "does it exist" check never downloaded the content.
   contentLog,
+  // #319: a public repository, which anyone can read with no token at all. A request with no Authorization header may then GET; a
+  // request with a wrong PAT is still refused, and every write still needs a valid one.
+  anonymousRead = false,
 } = {}) {
   const issues = new Map() // number -> issue object
   const issueIdToNumber = new Map() // internal id -> number
@@ -176,7 +179,8 @@ export function createFakeGitHubServer({
     const auth = req.headers['authorization'] ?? ''
     const [, providedPat] = auth.match(/^Bearer (.+)$/) ?? []
     const validPats = Array.isArray(validPat) ? validPat : [validPat]
-    if (!validPats.includes(providedPat)) {
+    const anonymousGet = anonymousRead && req.method === 'GET' && !req.headers['authorization']
+    if (!anonymousGet && !validPats.includes(providedPat)) {
       return json(401, { message: 'Bad credentials (fake server: invalid or missing PAT)' })
     }
 

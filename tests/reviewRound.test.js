@@ -16,6 +16,7 @@ import {
   reviewerLabels,
   resolveReviewCard,
   scrubNames,
+  unansweredThreadCount,
 } from '../web/lib/reviewRound.js'
 import { describeEntry } from '../web/lib/decisionsLogPanel.js'
 import { parseReviewManifest, stringifyReviewManifest, withAnsweredCounts } from '../web/lib/reviewManifest.js'
@@ -108,6 +109,14 @@ describe('the questions a Reviewed copy asks', async () => {
     const reopened = reviewUnits({ copies: [copy], reopened: new Set([`${copy.entry.id}:0`]) })
     assert.ok(reopened.units.some((u) => u.parts.some((p) => p.thread?.text === 'Which card schemes?')))
     assert.equal(reopened.resolved.length, 0)
+  })
+
+  test('the threads still waiting are the unresolved ones no Stage has answered (#320)', () => {
+    assert.equal(unansweredThreadCount([copy]), 7, 'eight threads, one resolved in Word')
+    const logs = { shape: { entries: [{ id: 'a-1', kind: 'review-answered', review: copy.entry.id, keys: [`${copy.entry.id}:2`, `${copy.entry.id}:changes:background.problem:Ana Reviewer`] }] } }
+    assert.equal(unansweredThreadCount([copy], logs), 6, 'an answered thread counts no more; tracked changes never did')
+    assert.equal(unansweredThreadCount([]), 0)
+    assert.equal(unansweredThreadCount([{ entry: copy.entry, error: 'unreadable' }]), 0, 'a copy that could not be read has no threads to count')
   })
 
   test('commenters whose tracked changes touch the same paragraph share one card', () => {

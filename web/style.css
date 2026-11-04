@@ -1467,6 +1467,8 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .guide-content ul { margin: 0 0 18px; padding-left: 22px; }
 .guide-content li { margin: 5px 0; }
 .guide-content code { font-family: var(--font-mono); font-size: 0.9em; }
+/* A long example (a code repository citation, say) scrolls inside its own block, like a wide table, never the page. */
+.guide-content pre { max-width: 100%; overflow-x: auto; }
 .guide-content h3 { font-family: var(--font-display); font-size: 17px; line-height: 1.3; margin: 28px 0 10px; scroll-margin-top: 24px; }
 .guide-content h4 { font-family: var(--font-display); font-size: 15px; line-height: 1.3; margin: 24px 0 8px; scroll-margin-top: 24px; }
 /* Reference tables (Definition Reference Guide) are wider than the 72ch prose column —
@@ -2146,6 +2148,15 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .decision-other-style { font-size: 12px; margin: 0 0 8px; }
 .decisions-problems { font-size: 12px; color: var(--warning, #b06a00); margin: 6px 0 8px; padding-left: 18px; }
 
+/* #320 — Sources & decisions: the reference panels shown under the editor toolbar in place of the Fields while the toggle is on. */
+.reference-panels-body { max-width: 1120px; margin: 0 auto; padding: 16px 32px 140px; }
+/* No .btn margin: like Navigation beside it, it stays level with the toolbar's other controls (and so does Save). */
+.toolbar .reference-toggle { margin: 0; }
+.reference-toggle .reference-count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; font-family: var(--font-mono); font-size: 11px; line-height: inherit; text-align: center; background: rgba(127, 127, 127, 0.25); border-radius: var(--radius); }
+@media (max-width: 720px) {
+  .reference-panels-body { padding: 16px 16px 140px; }
+}
+
 /* #279 — the Source documents panel under the editor toolbar: a collapsible strip with the upload control and one row per document. */
 .source-documents-wrap { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
 .source-documents { border-bottom: var(--hairline) solid var(--line); }
@@ -2347,6 +2358,26 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .source-documents .stamp.new { text-transform: none; letter-spacing: 0.02em; }
 .source-replaces { font: inherit; font-size: 12px; padding: 4px 6px; margin-left: 8px; max-width: 100%; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
 .interview-rail .source-replaces { margin: 6px 0 0; width: 100%; box-sizing: border-box; }
+
+/* #318: adding a Source document from a web address */
+.source-documents-address { display: flex; gap: 8px; align-items: center; margin: 6px 0; max-width: 760px; }
+.source-documents-address input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 4px 8px; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.interview-rail .source-documents-address { flex-wrap: wrap; }
+.interview-rail .source-documents-address input { flex-basis: 100%; }
+.source-documents-address-note { margin: 6px 0; font-size: 12px; }
+.source-documents-origin { font-size: 12px; word-break: break-all; }
+/* #319: + Add a code repository. One field per row, labelled above, in the editor's panel and the Interview page's rail alike. */
+.source-documents-add-repository { margin: 6px 0; }
+.source-documents-repository { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; padding: 8px 10px; max-width: 520px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.source-documents-repository .guidance { margin: 0; font-size: 12px; }
+.source-documents-repository label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-muted); }
+.source-documents-repository input,
+.source-documents-repository select { font: inherit; font-size: 13px; padding: 4px 8px; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.source-documents-repository-actions { display: flex; gap: 8px; }
+.source-repository-token-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; margin: 6px 0 0; }
+.source-repository-token-form label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-muted); flex: 1 1 200px; }
+.source-repository-token-form input { font: inherit; font-size: 13px; padding: 4px 8px; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.source-repository-no-access { margin: 4px 0 0; font-size: 12px; }
 .interview-rail .srcdocs .stamp { flex-basis: auto; font-size: 9px; }
 .out-of-date-banner { margin: 0 0 16px; padding: 10px 12px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); font-size: 13px; }
 .out-of-date-banner h2 { margin: 0 0 6px; font-size: 14px; }

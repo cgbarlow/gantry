@@ -171,9 +171,9 @@ export function markTargetAssumptions(text, architectText = '') {
   return pieces.join('').replace(new RegExp(CITED, 'g'), () => originals[n++])
 }
 
-/** The ids of the Source documents a text cites, in order, as `[...](source:<id>)`. */
+/** The ids of the Source documents a text cites, in order, as `[...](source:<id>)`. #319: a repository citation's `?path=…&commit=…` is not part of the id. */
 export function citedSourceIds(text) {
-  return [...String(text ?? '').matchAll(/\]\(source:([^)\s]+)\)/g)].map((m) => m[1])
+  return [...String(text ?? '').matchAll(/\]\(source:([^)\s?]+)(?:\?[^)\s]*)?\)/g)].map((m) => m[1])
 }
 
 /**
@@ -184,7 +184,7 @@ export function citationSegments(text) {
   const out = []
   let at = 0
   const source = String(text ?? '')
-  for (const match of source.matchAll(/\[([^\]]*)\]\(source:([^)\s]+)\)/g)) {
+  for (const match of source.matchAll(/\[([^\]]*)\]\(source:([^)\s?]+)(?:\?[^)\s]*)?\)/g)) {
     if (match.index > at) out.push({ text: source.slice(at, match.index) })
     out.push({ cite: match[1], id: match[2] })
     at = match.index + match[0].length

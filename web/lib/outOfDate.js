@@ -7,6 +7,13 @@
 //                       fingerprint of the text changed, so re-reading to the very same text changes nothing).
 // A new document that replaces nothing changes nothing for any Field: it is only marked **New since last interview**.
 //
+// #319 (docs/adr/0072): a **code repository** is read live, so it changes when its branch does. What a Field drew on from one is a set of
+// files, each at the commit it was read at (the decisions log's inputs and the citations in the content name them). When a Stage opens, the
+// caller has the Gantry server compare each of those files at its recorded commit with the branch head (`repositoryReadsOf` says which;
+// web/lib/outOfDateLoad.js asks). Only a real change to one of them flags the Field (`code-changed`, naming the files); a new commit that
+// touches nothing the Field used flags nothing. The architect answers it like any other flag: the `source-update` entry records the head
+// commit they answered at, and the Field is flagged again only when one of those files changes after it.
+//
 // What is flagged is exactly the Fields that drew on, or cite, that document:
 //   * AI-drafted Fields whose decisions-log `fields` record lists it among its inputs (ADR-0064), and
 //   * any content, hand-written included, that cites it with `source:<id>` (#281).
@@ -24,8 +31,9 @@
 //
 // Pure (no DOM, no network), shared by the editor, the Interview page and, later, MCP. tests/outOfDate.test.js drives it.
 import { normalizeSavedContent } from './interviewBrief.js'
-import { citedSourceIds } from './sourceCitations.js'
+import { citedSourceIds, findSourceCitations } from './sourceCitations.js'
 import { fingerprintText, isRemovedSource, replacedByMap } from './sourceDocuments.js'
+import { isRepositorySource, shortCommit } from './sourceRepository.js'
 
 /** The kind of decisions-log entry that records the architect's answer for a Field that was Out of date (written by "Bring up to date", #298). */
 export const SOURCE_UPDATE_KIND = 'source-update'
@@ -55,6 +63,56 @@ export function sourceChanges(entry, replacedByEntry) {
   return changes
 }
 
+// #319: for every Field, the files of each code repository it drew on and the commits it accepted them at: read when it was drafted, named
+// by a citation in its content, or answered for on a Bring up to date card. `{ field -> { source -> { path -> { commits, via, stages } } } }`.
+function repositoryDraws({ sources, pairs, content }) {
+  const repositories = new Set(sources.filter((s) => isRepositorySource(s) && !isRemovedSource(s)).map((s) => s.id))
+  const draws = new Map()
+  const note = (key, source, path, commit, via, stage) => {
+    if (!repositories.has(source) || typeof path !== 'string' || !path || typeof commit !== 'string' || !commit) return
+    const bySource = draws.get(key) ?? new Map()
+    const byPath = bySource.get(source) ?? new Map()
+    const at = byPath.get(path) ?? { commits: new Set(), via: new Set(), stages: new Set() }
+    at.commits.add(commit)
+    if (via) at.via.add(via)
+    if (stage) at.stages.add(stage)
+    byPath.set(path, at)
+    bySource.set(source, byPath)
+    draws.set(key, bySource)
+  }
+  for (const [stageId, log] of pairs) {
+    for (const [key, record] of Object.entries(log.fields ?? {})) {
+      for (const input of asList(record?.inputs)) note(key, input?.source, input?.path, input?.commit, 'drafted', stageId)
+    }
+    for (const entry of asList(log.entries)) {
+      if (entry?.kind !== SOURCE_UPDATE_KIND || !entry.commit) continue
+      for (const key of asList(entry.fields)) for (const path of asList(entry.paths)) note(key, entry.source, path, entry.commit, null, null)
+    }
+  }
+  for (const [moduleId, record] of Object.entries(content)) {
+    for (const [fieldId, value] of Object.entries(record.fields)) {
+      for (const c of findSourceCitations(asText(value))) note(`${moduleId}.${fieldId}`, c.id, c.path, c.commit, 'cited', null)
+    }
+  }
+  return draws
+}
+
+/**
+ * #319: the files of each code repository that the Fields drew on, at the commits to compare with the branch head: `{ [sourceId]: [{ path, commit }] }`.
+ * Takes what `findOutOfDateFields` takes. A repository nothing drew on a file of is not listed, so nothing is asked of it.
+ */
+export function repositoryReadsOf({ sources = [], logs = {}, modules = {} } = {}) {
+  const out = {}
+  for (const bySource of repositoryDraws({ sources, pairs: logPairs(logs), content: normalizeSavedContent(modules) }).values()) {
+    for (const [source, byPath] of bySource) {
+      const list = out[source] ?? []
+      for (const [path, at] of byPath) for (const commit of at.commits) if (!list.some((r) => r.path === path && r.commit === commit)) list.push({ path, commit })
+      out[source] = list
+    }
+  }
+  return out
+}
+
 /**
  * Every Field that is Out of date.
  *
@@ -63,9 +121,10 @@ export function sourceChanges(entry, replacedByEntry) {
  * @param {object|object[]} input.logs  each Stage's decisions log, `{ stageId: log }` or a list of logs
  * @param {object|object[]} input.modules  the saved content of every Module known, as `normalizeSavedContent` takes it
  * @param {object} [input.stageModules]  `{ stageId: [moduleId] }`, to say which Stages a flagged Field belongs to
- * @returns {{ field: string, cause: 'source'|'field', source?: string, sourceTitle?: string, inputField?: string, change: string, since?: string, replacedBy?: {id: string, title: string}, via: string[], stages: string[] }[]}
+ * @param {object} [input.repositoryChanges]  #319: `{ [sourceId]: { head, results: [{ path, commit, changed, deleted }] } }`, the Gantry server's comparison of the files `repositoryReadsOf` named with each branch head; a repository missing here is not checked
+ * @returns {{ field: string, cause: 'source'|'field', source?: string, sourceTitle?: string, inputField?: string, change: string, since?: string, replacedBy?: {id: string, title: string}, paths?: string[], head?: string, via: string[], stages: string[] }[]}
  */
-export function findOutOfDateFields({ sources = [], logs = {}, modules = {}, stageModules = {} } = {}) {
+export function findOutOfDateFields({ sources = [], logs = {}, modules = {}, stageModules = {}, repositoryChanges = {} } = {}) {
   const content = normalizeSavedContent(modules)
   const valueOf = (key) => {
     const [moduleId, ...rest] = String(key).split('.')
@@ -147,6 +206,39 @@ export function findOutOfDateFields({ sources = [], logs = {}, modules = {}, sta
     }
   }
 
+  // #319: a Field that drew on files of a code repository, at least one of which has really changed since every commit it accepted it at.
+  for (const [key, bySource] of repositoryDraws({ sources, pairs, content })) {
+    for (const [sourceId, byPath] of bySource) {
+      const compared = repositoryChanges?.[sourceId]
+      const entry = byId.get(sourceId)
+      if (!compared || !entry) continue
+      const resultOf = (path, commit) => asList(compared.results).find((r) => r.path === path && r.commit === commit)
+      const changedPaths = []
+      const vias = new Set()
+      const stages = new Set()
+      for (const [path, at] of byPath) {
+        const results = [...at.commits].map((commit) => resultOf(path, commit))
+        // Unchanged since any commit the Field accepted it at, or not compared: nothing to say.
+        if (results.some((r) => !r || r.changed === false)) continue
+        changedPaths.push(path)
+        for (const v of at.via) vias.add(v)
+        for (const s of at.stages) stages.add(s)
+      }
+      if (changedPaths.length === 0) continue
+      found.push({
+        field: key,
+        cause: 'source',
+        source: sourceId,
+        sourceTitle: entry.title || sourceId,
+        change: 'code-changed',
+        paths: changedPaths.sort(),
+        head: compared.head,
+        via: [...vias].sort(),
+        stages: unique([...stages, ...(vias.has('cited') ? stagesMounting(key) : [])]),
+      })
+    }
+  }
+
   // A draft that drew on another Field that is no longer what it saw.
   for (const [key, list] of records) {
     for (const record of list) {
@@ -189,6 +281,7 @@ const CHANGE_WORDS = {
   removed: 'now removed',
   replaced: 'now replaced',
   're-extracted': 'now read again with different text',
+  'code-changed': 'whose files have since changed',
 }
 
 /**
@@ -217,12 +310,29 @@ export function outOfDateBannerLines(flags) {
   })
 }
 
+/**
+ * #319: the line for a code repository Out of date could not compare just now (web/lib/outOfDateLoad.js's `unchecked`), so the architect knows
+ * the Fields that drew on it were not checked, and why: `Billing API was not checked for changes: You can't read … without a token. …`.
+ */
+export function uncheckedRepositoryLine({ title, code, reason }) {
+  const fix = code === 'no-access' ? ' Give a token that can read it with "Your token" on its row in Source documents.' : ''
+  return `${title} was not checked for changes, so the Fields that drew on it may be out of date: ${reason}${fix}`
+}
+
+/** #319: why a Field that drew on a code repository is flagged: `orders/service.ts in Billing API changed (now at 3f2a9c1)`. */
+export function codeChangeReason(flag) {
+  const paths = asList(flag.paths)
+  const files = paths.length <= 3 ? paths.join(', ') : `${paths.slice(0, 3).join(', ')} and ${paths.length - 3} more`
+  return `${files} in ${flag.sourceTitle} changed${flag.head ? ` (now at ${shortCommit(flag.head)})` : ''}`
+}
+
 /** The mark a single Field shows, e.g. `Out of date: Client brief was replaced by Client brief v3`. */
 export function outOfDateFieldNote(flags) {
   const reasons = asList(flags).map((flag) => {
     if (flag.cause !== 'source') return 'a Field it drew on has changed'
     if (flag.change === 'removed') return `${flag.sourceTitle} was removed`
     if (flag.change === 'replaced') return `${flag.sourceTitle} was replaced${flag.replacedBy ? ` by ${flag.replacedBy.title}` : ''}`
+    if (flag.change === 'code-changed') return codeChangeReason(flag)
     return `${flag.sourceTitle} was read again with different text`
   })
   return `Out of date: ${[...new Set(reasons)].join('; ')}`

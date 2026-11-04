@@ -112,6 +112,32 @@ export function pdfPagesToMarkdown(pagesText, pageCount) {
 
 const decodeUtf8 = (bytes) => new TextDecoder('utf-8').decode(bytes).replace(/^﻿/, '')
 
+// #318 (docs/adr/0071): an HTML page fetched from a web address is read to Markdown with the Pandoc WASM build Gantry already ships for
+// rendering (web/lib/pandocWasm.js), loaded only when a page is actually read. The server's own reading for an MCP agent passes pandoc-wasm's
+// Node build instead (lib/sourceExtractNode.js), so both give the same text.
+function loadBrowserPandoc() {
+  return import('./pandocWasm.js').then((module) => module.warmLoadPandocWasm())
+}
+
+/** The text of an HTML page's bytes, in the character set its `<meta charset>` (or `http-equiv` content type) names; UTF-8 when it names none, or one this runtime can't decode. */
+export function decodeHtml(bytes) {
+  const head = new TextDecoder('latin1').decode(bytes.subarray(0, Math.min(bytes.length, 4096)))
+  const named = head.match(/<meta[^>]+charset\s*=\s*["']?\s*([\w-]+)/i)?.[1]
+  if (named && !/^utf-?8$/i.test(named)) {
+    try {
+      return new TextDecoder(named).decode(bytes)
+    } catch {
+      // A label this runtime doesn't know: read it as UTF-8 below.
+    }
+  }
+  return decodeUtf8(bytes)
+}
+
+/** A page's Markdown with its pictures left out (they are not captured, ADR-0071): an image becomes its alt text, so a linked image is a plain link. */
+export function dropPageImages(markdown) {
+  return String(markdown ?? '').replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+}
+
 function friendlyProblem(err) {
   const code = err?.code ?? err?.type ?? ''
   const message = String(err?.message ?? err ?? '')
@@ -123,7 +149,7 @@ function friendlyProblem(err) {
 /**
  * Reads `bytes` (a `Uint8Array`) of the document called `filename` and returns `{ text, problem }`: the Markdown to store beside the original, or `text: null` when there is none to give. `problem` is a sentence for the architect when a document that should have had text could not be read; a picture or a scanned PDF is not a problem, only without text. Never throws.
  *
- * `options.loadParser()` returns officeparser's module; tests pass the Node build, the app the browser one.
+ * `options.loadParser()` returns officeparser's module; tests pass the Node build, the app the browser one. `options.loadPandoc()` (#318) returns a Pandoc with `convert(options, stdin, files)` for an HTML page: the app's pandoc-wasm instance by default, its Node build on the server.
  */
 export async function extractSourceText(filename, bytes, options = {}) {
   const kind = sourceFileKind(filename)
@@ -131,6 +157,15 @@ export async function extractSourceText(filename, bytes, options = {}) {
   if (kind === 'image') return { text: null, problem: null, reason: 'image' }
   try {
     if (kind === 'text') return { text: cutText(decodeUtf8(bytes)), problem: null }
+
+    // #318: an HTML page, kept as its HTML. Pandoc reads it to plain Markdown (no raw HTML; scripts and styles are dropped) and its pictures are left out.
+    if (kind === 'html') {
+      const pandoc = await (options.loadPandoc ?? loadBrowserPandoc)()
+      const result = await pandoc.convert({ from: 'html', to: 'gfm-raw_html', wrap: 'none' }, decodeHtml(bytes), {})
+      if (!result?.stdout && result?.stderr) throw new Error(String(result.stderr).trim())
+      const markdown = tidyMarkdown(dropPageImages(result?.stdout ?? ''))
+      return markdown ? { text: cutText(markdown), problem: null } : { text: null, problem: null, reason: 'empty' }
+    }
 
     const parser = await (options.loadParser ?? loadBrowserParser)()
     const parseOffice = parser.parseOffice ?? parser.default?.parseOffice

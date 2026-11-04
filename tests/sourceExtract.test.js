@@ -2,6 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as officeparser from 'officeparser'
 import {
+  decodeHtml,
+  dropPageImages,
   extractSourceText,
   officeParserConfig,
   OFFICEPARSER_BROWSER_URL,
@@ -12,6 +14,7 @@ import {
   tidyMarkdown,
 } from '../web/lib/sourceExtract.js'
 import { EXTRACTED_TEXT_CUT_CHARS } from '../web/lib/sourceDocuments.js'
+import { extractSourceTextOnServer } from '../lib/sourceExtractNode.js'
 import { pngImage, powerPointWithNotes, scannedPdf, spreadsheet, textPdf, wordDocument } from './helpers/sourceFixtures.js'
 
 // #279: text is read out of a Source document in the browser. These run the same code with officeparser's Node build standing in for the browser one (the app loads the browser build from /node_modules/, which tests/source-documents.playwright.test.js exercises for real).
@@ -144,4 +147,32 @@ test('the page and table helpers behave on their own', () => {
     '## S\n\n| a\\|b | c d |\n| --- | --- |\n| 1 |  |'
   )
   assert.equal(tidyMarkdown('---\ncreated: x\n---\n\n# Title {#title}\n\n\n\nBody'), '# Title\n\nBody')
+})
+
+// #318 (docs/adr/0071): a page fetched from a web address is kept as its HTML and read to Markdown with Pandoc. The server's reader (for an
+// outside agent) uses pandoc-wasm's Node build, the browser the same WASM build loaded from /node_modules/; both go through this one reader.
+test('an HTML page becomes Markdown with Pandoc, without its scripts, styles or pictures', async () => {
+  const page = new TextEncoder().encode(
+    '<!doctype html><html><head><title>Vendor API</title><script>steal()</script><style>p{color:red}</style></head>' +
+      '<body><h1>Rate limits</h1><p>Clients may make <b>100</b> requests a minute.</p><img src="chart.png" alt="Usage chart">' +
+      '<a href="/plans"><img src="logo.png" alt=""></a><table><tr><th>Plan</th><th>Limit</th></tr><tr><td>Free</td><td>100</td></tr></table></body></html>'
+  )
+  const { text, problem } = await extractSourceTextOnServer('Vendor API.html', page)
+  assert.equal(problem, null)
+  assert.match(text, /^# Rate limits$/m)
+  assert.match(text, /Clients may make \*\*100\*\* requests a minute\./)
+  assert.match(text, /\| Free +\| 100 +\|/)
+  assert.match(text, /Usage chart/)
+  assert.doesNotMatch(text, /steal|color:red|chart\.png|logo\.png|<[a-z]/)
+})
+
+test('an HTML page is read in the character set it names, and one with no text has none', async () => {
+  const latin1 = Uint8Array.from([...new TextEncoder().encode('<meta charset="iso-8859-1"><p>caf'), 0xe9, ...new TextEncoder().encode('</p>')])
+  assert.equal(decodeHtml(latin1).includes('café'), true)
+  assert.equal(decodeHtml(new TextEncoder().encode('<p>naïve</p>')), '<p>naïve</p>')
+  const fakePandoc = async () => ({ convert: async () => ({ stdout: '', stderr: '' }) })
+  assert.deepEqual(await extractSourceText('empty.html', new TextEncoder().encode('<html></html>'), { loadPandoc: fakePandoc }), { text: null, problem: null, reason: 'empty' })
+  const brokenPandoc = async () => ({ convert: async () => ({ stdout: '', stderr: 'pandoc: bad input' }) })
+  assert.match((await extractSourceText('bad.html', new TextEncoder().encode('<p>x'), { loadPandoc: brokenPandoc })).problem, /could not read its text \(pandoc: bad input\)/)
+  assert.equal(dropPageImages('See ![a chart](x.png) and [![](logo.png)](/home).'), 'See a chart and [](/home).')
 })

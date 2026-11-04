@@ -124,6 +124,188 @@ async function uploadSourceDocument(args, context) {
 }
 
 // ---------------------------------------------------------------------------
+// Source documents from a web address (#318, docs/adr/0071)
+// ---------------------------------------------------------------------------
+
+// Whether gantry serve offers adding by address (its operator's GANTRY_SOURCE_FETCH_DISABLED off switch), asked once per gantry client
+// and kept briefly, like the workspace classification, so a burst of MCP requests asks once. Anything but a clear "on" leaves the tools
+// out: a server that can't say has nothing to fetch with.
+const FETCH_STATUS_TTL_MS = 30_000
+const fetchStatusCache = new WeakMap()
+
+export async function sourceFetchOffered({ gantryClient }) {
+  const cached = fetchStatusCache.get(gantryClient)
+  if (cached && Date.now() - cached.at < FETCH_STATUS_TTL_MS) return cached.enabled
+  let enabled = false
+  try {
+    const res = await gantryClient.request({ path: '/api/sources/fetch' })
+    enabled = res.ok && res.body?.enabled === true
+  } catch {
+    enabled = false
+  }
+  fetchStatusCache.set(gantryClient, { at: Date.now(), enabled })
+  return enabled
+}
+
+// gantry serve fetches the address (every redirect hop checked, 25 MB, the same types); nothing is stored by this call. `{ fetched }` or
+// `{ result }` — a refusal already shaped for return, carrying gantry serve's own sentence for what to do.
+async function fetchAddress(address, { gantryClient }) {
+  const res = await gantryClient.request({ path: '/api/sources/fetch', method: 'POST', body: { address } })
+  if (!res.ok) return { result: errorResult(res.body?.error ?? `gantry serve responded ${res.status}`, { status: res.status, code: res.body?.code }) }
+  if (typeof res.body?.dataBase64 !== 'string') return { result: errorResult('gantry serve returned an unexpected shape fetching that address', res.body) }
+  return { fetched: res.body }
+}
+
+const originOf = (fetched) => ({ address: fetched.address, finalAddress: fetched.finalAddress, fetchedAt: fetched.fetchedAt })
+
+async function addSourceDocumentFromAddress(args, context) {
+  const { address, title, uploadedBy, replaces, slug, ref } = args
+  if (!slug && !ref) return errorResult('Provide "slug" or "ref" to identify the instance.')
+  if (!address) return errorResult('Provide "address" — the web address of the page or document, starting https://.')
+  const { fetched, result: refused } = await fetchAddress(address, context)
+  if (refused) return refused
+  const { res, result } = await callInstanceRoute(args, context, {
+    path: '/api/instance/sources',
+    method: 'POST',
+    body: {
+      filename: fetched.filename,
+      dataBase64: fetched.dataBase64,
+      // As for an upload: gantry serve reads the text with the browser's own extractors (an HTML page with Pandoc).
+      extractText: true,
+      title: title ?? fetched.title,
+      origin: originOf(fetched),
+      ...(uploadedBy !== undefined ? { uploadedBy } : {}),
+      ...(replaces !== undefined ? { replaces } : {}),
+    },
+  })
+  if (result) return result
+  return okResult(res.body)
+}
+
+async function fetchSourceDocumentAgain(args, context) {
+  const { id, uploadedBy, slug, ref } = args
+  if (!slug && !ref) return errorResult('Provide "slug" or "ref" to identify the instance.')
+  if (!id) return errorResult('Provide "id" — a Source document id from list_source_documents.')
+  const { res: listed, result: listRefused } = await callInstanceRoute(args, context, { path: '/api/instance/sources' })
+  if (listRefused) return listRefused
+  const entry = (listed.body?.entries ?? []).find((candidate) => candidate.id === id)
+  if (!entry) return errorResult(`No Source document "${id}" in this instance.`)
+  if (entry.removedAt) return errorResult(`"${entry.title}" has been removed.`)
+  if (!entry.origin?.address) return errorResult(`"${entry.title}" was uploaded, not fetched from a web address, so there is nothing to fetch again.`)
+  // As in the panel: only the newest copy is fetched again, so one page keeps one line of replacements. Asked before fetching, so a refused
+  // call costs no fetch; gantry serve's fetch-again route refuses it too (web/lib/sourceDocuments.js fetchAgainRefusal), whoever calls it.
+  const newer = (listed.body?.entries ?? []).filter((candidate) => candidate.replaces === id).sort((a, b) => String(b.uploadedAt ?? '').localeCompare(String(a.uploadedAt ?? '')))[0]
+  if (newer) {
+    return errorResult(`"${entry.title}" (${entry.id}) has already been replaced by "${newer.title}" (${newer.id}). Fetch again the newest copy instead, so the page keeps one line of replacements.`, { code: 'replaced' })
+  }
+  const { fetched, result: refused } = await fetchAddress(entry.origin.address, context)
+  if (refused) return refused
+  const { res, result } = await callInstanceRoute(args, context, {
+    path: `/api/instance/sources/${encodeURIComponent(id)}/fetch-again`,
+    method: 'POST',
+    body: { filename: fetched.filename, dataBase64: fetched.dataBase64, extractText: true, origin: originOf(fetched), ...(uploadedBy !== undefined ? { uploadedBy } : {}) },
+  })
+  if (result) return result
+  if (res.body?.unchanged) return okResult({ ...res.body, note: `Unchanged since ${entry.origin.fetchedAt}: nothing was added and no Field is flagged.` })
+  return okResult({ ...res.body, note: `The page changed since ${entry.origin.fetchedAt}. The new copy was added as "${res.body?.entry?.id}", which replaces "${id}"; the Fields that drew on "${id}" are now flagged Out of date (see get_instance).` })
+}
+
+// ---------------------------------------------------------------------------
+// Code repositories (#319, docs/adr/0072)
+// ---------------------------------------------------------------------------
+// A code repository is a Source document that points at a Provider repository and branch, read live. gantry serve reads it
+// (POST /api/sources/repository) with the credential this server already holds for the instance's workspace, the same one every other call
+// for it carries; a server workspace has none, so only a public repository can be read there. Nothing of the repository is stored.
+
+/** One read of a file returns at most this many characters, and says where to carry on. */
+export const REPOSITORY_READ_CHARS = 30000
+
+// Calls /api/sources/repository for `repository` with the instance's workspace credential: `{ body }` or `{ result }` (a refusal shaped for return).
+async function callRepositoryRoute(args, { gantryClient }, payload) {
+  const resolved = await resolveWorkspaceOrError(args, { gantryClient })
+  if (resolved.errorResult) return { result: resolved.errorResult }
+  const res = await gantryClient.request({ workspaceId: resolved.workspaceId, path: '/api/sources/repository', method: 'POST', body: payload })
+  if (res.credentialError) return { result: credentialErrorResult(res.credentialError) }
+  if (!res.ok) return { result: errorResult(res.body?.error ?? `gantry serve responded ${res.status}`, { status: res.status, code: res.body?.code }) }
+  return { body: res.body }
+}
+
+// The repository pointer `id` names, from the instance's list: `{ entry }` or `{ result }`.
+async function repositoryEntry(args, context) {
+  if (!args.id) return { result: errorResult('Provide "id" — the id of a code repository Source document, from list_source_documents.') }
+  const { res, result } = await callInstanceRoute(args, context, { path: '/api/instance/sources' })
+  if (result) return { result }
+  const entry = (res.body?.entries ?? []).find((candidate) => candidate.id === args.id)
+  if (!entry) return { result: errorResult(`No Source document "${args.id}" in this instance.`) }
+  if (entry.removedAt) return { result: errorResult(`"${entry.title}" has been removed.`) }
+  if (!entry.repository) return { result: errorResult(`"${entry.title}" is not a code repository. Read it with read_source_document.`) }
+  return { entry }
+}
+
+// The citation of a file at a commit: `[title, path](source:<id>` and the `?path=…&commit=…` gantry serve gave with the read (web/lib/sourceRepository.js writes it, so the form is Gantry's own).
+function repositoryCitation(entry, path, citationQuery) {
+  const label = `${entry.title}, ${path}`.replace(/([\\[\]])/g, '\\$1')
+  return `[${label}](source:${entry.id}${citationQuery ?? ''})`
+}
+
+async function addRepositorySourceDocument(args, context) {
+  const { provider, location, branch, folders, title, uploadedBy, slug, ref } = args
+  if (!slug && !ref) return errorResult('Provide "slug" or "ref" to identify the instance.')
+  if (!provider || !location) return errorResult('Provide "provider" and "location" — the repository, in the shape a workspace\'s location takes.')
+  const wanted = { provider, location, ...(branch ? { branch } : {}) }
+  // gantry serve checks this workspace's credential can read it (and finds its default branch) before anything is kept.
+  const { body: checked, result: refused } = await callRepositoryRoute(args, context, { action: 'check', repository: wanted })
+  if (refused) return refused
+  const repository = { ...wanted, branch: checked.branch, ...(Array.isArray(folders) && folders.length ? { folders } : {}) }
+  const { res, result } = await callInstanceRoute(args, context, {
+    path: '/api/instance/sources',
+    method: 'POST',
+    body: { repository, ...(title !== undefined ? { title } : {}), ...(uploadedBy !== undefined ? { uploadedBy } : {}) },
+  })
+  if (result) return result
+  return okResult({ ...res.body, branch: checked.branch, commit: checked.commit, note: 'Only the pointer is kept: read the repository with list_repository_folder, search_repository and read_repository_file.' })
+}
+
+async function listRepositoryFolder(args, context) {
+  const { entry, result } = await repositoryEntry(args, context)
+  if (result) return result
+  const { body, result: refused } = await callRepositoryRoute(args, context, { action: 'list', repository: entry.repository, path: args.path ?? '' })
+  if (refused) return refused
+  return okResult({ id: entry.id, title: entry.title, ...body })
+}
+
+async function searchRepository(args, context) {
+  const { entry, result } = await repositoryEntry(args, context)
+  if (result) return result
+  if (!args.query) return errorResult('Provide "query" — the text to look for.')
+  const { body, result: refused } = await callRepositoryRoute(args, context, { action: 'search', repository: entry.repository, query: args.query, path: args.path ?? '' })
+  if (refused) return refused
+  return okResult({ id: entry.id, title: entry.title, ...body })
+}
+
+async function readRepositoryFile(args, context) {
+  const { entry, result } = await repositoryEntry(args, context)
+  if (result) return result
+  if (!args.path) return errorResult('Provide "path" — the file, as a path from the root of the repository.')
+  const { body, result: refused } = await callRepositoryRoute(args, context, { action: 'read', repository: entry.repository, path: args.path })
+  if (refused) return refused
+  const start = Math.max(0, Math.min(Number(args.start ?? 0) || 0, body.text.length))
+  const end = Math.min(body.text.length, start + REPOSITORY_READ_CHARS)
+  return okResult({
+    id: entry.id,
+    title: entry.title,
+    path: body.path,
+    commit: body.commit,
+    cite: repositoryCitation(entry, body.path, body.citationQuery),
+    start,
+    end,
+    total: body.text.length,
+    ...(end < body.text.length ? { next: end } : {}),
+    text: body.text.slice(start, end),
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Decisions logs
 // ---------------------------------------------------------------------------
 
@@ -192,7 +374,7 @@ export const tools = [
     description:
       '1. Lists an instance\'s Source documents — the evidence (client briefs, standards, spreadsheets, PDFs, pictures) the architect uploaded for the AI interview to draw on. Read them before you draft, so a figure or a name comes from a document and not from you. ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". ' +
-      '3. Each document carries its "id" (cite it in content as [Title, p. 4](source:<id>)), "title", "filename", "size", "uploadedBy", "uploadedAt" and "hasText" (false for a picture and for a scanned PDF). A document a newer one replaces carries "replacedBy"; the newer one carries "replaces". The older one stays citable. A "removed" document is kept in the list so a citation of it still shows its title, but it can no longer be read. ' +
+      '3. Each document carries its "id" (cite it in content as [Title, p. 4](source:<id>)), "title", "filename", "size", "uploadedBy", "uploadedAt" and "hasText" (false for a picture and for a scanned PDF). One added from a web address also carries its "origin": { address, finalAddress, fetchedAt }. A code repository carries "repository": { provider, location, branch, folders? } instead of a file: read it with list_repository_folder, search_repository and read_repository_file. A document a newer one replaces carries "replacedBy"; the newer one carries "replaces". The older one stays citable. A "removed" document is kept in the list so a citation of it still shows its title, but it can no longer be read. ' +
       '4. Also returns "totalBytes", a "warning" once the live documents are past about 100 MB, and the "limits" (25 MB per document). ' +
       '5. Works on server, Azure DevOps and GitHub workspaces; a local workspace\'s files are on the architect\'s computer and are not reachable here. GitLab and Atlassian workspaces take Source documents later.',
     inputSchema: { ...slugRefShape },
@@ -231,6 +413,104 @@ export const tools = [
       replaces: z.string().optional().describe('The id of an older Source document this one replaces.'),
     },
     handler: uploadSourceDocument,
+  },
+  {
+    name: 'add_source_document_from_address',
+    description:
+      '1. Adds a Source document to an instance from a web address, under the same rules as the web app\'s "Add from address": gantry serve fetches the page or document (a public web page, PDF, Word, PowerPoint, spreadsheet, Markdown or text file, or picture, at most 25 MB) and keeps a snapshot of it, never a live link. ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "address" is required. ' +
+      '3. Private, loopback and cloud-metadata addresses are refused, at every redirect, unless the operator allows private addresses for Source documents. A page behind a sign-in, a paywall or a VPN can\'t be fetched: Gantry never takes cookies or passwords for other sites. Each failure (unreachable, a 4xx or 5xx, a time-out, over 25 MB, an unsupported type, a sign-in page) comes back with what to do; pass it on to the architect. ' +
+      '4. The text is read as for upload_source_document (an HTML page to Markdown; its images and scripts are not captured). The entry records its "origin": { address, finalAddress, fetchedAt }. "title" defaults to the page\'s own title; "replaces" and "uploadedBy" work as for upload_source_document. ' +
+      '5. One commit on the current stage\'s branch on an Azure DevOps or GitHub workspace, as for an upload. This is a real write — treat it as final once called. ' +
+      '6. Only listed when the operator has not switched adding by address off.',
+    inputSchema: {
+      ...slugRefShape,
+      address: z.string().min(1).describe('The web address, starting http:// or https://.'),
+      title: z.string().optional().describe("Display title; defaults to the page's own title, or the file name."),
+      uploadedBy: z.string().optional().describe('Who is adding it, recorded in the manifest.'),
+      replaces: z.string().optional().describe('The id of an older Source document this one replaces.'),
+    },
+    available: sourceFetchOffered,
+    handler: addSourceDocumentFromAddress,
+  },
+  {
+    name: 'fetch_source_document_again',
+    description:
+      '1. Fetches a Source document that was added from a web address (it has an "origin") again, from the address it was added from. Nothing ever refetches on its own: this is the only way. ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" is required (from list_source_documents). ' +
+      '3. If the fetched bytes are identical, nothing is added or flagged and the response says "unchanged": true. If they differ, the new copy is added as a new document that replaces the old one (the old one stays, citable and marked "replaced by"), and the Fields that drew on the old one are flagged Out of date — bring them up to date with the architect. ' +
+      '4. Only the newest copy of a page is fetched again, as in the app: a document that has already been replaced (another document\'s "replaces" names it) is refused. ' +
+      '5. The same address check, limits and failures as add_source_document_from_address. A real write when the page changed — treat it as final once called. ' +
+      '6. Only listed when the operator has not switched adding by address off.',
+    inputSchema: {
+      ...slugRefShape,
+      id: z.string().describe('The Source document id, from list_source_documents. It must have an "origin" and be the newest copy: one another document "replaces" is refused, so fetch that newer one again instead.'),
+      uploadedBy: z.string().optional().describe('Who is fetching it again, recorded on the new document if the page changed.'),
+    },
+    available: sourceFetchOffered,
+    handler: fetchSourceDocumentAgain,
+  },
+  {
+    name: 'add_repository_source_document',
+    description:
+      '1. Adds a code repository to an instance as a Source document: a pointer to a Provider repository and branch that is read live, never a copy. Nothing from the repository is stored in the instance. ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". "provider" is "github", "azure-devops", "gitlab" or "atlassian" (Bitbucket); "location" is the repository in the shape a workspace location takes: { owner, repository } (GitHub, Bitbucket), { organization, project, repository } (Azure DevOps) or { namespace, repository } (GitLab), with an optional "baseUrl" for a self-hosted server this Gantry accepts. ' +
+      '3. "branch" defaults to the repository\'s default branch; "folders" narrows it to some folders. The repository is read with the credential this MCP server holds for the instance\'s workspace (none on a server workspace, so only a public repository there). If it cannot read the repository the call is refused with a sentence saying so; pass it on to the architect. ' +
+      '4. The response carries the "entry" (its "id"), the "branch" and the "commit" it stands at now. Read it with list_repository_folder, search_repository and read_repository_file. ' +
+      '5. One commit of the manifest on the current stage\'s branch on an Azure DevOps or GitHub workspace. This is a real write — treat it as final once called.',
+    inputSchema: {
+      ...slugRefShape,
+      provider: z.enum(['github', 'azure-devops', 'gitlab', 'atlassian']).describe('The repository\'s Provider ("atlassian" is Bitbucket).'),
+      location: z.record(z.string()).describe('The repository, as a workspace location names it, e.g. { "owner": "acme", "repository": "billing-api" }.'),
+      branch: z.string().optional().describe('The branch to follow; defaults to the repository\'s default branch.'),
+      folders: z.array(z.string()).optional().describe('Optional: only these folders of the repository, e.g. ["services/orders", "infra"].'),
+      title: z.string().optional().describe('Display title; defaults to the repository\'s name.'),
+      uploadedBy: z.string().optional().describe('Who is adding it, recorded in the manifest.'),
+    },
+    handler: addRepositorySourceDocument,
+  },
+  {
+    name: 'list_repository_folder',
+    description:
+      '1. Lists the files and folders in a folder of a code repository Source document, at its branch\'s latest commit. ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" is the repository\'s Source document id; "path" is a folder from the root ("" or left out for the top). ' +
+      '3. Vendored code, build output and binaries are never listed, nor anything outside the folders the pointer is narrowed to. The response names the "commit" it was read at.',
+    inputSchema: {
+      ...slugRefShape,
+      id: z.string().describe('The code repository\'s Source document id, from list_source_documents.'),
+      path: z.string().optional().describe('A folder path from the root of the repository.'),
+    },
+    handler: listRepositoryFolder,
+  },
+  {
+    name: 'search_repository',
+    description:
+      '1. Searches a code repository Source document for text (case-insensitive) in its file names and contents, at its branch\'s latest commit. ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" and "query" are required; "path" searches under one folder only. ' +
+      '3. Returns "matches" ({ path, line, text }, or just { path } when the file name matches), "filesSearched", and "truncated" when it stopped early. Skips vendored code, build output and binaries. Read a file with read_repository_file before you rely on it.',
+    inputSchema: {
+      ...slugRefShape,
+      id: z.string().describe('The code repository\'s Source document id, from list_source_documents.'),
+      query: z.string().min(2).describe('The text to look for.'),
+      path: z.string().optional().describe('Optional: search only under this folder.'),
+    },
+    handler: searchRepository,
+  },
+  {
+    name: 'read_repository_file',
+    description:
+      '1. Reads one file of a code repository Source document at its branch\'s latest commit — what Gantry\'s own AI reads. ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" and "path" are required. ' +
+      `3. Returns at most ${REPOSITORY_READ_CHARS.toLocaleString('en-US')} characters from "start" (default 0), with "total" and, when there is more, "next" to carry on from. ` +
+      '4. The response names the "commit" it was read at and gives "cite": the citation to write in content for a fact from this file, [title, path](source:<id>?path=…&commit=…). Cite exactly that, so the Field is flagged Out of date only when this file really changes. ' +
+      '5. Vendored code, build output, binaries and files over 1 MB are refused with the reason.',
+    inputSchema: {
+      ...slugRefShape,
+      id: z.string().describe('The code repository\'s Source document id, from list_source_documents.'),
+      path: z.string().min(1).describe('The file path from the root of the repository.'),
+      start: z.number().int().nonnegative().optional().describe('The character to start reading from; defaults to 0.'),
+    },
+    handler: readRepositoryFile,
   },
   {
     name: 'read_decisions_log',

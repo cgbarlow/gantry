@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { showFields, showSourcesAndDecisions } from './helpers/referenceView.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { exampleModuleText } from './helpers/fixtureModules.js'
 import { pngImage } from './helpers/sourceFixtures.js'
@@ -30,6 +31,7 @@ async function withPage(fn) {
 }
 
 const openPanel = async (page) => {
+  await showSourcesAndDecisions(page)
   const panel = page.locator('[data-testid="source-documents"]')
   await panel.waitFor({ timeout: 15_000 })
   if (!(await panel.evaluate((el) => el.open))) await panel.locator('[data-testid="source-documents-summary"]').click()
@@ -104,6 +106,9 @@ test('server workspace: a citation opens the document, a removed one keeps its w
         assert.match(opened.url(), /^blob:/)
         assert.equal(await opened.locator('body').innerText(), NOTES_TEXT)
         await opened.close()
+        // #320: a citation leads into the Source documents, so Sources & decisions is on.
+        assert.equal(await page.getByTestId('reference-toggle').getAttribute('aria-pressed'), 'true')
+        assert.equal(await page.locator('main#modules').isVisible(), false)
 
         // The panel offers the citation to paste, and Use as image for a PNG or JPEG only.
         const panel = await openPanel(page)
@@ -244,7 +249,9 @@ test('local workspace: a citation opens the document from the folder, Use as ima
       // Before the document is added, the citation names nothing the Instance has.
       const panel = await openPanel(page)
       await panel.locator('[data-testid="source-documents-empty"]').waitFor()
+      await showFields(page)
       await page.locator('.cm-vsource-missing[data-source-id="notes"]').first().waitFor({ timeout: 15_000 })
+      await showSourcesAndDecisions(page)
 
       const marker = 'UNIQUE-CITED-DOCUMENT-MARKER-9921'
       const input = panel.locator('[data-testid="source-documents-input"]')
@@ -256,6 +263,7 @@ test('local workspace: a citation opens the document from the folder, Use as ima
       await rowFor(panel, 'Unrelated').waitFor()
 
       // Now the same citation is a link, and clicking it opens the document kept in the folder.
+      await showFields(page)
       const live = page.locator('.cm-vsource[data-source-id="notes"]').first()
       await live.waitFor({ timeout: 15_000 })
       await live.locator('span').first().click() // the words themselves, as a person clicks them

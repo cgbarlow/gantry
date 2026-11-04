@@ -86,6 +86,8 @@ test('a ```mermaid fence renders as an SVG in the preview, and a WASM Render emb
     try {
       const page = await browser.newPage()
       page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      // The browser keeps only 250 resource timings by default, and Gantry's own modules alone come close to that on first load.
+      await page.addInitScript(() => performance.setResourceTimingBufferSize(2000))
       const consoleErrors = []
       page.on('pageerror', (err) => consoleErrors.push(String(err)))
 

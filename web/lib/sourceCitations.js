@@ -4,16 +4,24 @@
 //
 //     [Client brief, p. 4](source:client-brief)
 //
+// #319 (docs/adr/0072): a citation of a code repository may carry the file and the commit it was read at after the id, as a query
+// (web/lib/sourceRepository.js): `[orders service](source:billing-api?path=src/orders.ts&commit=3f2a9c1…)`. Every other citation is unchanged.
+//
 // In the editor the link is clickable and opens the document (web/app.js's renderPreview). Word readers usually have no repo access, so the Word render prints it as plain "(Client brief, p. 4)" with no hyperlink. The exported `.md` keeps the link as written, as it keeps a diagram caption's syntax. Only a link is a citation: an image (`![…](source:…)`) is not, and neither is anything inside a code span or a fenced code block.
 //
-// An Artefact whose Definition sets `source-appendix: true` ends with a Sources list of the documents it cites: each with its title, original filename and upload date. A removed document is still listed, marked removed. With the key off (its default) there is no list.
+// An Artefact whose Definition sets `source-appendix: true` ends with a Sources list of the documents it cites: each with its title, original filename and upload date (or, #318, for a page fetched from a web address, its address and "retrieved <date>"). A removed document is still listed, marked removed. With the key off (its default) there is no list.
+//
+// #319: a repository's row gives its title, its web address, its branch and the commits the Artefact cites it at.
 //
 // Pure (no DOM, no Node built-ins), so the server's compile step (lib/render.js), the Definition checks (lib/definition.js, web/lib/localStatus.js) and the browser (web/app.js) share one copy of the syntax, as web/lib/diagramCaptions.js does.
+
+import { isRepositorySource, normalizeSourceRepository, parseSourceAddress, repositoryCitationQuery, repositoryWebAddress, shortCommit } from './sourceRepository.js'
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/
 
 // Either a code span (kept as it is) or a citation. A code span's backtick run is matched with its own length, so ``a `b` c`` is one span. The link text may hold backslash escapes (`\]`) and may not span a line.
-const CITATION_OR_CODE = /(`+)(?:(?!\1)[\s\S])*?\1(?!`)|(?<!!)\[((?:[^\]\\\n]|\\.)*)\]\(source:([A-Za-z0-9][A-Za-z0-9_-]*)\)/g
+// #319: the id may be followed by `?path=…&commit=…` (a repository's file and commit).
+const CITATION_OR_CODE = /(`+)(?:(?!\1)[\s\S])*?\1(?!`)|(?<!!)\[((?:[^\]\\\n]|\\.)*)\]\(source:([A-Za-z0-9][A-Za-z0-9_-]*)((?:\?[^\s)]*)?)\)/g
 
 /** Runs `change(segment)` over the parts of `markdown` that are not fenced code blocks, and leaves the fenced blocks alone. */
 function mapOutsideFences(markdown, change) {
@@ -44,20 +52,32 @@ function mapOutsideFences(markdown, change) {
 
 const unescapeText = (text) => text.replace(/\\(.)/g, '$1')
 
+// A repository citation's `{ path?, commit? }`, from the query after its id.
+const locationOf = (id, query) => {
+  if (!query) return {}
+  const { id: _id, ...rest } = parseSourceAddress(`source:${id}${query}`) ?? {}
+  return rest
+}
+
 function replaceCitations(markdown, replace) {
   return mapOutsideFences(markdown, (segment) =>
-    segment.replace(CITATION_OR_CODE, (match, tick, text, id) => (tick ? match : replace({ match, text, id })))
+    segment.replace(CITATION_OR_CODE, (match, tick, text, id, query) => (tick ? match : replace({ match, text, id, ...locationOf(id, query) })))
   )
 }
 
-/** Every citation in `markdown`, in order: `[{ id, text }]` with the link text as the author wrote it (escapes removed). */
+/** Every citation in `markdown`, in order: `[{ id, text, path?, commit? }]` with the link text as the author wrote it (escapes removed); `path` and `commit` (#319) only on a repository citation that names them. */
 export function findSourceCitations(markdown) {
   const found = []
-  replaceCitations(markdown, ({ match, text, id }) => {
-    found.push({ id, text: unescapeText(text) })
+  replaceCitations(markdown, ({ match, text, id, path, commit }) => {
+    found.push({ id, text: unescapeText(text), ...(path ? { path } : {}), ...(commit ? { commit } : {}) })
     return match
   })
   return found
+}
+
+/** #319: the commits `markdown` cites document `id` at, in the order first cited. */
+export function citedCommits(markdown, id) {
+  return [...new Set(findSourceCitations(markdown).filter((c) => c.id === id && c.commit).map((c) => c.commit))]
 }
 
 /** The distinct ids `markdown` cites, in the order they are first cited. */
@@ -76,10 +96,11 @@ export function sourceCitationsForWord(markdown, titleFor) {
   })
 }
 
-/** The citation to paste into a field for a document: `[Client brief](source:client-brief)`. */
-export function sourceCitationFor(entry) {
-  const title = String(entry?.title ?? entry?.id ?? '').replace(/([\\[\]])/g, '\\$1')
-  return `[${title}](source:${entry.id})`
+/** The citation to paste into a field for a document: `[Client brief](source:client-brief)`. #319: for a repository, `at` (`{ path, commit }`) names the file and the commit it was read at, and the file is the link's text. */
+export function sourceCitationFor(entry, at = {}) {
+  const label = at.path ? `${entry?.title ?? entry?.id}, ${at.path}` : (entry?.title ?? entry?.id)
+  const title = String(label ?? '').replace(/([\\[\]])/g, '\\$1')
+  return `[${title}](source:${entry.id}${repositoryCitationQuery(at)})`
 }
 
 /**
@@ -121,17 +142,27 @@ const cell = (text) => String(text ?? '').replace(/\r?\n/g, ' ').replace(/\\/g, 
 export const SOURCE_APPENDIX_HEADING = 'Sources'
 
 /**
- * The Sources list an Artefact ends with: a heading and a table of the documents `markdown` cites, in the order they are first cited, each with its title, original filename and upload date. A removed document is listed too, marked "(removed)". A cited id the manifest does not list is left out (there is nothing to say about it), and `''` is returned when nothing is left, so an Artefact that cites nothing ends exactly as it did.
+ * The Sources list an Artefact ends with: a heading and a table of the documents `markdown` cites, in the order they are first cited, each with its title, original filename and upload date. #318: a document fetched from a web address (it has an `origin`) shows the address and "retrieved <date>" in place of the filename and upload date. A removed document is listed too, marked "(removed)". A cited id the manifest does not list is left out (there is nothing to say about it), and `''` is returned when nothing is left, so an Artefact that cites nothing ends exactly as it did.
  *
  * @param {string} markdown  the compiled text of the Artefact
- * @param {{ id: string, title?: string, filename?: string, uploadedAt?: string, removedAt?: string }[]} entries  the Instance's manifest
+ * @param {{ id: string, title?: string, filename?: string, uploadedAt?: string, removedAt?: string, origin?: { address: string, fetchedAt: string } }[]} entries  the Instance's manifest
  */
 export function buildSourceAppendix(markdown, entries) {
   const byId = new Map((entries ?? []).map((e) => [e.id, e]))
   const rows = citedSourceIds(markdown)
     .map((id) => byId.get(id))
     .filter(Boolean)
-    .map((e) => `| ${cell(e.title || e.id)}${e.removedAt ? ' (removed)' : ''} | ${cell(e.filename)} | ${appendixDate(e.uploadedAt)} |`)
+    .map((e) => {
+      const title = `${cell(e.title || e.id)}${e.removedAt ? ' (removed)' : ''}`
+      if (isRepositorySource(e)) {
+        // #319: a code repository: its address, its branch and the commits this Artefact cites it at.
+        const repository = normalizeSourceRepository(e.repository)
+        const commits = citedCommits(markdown, e.id).map(shortCommit)
+        return `| ${title} | ${cell(repositoryWebAddress(repository))} | branch ${cell(repository.branch)}${commits.length ? `, commit${commits.length === 1 ? '' : 's'} ${cell(commits.join(', '))}` : ''} |`
+      }
+      if (typeof e.origin?.address === 'string' && e.origin.address) return `| ${title} | ${cell(e.origin.address)} | retrieved ${appendixDate(e.origin.fetchedAt)} |`
+      return `| ${title} | ${cell(e.filename)} | ${appendixDate(e.uploadedAt)} |`
+    })
   if (!rows.length) return ''
   return `# ${SOURCE_APPENDIX_HEADING}\n\n| Document | File | Added |\n| --- | --- | --- |\n${rows.join('\n')}\n`
 }

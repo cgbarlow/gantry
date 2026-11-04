@@ -5,6 +5,7 @@ import { createServer as createHttpServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { showSourcesAndDecisions } from './helpers/referenceView.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { createInstance, readModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
@@ -238,6 +239,7 @@ test('server workspace: a drafted Field is edited in place, the AI changes it on
 
           // The editor's read-only panel shows the hand edit.
           await page.click('[data-testid="interview-back"]')
+          await showSourcesAndDecisions(page)
           await page.waitForSelector('[data-testid="decisions-log-panel"]')
           assert.match(await page.textContent('[data-testid="decisions-latest"]'), /edited .* by hand/)
           assert.equal(await page.locator('[data-testid="unsaved-ai-drafts"]').count(), 0, 'saved, so no banner')

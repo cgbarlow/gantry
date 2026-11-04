@@ -20,6 +20,9 @@
 // content is *drawn from*. They have separate folders, separate manifests and separate routes, and nothing here touches
 // `assets/`.
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
+import { defaultRepositoryTitle, isRepositorySource, normalizeSourceRepository } from './sourceRepository.js'
+
+export { isRepositorySource }
 
 export const SOURCES_FOLDER = 'sources'
 export const SOURCE_MANIFEST_PATH = 'sources/manifest.yaml'
@@ -50,6 +53,46 @@ export const SOURCE_FILE_KINDS = Object.freeze({
 
 export const SOURCE_FILE_EXTENSIONS = Object.freeze(Object.values(SOURCE_FILE_KINDS).flat())
 
+/**
+ * The media type each extension an upload takes is served (and, #318, recognised when fetched) as: the one table the download headers
+ * (lib/sourceDocuments.js) and the fetch from a web address (lib/sourceFetch.js) both read, so the two can never take different types.
+ */
+export const SOURCE_MEDIA_TYPES = Object.freeze({
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pdf': 'application/pdf',
+  '.md': 'text/markdown; charset=utf-8',
+  '.markdown': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8',
+  '.tsv': 'text/tab-separated-values; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+})
+
+// How each kind is named when Gantry says what it takes.
+const SOURCE_KIND_LABELS = { word: 'Word', powerpoint: 'PowerPoint', spreadsheet: 'spreadsheets', pdf: 'PDFs', text: 'Markdown and text files', image: 'images' }
+
+/** "Word (.docx), PowerPoint (.pptx), …": every kind an upload takes, with its extensions, built from SOURCE_FILE_KINDS so the sentence can never fall behind it. */
+export function sourceAcceptedTypes() {
+  const parts = Object.entries(SOURCE_FILE_KINDS).map(([kind, extensions]) => `${SOURCE_KIND_LABELS[kind] ?? kind} (${extensions.join(', ')})`)
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)}` : parts.join('')
+}
+
+/**
+ * #318 (docs/adr/0071): the kinds a document fetched from a web address may also be, beyond what an upload takes. An HTML page is kept as
+ * its HTML and read to Markdown with Pandoc (web/lib/sourceExtract.js); its images and scripts are not captured. An HTML file is never
+ * taken as an upload, so uploads behave exactly as before.
+ */
+export const FETCHED_FILE_KINDS = Object.freeze({ html: ['.html', '.htm'] })
+
+/** The media type a fetched-only kind arrives as. Never used to serve one: a stored page always downloads as `application/octet-stream`. */
+export const FETCHED_MEDIA_TYPES = Object.freeze({ '.html': 'text/html' })
+
 /** The `accept` value for the upload's file picker. */
 export const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.join(',')
 
@@ -60,22 +103,23 @@ export function sourceFileExtension(filename) {
   return dot > 0 ? name.slice(dot).toLowerCase() : ''
 }
 
-/** The kind a filename's extension names (a key of SOURCE_FILE_KINDS), or null when Gantry does not take that type. */
+/** The kind a stored document's filename names (a key of SOURCE_FILE_KINDS, or `html` for a page fetched from a web address), or null when Gantry does not take that type. */
 export function sourceFileKind(filename) {
   const ext = sourceFileExtension(filename)
-  for (const [kind, extensions] of Object.entries(SOURCE_FILE_KINDS)) {
+  for (const [kind, extensions] of [...Object.entries(SOURCE_FILE_KINDS), ...Object.entries(FETCHED_FILE_KINDS)]) {
     if (extensions.includes(ext)) return kind
   }
   return null
 }
 
-/** The sentence shown when a file of a type Gantry cannot read is picked, or null when it can. */
-export function sourceFileTypeProblem(filename) {
-  if (sourceFileKind(filename)) return null
+/** The sentence shown when a file of a type Gantry cannot read is picked, or null when it can. `fetched` (#318) also takes an HTML page, which only ever comes from a web address. */
+export function sourceFileTypeProblem(filename, { fetched = false } = {}) {
+  const kind = sourceFileKind(filename)
+  if (kind && (fetched || SOURCE_FILE_KINDS[kind])) return null
   const ext = sourceFileExtension(filename)
   const legacy = { '.doc': '.docx', '.ppt': '.pptx', '.xls': '.xlsx' }[ext]
   const hint = legacy ? ` Save it as ${legacy} and upload that.` : ''
-  return `Gantry can't take ${ext ? `${ext} files` : 'that file'}.${hint} It takes Word (.docx), PowerPoint (.pptx), spreadsheets (.xlsx, .csv, .tsv), PDFs, Markdown and text files, and images (.png, .jpg, .gif, .webp).`
+  return `Gantry can't take ${ext ? `${ext} files` : 'that file'}.${hint} It takes ${sourceAcceptedTypes()}.`
 }
 
 /** A problem with this Source document's weight, as a sentence naming the limit, or null when it is fine to upload. */
@@ -246,7 +290,55 @@ export function paginateSourceText(text, filename) {
 // --- the manifest ---------------------------------------------------------------------------------------------------
 
 // #297: `replaces` (on the NEW document) is the id of the older one it supersedes, and `textChangedAt` the time the text read from the document last became different from what it was. Both are kept only when set, so a manifest that never used them is unchanged byte for byte.
-const ENTRY_KEYS = ['id', 'filename', 'title', 'uploadedBy', 'uploadedAt', 'size', 'text', 'readVisually', 'replaces', 'textChangedAt', 'removedBy', 'removedAt']
+// #318: `origin` is where a document fetched from a web address came from; an upload has none, and its entry is unchanged byte for byte.
+// #319: `repository` makes the entry a pointer to a code repository (web/lib/sourceRepository.js): it has no `filename`, `size` or `text`, because nothing from the repository is kept. Entries without it are kept files, unchanged byte for byte.
+const ENTRY_KEYS = ['id', 'filename', 'title', 'uploadedBy', 'uploadedAt', 'size', 'text', 'readVisually', 'origin', 'repository', 'replaces', 'textChangedAt', 'removedBy', 'removedAt']
+
+const isWebAddress = (value) => typeof value === 'string' && /^https?:\/\/\S+$/i.test(value.trim())
+
+/**
+ * #318 (docs/adr/0071): a fetched document's **origin**, `{ address, finalAddress, fetchedAt }` in that order: the address the architect gave, the final address after redirects (the given one when there were none) and when it was fetched. `null` for anything that is not one, so an entry without a usable origin is an upload.
+ */
+export function normalizeSourceOrigin(origin) {
+  if (!origin || typeof origin !== 'object' || !isWebAddress(origin.address)) return null
+  const fetchedAt = typeof origin.fetchedAt === 'string' && !Number.isNaN(new Date(origin.fetchedAt).getTime()) ? origin.fetchedAt : null
+  if (!fetchedAt) return null
+  return { address: origin.address.trim(), finalAddress: isWebAddress(origin.finalAddress) ? origin.finalAddress.trim() : origin.address.trim(), fetchedAt }
+}
+
+/** Whether a document was fetched from a web address (it has an origin), and so can be fetched again. */
+export function isFetchedSource(entry) {
+  return normalizeSourceOrigin(entry?.origin) !== null
+}
+
+/**
+ * #318 (docs/adr/0071): why **Fetch again** is not offered for `entry`, as `{ code, status, message }`, or null when it is. `replacedByEntry`
+ * is `replacedByMap(entries)`. One rule for the panel, the store (and so the server route an outside agent calls) and the MCP tool: only the
+ * newest copy of a document fetched from a web address, still kept, is fetched again. An older copy that has been replaced is not, so one
+ * page always has one line of replacements, never two that branch from the same copy.
+ */
+export function fetchAgainRefusal(entry, replacedByEntry) {
+  if (isRemovedSource(entry)) return { code: 'removed', status: 409, message: `"${entry.title}" has been removed.` }
+  if (!isFetchedSource(entry)) {
+    return { code: 'not-fetched', status: 400, message: `"${entry.title}" was uploaded, not fetched from a web address, so there is nothing to fetch again.` }
+  }
+  const newer = replacedByEntry?.get(entry.id)
+  if (newer) {
+    return {
+      code: 'replaced',
+      status: 409,
+      message: `"${entry.title}" (${entry.id}) has already been replaced by "${newer.title}" (${newer.id}). Fetch again the newest copy instead, so the page keeps one line of replacements.`,
+    }
+  }
+  return null
+}
+
+/** Whether two documents' bytes are the same, byte for byte: what **Fetch again** asks before it adds anything. */
+export function sameSourceBytes(a, b) {
+  if (!a || !b || a.byteLength !== b.byteLength) return false
+  for (let i = 0; i < a.byteLength; i++) if (a[i] !== b[i]) return false
+  return true
+}
 
 /** One manifest entry with its keys in a fixed order and only the ones that have a value, so two writers produce the same bytes. */
 export function normalizeSourceEntry(entry) {
@@ -257,6 +349,16 @@ export function normalizeSourceEntry(entry) {
     if (value === '' && key !== 'uploadedBy') continue
     // #292: `readVisually` is kept only while it is on, so a manifest that never used it is unchanged byte for byte.
     if (key === 'readVisually' && value !== true) continue
+    if (key === 'origin') {
+      const origin = normalizeSourceOrigin(value)
+      if (origin) out.origin = origin
+      continue
+    }
+    if (key === 'repository') {
+      const repository = normalizeSourceRepository(value)
+      if (repository) out.repository = repository
+      continue
+    }
     out[key] = value
   }
   return out
@@ -271,7 +373,7 @@ export function parseSourceManifest(text) {
     return []
   }
   if (!Array.isArray(parsed)) return []
-  return parsed.filter((e) => e && typeof e.id === 'string' && typeof e.filename === 'string').map(normalizeSourceEntry)
+  return parsed.filter((e) => e && typeof e.id === 'string' && (typeof e.filename === 'string' || isRepositorySource(e))).map(normalizeSourceEntry)
 }
 
 export function stringifySourceManifest(entries) {
@@ -385,6 +487,14 @@ export function createSourceStore(io, options = {}) {
     return entry
   }
 
+  // #319: a repository pointer keeps no file and no text, so nothing that reads, re-reads or re-fetches one applies to it.
+  function keptFile(entry, doing) {
+    if (isRepositorySource(entry)) {
+      throw new SourceDocumentError(`"${entry.title}" is a code repository, read live from its Provider: nothing of it is kept here to ${doing}.`, { code: 'repository', status: 400 })
+    }
+    return entry
+  }
+
   async function writeTextFor(entry, text) {
     const path = sourceTextPath(entry.filename)
     if (text === null || text === undefined || text === '') {
@@ -395,20 +505,22 @@ export function createSourceStore(io, options = {}) {
     return true
   }
 
-  return {
+  const store = {
     /** `{ entries, totalBytes, warning }`: every entry, removed ones included (they show their title where a citation still names them). */
     async list() {
       return summary((await readManifest()).entries)
     },
 
     /**
-     * Adds a document: always a new one with its own id and stored name, even when it is named like an existing one. `data` is `{ filename, bytes, text?, title?, uploadedBy?, replaces? }`; `replaces` (#297) is the id of an older document this one supersedes, recorded on the new entry (the older one stays as it is and shows "replaced by"). Refused when it is empty or over MAX_SOURCE_BYTES (the server's half of the browser's own check), or when `text` is past MAX_SOURCE_TEXT_CHARS. Returns `{ entry, totalBytes, warning }`.
+     * Adds a document: always a new one with its own id and stored name, even when it is named like an existing one. `data` is `{ filename, bytes, text?, title?, uploadedBy?, replaces?, origin? }`; `replaces` (#297) is the id of an older document this one supersedes, recorded on the new entry (the older one stays as it is and shows "replaced by"); `origin` (#318) is `{ address, finalAddress, fetchedAt }` for a document fetched from a web address. Refused when it is empty or over MAX_SOURCE_BYTES (the server's half of the browser's own check), when `text` is past MAX_SOURCE_TEXT_CHARS, or when an `origin` is given that is not one. Returns `{ entry, totalBytes, warning }`.
      */
     async upload(data) {
       const bytes = data.bytes
       const size = bytes?.byteLength ?? 0
       const sizeProblem = sourceSizeProblem(size, data.filename ? cleanSourceFilename(data.filename) : undefined)
       if (sizeProblem) throw new SourceDocumentError(sizeProblem, { code: size > MAX_SOURCE_BYTES ? 'too-large' : 'empty', status: size > MAX_SOURCE_BYTES ? 413 : 400 })
+      const origin = data.origin === undefined || data.origin === null ? undefined : normalizeSourceOrigin(data.origin)
+      if (origin === null) throw new SourceDocumentError('A fetched document\'s origin needs the web address it came from and when it was fetched.', { code: 'bad-origin', status: 400 })
       const text = typeof data.text === 'string' && data.text !== '' ? data.text : null
       if (text !== null && text.length > MAX_SOURCE_TEXT_CHARS) {
         throw new SourceDocumentError(`The text read from this document is ${text.length.toLocaleString('en-US')} characters, over the ${MAX_SOURCE_TEXT_CHARS.toLocaleString('en-US')} limit.`, { code: 'text-too-large', status: 413 })
@@ -421,7 +533,7 @@ export function createSourceStore(io, options = {}) {
       const replaces = typeof data.replaces === 'string' && data.replaces.trim() ? data.replaces.trim() : undefined
       const result = await mutateManifest((entries) => {
         if (replaces !== undefined) liveEntry(entries, replaces)
-        const filename = uniqueSourceFilename(cleaned, entries.map((e) => e.filename))
+        const filename = uniqueSourceFilename(cleaned, entries.map((e) => e.filename).filter(Boolean))
         const id = sourceIdFor(cleaned, entries.map((e) => e.id))
         created = normalizeSourceEntry({
           id,
@@ -431,6 +543,7 @@ export function createSourceStore(io, options = {}) {
           uploadedAt: now(),
           size,
           text: text === null ? undefined : sourceTextRef(filename),
+          origin,
           replaces,
         })
         return { entries: [...entries, created] }
@@ -447,6 +560,43 @@ export function createSourceStore(io, options = {}) {
         throw err
       }
       return { entry: created, ...summary(result.entries) }
+    },
+
+    /**
+     * #319 (docs/adr/0072): adds a pointer to a code repository. `data` is `{ repository, title?, uploadedBy? }`, `repository` being `{ provider, location, branch, folders? }` (web/lib/sourceRepository.js). Only the manifest entry is written: nothing from the repository is stored. Its id comes from the repository's name, `-2` added when taken. Whether the architect can read the repository is checked before this (lib/repositorySource.js); the store keeps the pointer. Returns `{ entry, totalBytes, warning }`.
+     */
+    async addRepository(data) {
+      const repository = normalizeSourceRepository(data?.repository)
+      if (!repository) {
+        throw new SourceDocumentError('A code repository needs its Provider, its location (as for a workspace) and a branch.', { code: 'bad-repository', status: 400 })
+      }
+      const title = (typeof data.title === 'string' && data.title.trim()) || defaultRepositoryTitle(repository)
+      let created
+      const result = await mutateManifest((entries) => {
+        created = normalizeSourceEntry({
+          id: sourceIdFor(defaultRepositoryTitle(repository).replace(/\./g, '-'), entries.map((e) => e.id)),
+          title,
+          uploadedBy: (data.uploadedBy ?? '').trim(),
+          uploadedAt: now(),
+          repository,
+        })
+        return { entries: [...entries, created] }
+      })
+      return { entry: created, ...summary(result.entries) }
+    },
+
+    /**
+     * #318 (docs/adr/0071): **Fetch again** for document `id`, which must have been fetched from a web address and not already replaced by a newer copy (`fetchAgainRefusal`, the rule the panel offers the button by). `data` is what the new fetch gave, as for `upload` with its `origin`. When its bytes are the same as the kept document's, nothing is added or flagged and `{ unchanged: true, entry, totalBytes, warning }` comes back, `entry` being the kept one (the panel says "unchanged since" its fetch). Otherwise the new bytes are added as a new document that replaces the old one under the old one's title (the existing Replaced rule, so the Fields that drew on it are flagged Out of date), and `{ unchanged: false, entry, totalBytes, warning }` comes back. `extract()`, when given, is called for the text only once the bytes are known to differ.
+     */
+    async fetchAgain(id, data, { extract } = {}) {
+      const { entries } = await readManifest()
+      const entry = keptFile(liveEntry(entries, id), 'fetch again')
+      const refusal = fetchAgainRefusal(entry, replacedByMap(entries))
+      if (refusal) throw new SourceDocumentError(refusal.message, { code: refusal.code, status: refusal.status })
+      const kept = await io.readBytes(sourceFilePath(entry.filename))
+      if (sameSourceBytes(kept, data.bytes)) return { unchanged: true, entry, ...summary(entries) }
+      const text = extract ? await extract() : data.text
+      return { unchanged: false, ...(await store.upload({ ...data, text, title: entry.title, replaces: id })) }
     },
 
     /** Changes only a document's title. Its id and stored filename never change, and citations already written keep the title they were written with. */
@@ -473,8 +623,11 @@ export function createSourceStore(io, options = {}) {
         removed = normalizeSourceEntry({ ...rest, removedBy: String(removedBy ?? '').trim(), removedAt: now() })
         return { entries: entries.map((e) => (e.id === id ? removed : e)) }
       })
-      await io.remove(sourceFilePath(filename))
-      await io.remove(sourceTextPath(filename))
+      // #319: a repository pointer has no file or text to delete; its entry is all there was.
+      if (filename) {
+        await io.remove(sourceFilePath(filename))
+        await io.remove(sourceTextPath(filename))
+      }
       return removed
     },
 
@@ -484,7 +637,7 @@ export function createSourceStore(io, options = {}) {
         throw new SourceDocumentError(`The text read from this document is ${text.length.toLocaleString('en-US')} characters, over the ${MAX_SOURCE_TEXT_CHARS.toLocaleString('en-US')} limit.`, { code: 'text-too-large', status: 413 })
       }
       const { entries } = await readManifest()
-      const entry = liveEntry(entries, id)
+      const entry = keptFile(liveEntry(entries, id), 'read again')
       // #297: what the text was before, so a re-read that gives the very same text changes nothing downstream.
       const before = entry.text ? ((await io.readText(sourceTextPath(entry.filename)))?.text ?? '') : ''
       const has = await writeTextFor(entry, text)
@@ -519,7 +672,7 @@ export function createSourceStore(io, options = {}) {
     /** `{ entry, bytes }`, with `bytes` null when the folder no longer holds the file. */
     async readOriginal(id) {
       const { entries } = await readManifest()
-      const entry = liveEntry(entries, id)
+      const entry = keptFile(liveEntry(entries, id), 'download')
       return { entry, bytes: await io.readBytes(sourceFilePath(entry.filename)) }
     },
 
@@ -527,9 +680,10 @@ export function createSourceStore(io, options = {}) {
     async readText(id) {
       const { entries } = await readManifest()
       const entry = liveEntry(entries, id)
-      if (!entry.text) return null
+      if (!entry.text || isRepositorySource(entry)) return null
       const stored = await io.readText(sourceTextPath(entry.filename))
       return stored ? stored.text : null
     },
   }
+  return store
 }

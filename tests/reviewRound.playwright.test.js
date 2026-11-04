@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse as parseYAML } from 'yaml'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { showSourcesAndDecisions } from './helpers/referenceView.js'
 import { withRunningServer, withScratchInstances } from './helpers/lifecycle.js'
 import { seedProviders, withFakeAnthropic } from './helpers/interviewStandIn.js'
 import { RENDER_PROPERTIES, reviewedCopy } from './helpers/reviewedCopyFixture.js'
@@ -129,6 +130,7 @@ async function answerRound(page, except = new Map()) {
 test('server workspace: the review round asks one card per unresolved thread, an accepted edit is made by Gantry, and nothing is saved until the round is', async () => {
   await withReviewServer(async ({ page, base, posts, folder, entry }) => {
     await page.goto(`${base}/instance/${SLUG}`)
+    await showSourcesAndDecisions(page)
     await page.getByTestId('review-copies-panel').waitFor()
     // The editor's panel is the way in from where the comments are listed.
     await page.getByTestId('review-work-through').click()
@@ -343,6 +345,7 @@ test('server workspace: after a review round the Review response list downloads 
 
     // The editor's Review comments panel offers it too, once the manifest says comments are answered.
     await page.goto(`${base}/instance/${SLUG}`)
+    await showSourcesAndDecisions(page)
     await page.getByTestId('review-copies-panel').waitFor()
     await page.getByTestId('review-response').waitFor()
     const [again] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid="review-response-download"]')])
@@ -354,6 +357,7 @@ test('server workspace: after a review round the Review response list downloads 
 test('server workspace: the editor offers no Review response list until a comment has been answered', async () => {
   await withReviewServer(async ({ page, base }) => {
     await page.goto(`${base}/instance/${SLUG}`)
+    await showSourcesAndDecisions(page)
     await page.getByTestId('review-copies-panel').waitFor()
     assert.equal(await page.locator('[data-testid="review-response"]').count(), 0)
   })
