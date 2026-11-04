@@ -17,6 +17,21 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.14.1 — 2026-11-04
+
+A fix for code repositories as Source documents. Operators should allow outbound HTTPS to one more GitHub address.
+
+### Fixed
+
+- **A public GitHub repository is no longer refused as "you can't read it without a token"** (#325).
+  - **What went wrong.** GitHub lets a server make only 60 requests an hour without a token, counted per server address, and a hosted server often shares that address. One search by the AI could use the whole allowance. GitHub's "limit reached" answer was then shown as if the repository couldn't be read.
+  - **Fewer requests.** Without a token, Gantry now reads a public repository's files from GitHub's raw-file address, which that limit doesn't count. A search lists the whole repository in one request instead of one per folder.
+  - **The real reason.** When a GitHub, Azure DevOps, GitLab or Bitbucket limit is used up, the interview, the Source documents row (**LIMIT REACHED**) and Out of date now say so, with the time it resets. They also say that a token raises the limit; for a public GitHub repository, a fine-grained token with **Public repositories** access and no permissions is enough.
+
+### For operators
+
+- **Allow `raw.githubusercontent.com`.** The server reads public GitHub repositories from there as well as from `api.github.com`. If outbound traffic is restricted, allow both.
+
 ## 0.14.0 — 2026-11-04
 
 More to draw on, and less in the way. An architect can now add a Source document from a web address,
