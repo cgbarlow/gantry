@@ -161,6 +161,14 @@ function openAiMessages(system, messages) {
       } else {
         wire.push({ role: 'user', content: m.text ?? '' })
       }
+      // Two user messages in a row (Gantry's opening and the architect's own, #331; a compacted conversation, #329) are one turn here:
+      // some local models' chat templates refuse a conversation whose roles don't alternate.
+      const [previous, added] = wire.slice(-2)
+      if (wire.length > 1 && previous.role === 'user') {
+        wire.pop()
+        if (typeof previous.content === 'string' && typeof added.content === 'string') previous.content = [previous.content, added.content].filter(Boolean).join('\n\n')
+        else previous.content = [previous.content, added.content].flatMap((c) => (typeof c === 'string' ? (c ? [{ type: 'text', text: c }] : []) : c))
+      }
     } else if (m.role === 'assistant') {
       const entry = { role: 'assistant', content: m.text || (m.toolCalls?.length ? null : '') }
       if (m.toolCalls?.length) {

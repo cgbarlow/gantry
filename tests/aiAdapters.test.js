@@ -228,6 +228,17 @@ test('OpenAI request: Chat Completions with tool_choice auto, streamed usage and
   assert.deepEqual(req.body.messages[3], { role: 'tool', tool_call_id: 'c1', content: 'Cost' })
 })
 
+test('OpenAI request: two user messages in a row (an opening message, a compacted conversation) go as one turn, so roles alternate', () => {
+  const provider = normaliseAiProvider({ type: 'ollama', model: 'm' })
+  const plain = buildChatRequest(provider, { system: 'S', messages: [{ role: 'user', text: 'Gantry opens.' }, { role: 'user', text: 'Focus on hosting.' }, { role: 'assistant', text: 'OK' }, { role: 'user', text: 'Next.' }] })
+  assert.deepEqual(plain.body.messages.map((m) => m.role), ['system', 'user', 'assistant', 'user'])
+  assert.equal(plain.body.messages[1].content, 'Gantry opens.\n\nFocus on hosting.')
+  const withPicture = buildChatRequest(provider, { messages: [{ role: 'user', text: 'Gantry opens.', images: [{ mediaType: 'image/png', data: 'AAAA' }] }, { role: 'user', text: 'Focus on hosting.' }] })
+  assert.deepEqual(withPicture.body.messages.map((m) => m.role), ['user'])
+  assert.deepEqual(withPicture.body.messages[0].content.map((b) => b.type), ['text', 'image_url', 'text'])
+  assert.equal(withPicture.body.messages[0].content[2].text, 'Focus on hosting.')
+})
+
 test('OpenRouter is sent require_parameters so tools are not silently dropped', () => {
   const provider = normaliseAiProvider({ type: 'openrouter', address: 'https://openrouter.ai/api/v1', key: 'k', model: 'x/y', advanced: { topK: 40, reasoningEffort: 'high' } })
   const withTools = buildChatRequest(provider, { messages: [{ role: 'user', text: 'x' }], tools: [TOOL] })
