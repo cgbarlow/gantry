@@ -1,8 +1,8 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { withFlatSystem } from './helpers/aiRequest.js'
+import { cacheBlocks, createAnthropicCache } from './helpers/anthropicCache.js'
 
 // #328 (docs/adr/0073): an AI interview call costs less. The conversation is cached (a moving cache point on the last message, see
 // tests/aiAdapters.test.js), and once a read is more than three AI turns old its text is replaced, in batches worth about 20k tokens, by a
@@ -35,8 +35,8 @@ const definition = () => ({
 const savedNothing = () => [{ id: 'soap', status: 'draft', fields: ['subjective', 'objective', 'assessment', 'plan'].map((id) => ({ id, value: '' })) }]
 
 const sse = (events) => new Response(events.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join(''), { status: 200, headers: { 'content-type': 'text/event-stream' } })
-function anthropicReply({ text, tools = [] }) {
-  const events = [['message_start', { type: 'message_start', message: { id: 'm', type: 'message', role: 'assistant', content: [], usage: { input_tokens: 10, output_tokens: 1 } } }]]
+function anthropicReply({ text, tools = [], usage = {} }) {
+  const events = [['message_start', { type: 'message_start', message: { id: 'm', type: 'message', role: 'assistant', content: [], usage: { input_tokens: 10, output_tokens: 1, ...usage } } }]]
   let index = 0
   if (text) {
     events.push(['content_block_start', { type: 'content_block_start', index, content_block: { type: 'text', text: '' } }])
@@ -251,41 +251,10 @@ test('a model without tools has its old read replies shortened in place too', as
 })
 
 // ---------- a long interview costs at least half as much uncached input ----------
-
-/** The blocks of an Anthropic request in the order the cache sees them, each `{ text, mark }`; `text` leaves the cache point out. */
-function cacheBlocks(raw) {
-  const plain = ({ cache_control, ...rest }) => rest
-  const system = typeof raw.system === 'string' ? [{ type: 'text', text: raw.system }] : raw.system ?? []
-  const blocks = [...(raw.tools ?? []), ...system].map((b) => ({ text: JSON.stringify(plain(b)), mark: Boolean(b.cache_control) }))
-  for (const m of raw.messages) {
-    const content = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content
-    content.forEach((b, i) => blocks.push({ text: (i === 0 ? m.role : '') + JSON.stringify(plain(b)), mark: Boolean(b.cache_control) }))
-  }
-  return blocks
-}
-
-/**
- * The input of a run of requests that is not read from the cache, in tokens (about four characters each), the way Anthropic counts it: a
- * request reads from the cache the longest start of itself that an earlier request wrote at one of its cache points.
- */
-function uncachedTokens(requests) {
-  const written = new Set()
-  let uncached = 0
-  for (const raw of requests) {
-    const hash = createHash('sha256')
-    let chars = 0
-    let cached = 0
-    for (const block of cacheBlocks(raw)) {
-      hash.update(block.text)
-      chars += block.text.length
-      const key = hash.copy().digest('hex')
-      if (written.has(key)) cached = chars
-      if (block.mark) written.add(key)
-    }
-    uncached += (chars - cached) / 4
-  }
-  return uncached
-}
+// The interview is tests/fixtures/long-interview.json, a reconstruction of a long SOAP interview (no real one was recorded). Each answer of
+// the fake Anthropic AI Provider reports the usage the real one would, worked out by tests/helpers/anthropicCache.js from Anthropic's
+// published caching rules (its 20-position lookback included), and the saving is read back from the session's own token count: the
+// numbers the Tokens hover shows. "Before" is the same requests as Gantry sent them before #328, put through a cache of their own.
 
 /** The same requests as Gantry sent them before #328: every read in full, and no cache point in the conversation. */
 function asBefore(requests) {
@@ -306,8 +275,17 @@ function asBefore(requests) {
   })
 }
 
-test('a long interview over a repository sends at least 50% fewer uncached input tokens than before', async () => {
-  const fixture = JSON.parse(readFileSync(new URL('./fixtures/long-interview.json', import.meta.url), 'utf8'))
+/** `raw` without the bridge point: a cache point on the last message only, as before the lookback was handled. */
+function withoutBridge(raw) {
+  const copy = structuredClone(raw)
+  for (const m of copy.messages.slice(0, -1)) if (Array.isArray(m.content)) for (const b of m.content) delete b.cache_control
+  return copy
+}
+
+const fixture = JSON.parse(readFileSync(new URL('./fixtures/long-interview.json', import.meta.url), 'utf8'))
+
+/** Plays the fixture through a session, every file read and search `scale` times as long (a document read is of the range it names); the AI Provider's usage comes from `cache`. */
+async function replay({ scale = 1, cache = createAnthropicCache() } = {}) {
   const sizes = {}
   const searchSizes = {}
   const script = []
@@ -315,39 +293,89 @@ test('a long interview over a repository sends at least 50% fewer uncached input
   for (const exchange of fixture.exchanges) {
     for (const call of exchange.calls) {
       if (call.text) {
-        script.push(anthropicReply({ text: call.text }))
+        script.push((usage) => anthropicReply({ text: call.text, usage }))
         continue
       }
       const tools = (call.reads ?? []).map(([kind, what, chars]) => {
         id++
         if (kind === 'file') {
-          sizes[what] = chars
+          sizes[what] = Math.round(chars * scale)
           return { id: `t${id}`, name: 'read_repository_file', input: { id: fixture.repository.id, path: what } }
         }
         if (kind === 'search') {
-          searchSizes[what] = chars
+          searchSizes[what] = Math.round(chars * scale)
           return { id: `t${id}`, name: 'search_repository', input: { id: fixture.repository.id, query: what } }
         }
         return { id: `t${id}`, name: 'read_source_document', input: { id: fixture.document.id, range: what } }
       })
       for (const field of call.drafts ?? []) tools.push({ id: `t${++id}`, name: 'draft_field', input: { field, value: `What the code shows for ${field}.` } })
-      script.push(() => anthropicReply({ tools }))
+      script.push((usage) => anthropicReply({ tools, usage }))
     }
   }
-  const ai = fakeAi((_request, n) => {
-    const next = script[n]
-    return typeof next === 'function' ? next() : next
+  const reported = []
+  const ai = fakeAi((request, n) => {
+    reported.push(cache.usage(request.raw))
+    return script[n](reported.at(-1))
   })
   const server = fakeServer({ sizes, searchSizes })
   const session = sessionWith(ai, { provider: anthropic(40000), sources: [brief(fixture.document.chars), { ...repository, id: fixture.repository.id, title: fixture.repository.title }], server })
   await session.start()
   for (const exchange of fixture.exchanges.slice(1)) await session.send(exchange.architect)
-  assert.equal(ai.calls.length, script.length, 'every call of the recording was made')
+  assert.equal(ai.calls.length, script.length, 'every call of the interview was made')
+  return { requests: ai.calls.map((c) => c.raw), reported, usage: session.snapshot().usage }
+}
 
-  const requests = ai.calls.map((c) => c.raw)
-  const before = uncachedTokens(asBefore(requests))
-  const after = uncachedTokens(requests)
-  assert.ok(after <= before * 0.5, `uncached input: ${Math.round(before)} tokens before, ${Math.round(after)} now`)
-  const sent = (raw) => JSON.stringify(raw.messages).length
-  assert.ok(sent(requests.at(-1)) < sent(asBefore(requests).at(-1)) / 2, 'the last call carries far less of the conversation too')
+/** The input of a run of requests not read from the cache, by what `cache` reports for each. */
+const uncachedOf = (requests, cache) => requests.map((raw) => cache.usage(raw)).reduce((n, u) => n + u.input_tokens + u.cache_creation_input_tokens, 0)
+
+for (const { scale, collapseToolRuns } of [
+  { scale: 1, collapseToolRuns: false },
+  { scale: 1, collapseToolRuns: true },
+  { scale: 0.5, collapseToolRuns: false },
+  { scale: 2, collapseToolRuns: false },
+  { scale: 0.1, collapseToolRuns: false },
+]) {
+  const how = `${scale === 1 ? 'reads as recorded' : `every file read and search ${scale} times as long`}, ${collapseToolRuns ? 'a run of tool calls counted as one position (the Claude API)' : 'every block a position'}`
+  test(`a long interview over a repository sends at least 50% fewer uncached input tokens than before, by the AI Provider's usage (${how})`, async (t) => {
+    const { requests, reported, usage } = await replay({ scale, cache: createAnthropicCache({ collapseToolRuns }) })
+    const sum = (key) => reported.reduce((n, u) => n + u[key], 0)
+    assert.equal(usage.cacheReadTokens, sum('cache_read_input_tokens'), "the session's count is what the AI Provider reported")
+    assert.equal(usage.inputTokens, sum('input_tokens') + sum('cache_read_input_tokens') + sum('cache_creation_input_tokens'))
+    const after = usage.inputTokens - usage.cacheReadTokens
+    const before = uncachedOf(asBefore(requests), createAnthropicCache({ collapseToolRuns }))
+    t.diagnostic(`uncached input: ${before} tokens before, ${after} now (${Math.round((1 - after / before) * 100)}% fewer)`)
+    assert.ok(after <= before * 0.5, `uncached input: ${before} tokens before, ${after} now`)
+    const sent = (raw) => JSON.stringify(raw.messages).length
+    assert.ok(sent(requests.at(-1)) < sent(asBefore(requests).at(-1)) / 2, 'the last call carries far less of the conversation too')
+  })
+}
+
+test('after a burst of tool calls at once, the next call still reads the whole conversation so far from the cache', async () => {
+  const { requests, reported } = await replay()
+  const blocks = (raw) => cacheBlocks(raw).map((b) => b.text)
+  const tokens = (raw) => Math.round(blocks(raw).join('').length / 4)
+  // The calls that send the results of a burst (nine or more tool calls in the AI's last reply), and that change nothing before them.
+  const afterBurst = requests
+    .map((raw, n) => ({ raw, n }))
+    .filter(({ raw, n }) => {
+      const reply = raw.messages.findLast((m) => m.role === 'assistant')
+      if (!reply || reply.content.filter((b) => b.type === 'tool_use').length < 9) return false
+      const previous = blocks(requests[n - 1])
+      return blocks(raw).slice(0, previous.length).every((text, i) => text === previous[i])
+    })
+  assert.ok(afterBurst.length >= 2, `the interview has bursts to test (${afterBurst.length})`)
+  const stripped = createAnthropicCache()
+  const unbridged = requests.map((raw) => stripped.usage(withoutBridge(raw)))
+  let beyondReach = 0
+  for (const { raw, n } of afterBurst) {
+    assert.ok(reported[n].cache_read_input_tokens >= tokens(requests[n - 1]) - 1, `call ${n} reads everything the previous call sent (${reported[n].cache_read_input_tokens} of ${tokens(requests[n - 1])} tokens)`)
+    assert.ok(raw.messages.flatMap((m) => (Array.isArray(m.content) ? m.content : [])).filter((b) => b.cache_control).length + raw.system.filter((b) => b.cache_control).length <= 4)
+    // Ten or more calls and their results are 20 blocks or more: without the bridge the moving point finds nothing within reach, and the
+    // call reads only the system text from the cache. (Nine and their results are 18: just within reach, and bridged all the same.)
+    if (raw.messages.findLast((m) => m.role === 'assistant').content.filter((b) => b.type === 'tool_use').length < 10) continue
+    beyondReach++
+    const head = Math.round(cacheBlocks(raw).filter((b) => b.type === 'head').reduce((c, b) => c + b.text.length, 0) / 4)
+    assert.ok(unbridged[n].cache_read_input_tokens <= head, `without the bridge point, call ${n} would have read only the system text from the cache (${unbridged[n].cache_read_input_tokens} of ${head} tokens)`)
+  }
+  assert.ok(beyondReach >= 2, `the interview has bursts beyond the lookback (${beyondReach})`)
 })

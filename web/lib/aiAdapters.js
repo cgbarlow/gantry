@@ -100,21 +100,49 @@ function markAttachmentsCacheable(wire) {
 // four cache points Anthropic allows. An empty text block cannot carry one, so it goes on the last block that has something in it.
 const MAX_CACHE_POINTS = 4
 
+// Anthropic finds an earlier cache entry by walking back from a cache point at most 20 positions. One AI reply that makes many tool calls at
+// once adds a block per call and a block per result, so the previous call's moving point can end up further back than that, and then the
+// call reads none of the conversation from the cache. (The Claude API itself counts a run of tool calls, or of results, as one position, but
+// that is not promised wherever OpenRouter sends a request, so Gantry counts every block.) When the new part is longer than BRIDGE_AFTER
+// blocks, a further cache point goes where the previous call's moving one was: that call wrote the cache there, so this one reads up to it
+// and the moving point is within reach again. It is the fourth point at most; a read of an entry already written costs nothing extra.
+const BRIDGE_AFTER = 15
+
 function countCachePoints(blocks) {
   return blocks.filter((b) => b && typeof b === 'object' && b.cache_control).length
 }
 
-/** Puts the moving cache point on `message` (one wire message, Anthropic's or OpenAI's shape), unless `used` already fills the four. */
-function markLastMessageCacheable(message, used) {
-  if (!message || used >= MAX_CACHE_POINTS) return
+/** Puts a cache point on the last block of `message` that has something in it (Anthropic's or OpenAI's shape), unless `used` already fills the four. */
+function markMessageCacheable(message, used) {
+  if (!message || used >= MAX_CACHE_POINTS) return false
   if (typeof message.content === 'string') {
-    if (message.content) message.content = [{ type: 'text', text: message.content, cache_control: { ...CACHE_CONTROL } }]
-    return
+    if (!message.content) return false
+    message.content = [{ type: 'text', text: message.content, cache_control: { ...CACHE_CONTROL } }]
+    return true
   }
-  if (!Array.isArray(message.content)) return
+  if (!Array.isArray(message.content)) return false
   const block = message.content.findLast((b) => b.type !== 'text' || b.text)
-  if (block && !block.cache_control) block.cache_control = { ...CACHE_CONTROL }
+  if (!block || block.cache_control) return false
+  block.cache_control = { ...CACHE_CONTROL }
+  return true
 }
+
+/** How many content blocks a wire message has, counting each tool call of an OpenAI-shaped assistant message as one. */
+const blockCount = (m) => (Array.isArray(m.content) ? m.content.length : m.content ? 1 : 0) + (m.tool_calls?.length ?? 0)
+
+/**
+ * The previous call's moving cache point, when this call has moved too far past it (#328): `wire` is this call's messages and `previousLength`
+ * how many of them the previous call sent (the conversation up to the AI's last reply; both wire formats only ever add to the end of it).
+ * Returns that last message, or null when the new part is short enough to be found from the moving point.
+ */
+function bridgeMessage(wire, previousLength) {
+  if (previousLength < 1 || previousLength >= wire.length) return null
+  const added = wire.slice(previousLength).reduce((n, m) => n + blockCount(m), 0)
+  return added > BRIDGE_AFTER ? wire[previousLength - 1] : null
+}
+
+/** How much of `messages` (the internal conversation) the previous call sent: everything before the AI's last reply. */
+const sentBefore = (messages) => messages.findLastIndex((m) => m.role === 'assistant')
 
 function openAiMessages(system, messages) {
   const wire = []
@@ -177,7 +205,8 @@ const cachesViaOpenRouter = (provider) => provider.type === 'openrouter' && /^an
  * for the message shape; a tool is `{ name, description, parameters }`). The AI Provider's own settings
  * (temperature, max tokens, the Advanced set) are applied here. `cachePrefix` (#294) is the start of `system` that stays the same from turn
  * to turn; Anthropic gets a one-hour cache point after it (and after the originals attached to the first message, which are as stable),
- * and (#328) a moving one on the last message, so the conversation so far is read from the cache on the next call.
+ * and (#328) a moving one on the last message, so the conversation so far is read from the cache on the next call, with one more where the
+ * previous call's moving point was when this call has added too many blocks for Anthropic to find it.
  * Returns `{ url, method, headers, body }`.
  */
 export function buildChatRequest(provider, { system = '', cachePrefix = '', messages = [], tools = [], maxTokens } = {}) {
@@ -190,8 +219,10 @@ export function buildChatRequest(provider, { system = '', cachePrefix = '', mess
     set(body, 'system', anthropicSystem(system, cachePrefix))
     if (cachePrefix) {
       markAttachmentsCacheable(body.messages)
-      const used = countCachePoints(Array.isArray(body.system) ? body.system : []) + body.messages.reduce((n, m) => n + (Array.isArray(m.content) ? countCachePoints(m.content) : 0), 0)
-      markLastMessageCacheable(body.messages.at(-1), used)
+      const used = () => countCachePoints(Array.isArray(body.system) ? body.system : []) + body.messages.reduce((n, m) => n + (Array.isArray(m.content) ? countCachePoints(m.content) : 0), 0)
+      markMessageCacheable(body.messages.at(-1), used())
+      const previous = sentBefore(messages)
+      if (previous > 0) markMessageCacheable(bridgeMessage(body.messages, anthropicMessages(messages.slice(0, previous)).length), used())
     }
     if (tools.length) {
       body.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }))
@@ -213,7 +244,12 @@ export function buildChatRequest(provider, { system = '', cachePrefix = '', mess
   if (cachesViaOpenRouter(provider) && splitAtCachePoint(system, cachePrefix)) {
     body.messages[0] = { role: 'system', content: cachedSystemBlocks(system, cachePrefix) }
     // #328: and the moving one on the last message, as for Anthropic itself. A message with no text (an assistant's tool calls only) has nowhere to carry it.
-    if (body.messages.length > 1) markLastMessageCacheable(body.messages.at(-1), 1)
+    // And the bridge back to the previous call's moving point, when this call has moved too far past it.
+    if (body.messages.length > 1) {
+      const used = markMessageCacheable(body.messages.at(-1), 1) ? 2 : 1
+      const previous = sentBefore(messages)
+      if (previous > 0) markMessageCacheable(bridgeMessage(body.messages, openAiMessages(system, messages.slice(0, previous)).length), used)
+    }
   }
   if (tools.length) {
     body.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }))

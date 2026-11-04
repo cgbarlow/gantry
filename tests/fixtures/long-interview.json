@@ -1,5 +1,5 @@
 {
- "about": "The shape of a long SOAP interview over a code repository and an uploaded brief (#328): each exchange is what the architect said and the AI calls that followed; each read is [kind, path or query or range, characters returned]. The test fills in the text.",
+ "about": "A reconstruction, not a capture: the shape of a long SOAP interview over a code repository and an uploaded brief, modelled on the one in #328 that reached about 695k tokens (no recording of that session is in the repository). Each exchange is what the architect said and the AI calls that followed; each read is [kind, path or query or range, characters returned], and the test fills in the text. Three calls read in a burst, nine to twelve tool calls at once, as an AI does when it surveys a repository: those are the calls that test Anthropic's 20-position lookback.",
  "repository": {
   "id": "billing-api",
   "title": "Billing API"
@@ -29,6 +29,60 @@
        "search",
        "retry",
        12000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "search",
+       "invoice",
+       1500
+      ],
+      [
+       "search",
+       "currency",
+       1500
+      ],
+      [
+       "search",
+       "tax",
+       1500
+      ],
+      [
+       "search",
+       "discount",
+       1500
+      ],
+      [
+       "search",
+       "approver",
+       1500
+      ],
+      [
+       "search",
+       "webhook",
+       1500
+      ],
+      [
+       "search",
+       "queue",
+       1500
+      ],
+      [
+       "search",
+       "cron",
+       1500
+      ],
+      [
+       "search",
+       "xero",
+       1500
+      ],
+      [
+       "search",
+       "ledger",
+       1500
       ]
      ]
     },
@@ -419,6 +473,70 @@
      "reads": [
       [
        "file",
+       "src/infra/zones.ts",
+       4000
+      ],
+      [
+       "file",
+       "src/infra/database.ts",
+       4000
+      ],
+      [
+       "file",
+       "src/infra/backup.ts",
+       4000
+      ],
+      [
+       "file",
+       "src/infra/replica.ts",
+       4000
+      ],
+      [
+       "file",
+       "src/infra/failover.ts",
+       4000
+      ],
+      [
+       "file",
+       "src/infra/dns.ts",
+       4000
+      ],
+      [
+       "file",
+       "src/infra/tls.ts",
+       4000
+      ],
+      [
+       "file",
+       "src/infra/secrets.ts",
+       4000
+      ],
+      [
+       "file",
+       "src/infra/monitoring.ts",
+       4000
+      ],
+      [
+       "file",
+       "src/infra/alerts.ts",
+       4000
+      ],
+      [
+       "file",
+       "src/infra/logging.ts",
+       4000
+      ],
+      [
+       "file",
+       "src/infra/scaling.ts",
+       4000
+      ]
+     ]
+    },
+    {
+     "reads": [
+      [
+       "file",
        "src/payments/gateway.ts",
        9000
       ],
@@ -614,6 +732,55 @@
   {
    "architect": "Let us move on to the plan: what changes first?",
    "calls": [
+    {
+     "reads": [
+      [
+       "search",
+       "TODO",
+       2000
+      ],
+      [
+       "search",
+       "FIXME",
+       2000
+      ],
+      [
+       "search",
+       "deprecated",
+       2000
+      ],
+      [
+       "search",
+       "legacy",
+       2000
+      ],
+      [
+       "search",
+       "migration",
+       2000
+      ],
+      [
+       "search",
+       "feature flag",
+       2000
+      ],
+      [
+       "search",
+       "v1",
+       2000
+      ],
+      [
+       "search",
+       "v2",
+       2000
+      ],
+      [
+       "search",
+       "rollout",
+       2000
+      ]
+     ]
+    },
     {
      "reads": [
       [
