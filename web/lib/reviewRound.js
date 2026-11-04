@@ -202,6 +202,15 @@ export function reviewUnits({ copies = [], answered = new Set(), reopened = new 
   return { units, resolved }
 }
 
+/**
+ * #320: how many comment threads of `copies` still wait for an answer: not resolved in Word and not answered in any Stage's decisions log
+ * (`logs`, as `answeredReviewKeys` reads them). Tracked changes with no thread beside them are not counted: they are not comment threads.
+ */
+export function unansweredThreadCount(copies = [], logs = {}) {
+  const { units } = reviewUnits({ copies, answered: answeredReviewKeys(logs) })
+  return units.reduce((n, unit) => n + unit.parts.filter((part) => part.thread).length, 0)
+}
+
 // ---------- has the Field changed since the render? ----------
 
 const norm = (text) => String(text ?? '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]+/gu, '')

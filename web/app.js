@@ -83,6 +83,7 @@ import { createLocalDecisionsStore, createServerDecisionsStore, planLocalDecisio
 import { approvalStatusLine } from './lib/interviewApproval.js'
 import { sentBackOf } from './lib/prRevision.js'
 import { DecisionsLogPanel } from './lib/decisionsLogPanel.js'
+import { NOTHING_HERE_YET, decisionsLogCounts, decisionsSummary, referenceToggleState, referenceView, reviewSummary } from './lib/referenceView.js'
 import { flagsForField, outOfDateBannerLines, outOfDateCountByStage, outOfDateFieldNote } from './lib/outOfDate.js'
 import { loadOutOfDate, outOfDateState, sourceListTick } from './lib/outOfDateState.js'
 import { firstFlaggedStage } from './lib/bringUpToDate.js'
@@ -122,6 +123,7 @@ import {
 import { REVIEWED_COPY_MAX_BYTES } from './lib/reviewedCopy.js'
 import { describeReview } from './lib/reviewManifest.js'
 import { downloadReviewResponseList } from './lib/reviewResponse.js'
+import { unansweredThreadCount } from './lib/reviewRound.js'
 import { modulesWithStandard } from './lib/standardModules.js'
 import {
   parseKeyDecisions,
@@ -970,8 +972,15 @@ function activateSourceCitations(node) {
     const link = event.target.closest?.('a.source-citation')
     if (!link || !node.contains(link)) return
     event.preventDefault()
-    sourceOpener.open?.(link.dataset.sourceId)
+    openCitedSource(link.dataset.sourceId)
   }
+}
+
+// #320: a citation leads into the Source documents panel, so the Sources & decisions toggle switches on (and goes to the panel) before the
+// document opens; a document that cannot be opened says so in that panel.
+function openCitedSource(id) {
+  showReferencePanels('[data-testid="source-documents-section"]')
+  sourceOpener.open?.(id)
 }
 
 // ---------- Instance-scoped state ----------
@@ -1910,7 +1919,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
     const splitEditableCompartment = new Compartment()
     const wrapCompartment = new Compartment()
     const visualCompartment = new Compartment()
-    const visualLayer = () => visualMode({ renderMarkdown: renderPreview, historyView: () => view, sourceDocument: (id) => (sourceIndex.value === null ? { unavailable: true } : sourceIndex.value[id]), openSourceDocument: (id) => sourceOpener.open?.(id) })
+    const visualLayer = () => visualMode({ renderMarkdown: renderPreview, historyView: () => view, sourceDocument: (id) => (sourceIndex.value === null ? { unavailable: true } : sourceIndex.value[id]), openSourceDocument: (id) => openCitedSource(id) })
     let hideToolbarTimer = null
     const state = EditorState.create({
       doc: field.value ?? '',
@@ -4449,7 +4458,8 @@ function AdvanceStagePanel({ instance }) {
 // Uses the shared Dropdown component, lists every module <h2> and every <h3>
 // subsection heading (field title, including custom sections) in document
 // order. Now rendered inside ViewModeToolbar to the right of the artefact
-// selector. Selecting an entry smooth-scrolls the heading and closes the menu.
+// selector. Selecting an entry smooth-scrolls the heading and closes the menu;
+// with Sources & decisions on (#320) it switches that off first.
 // Hidden when the stage has no headings (edge case).
 function StageNavigation({ modules, visibleFieldIds }) {
   const [open, setOpen] = useState(false)
@@ -4457,8 +4467,10 @@ function StageNavigation({ modules, visibleFieldIds }) {
   if (!headings.length) return null
   function handleSelect(id) {
     setOpen(false)
-    const el = document.getElementById(id)
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    showFields(() => {
+      const el = document.getElementById(id)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
   }
   return html`
     <div class="stage-navigation">
@@ -4485,6 +4497,73 @@ function StageNavigation({ modules, visibleFieldIds }) {
         )}
       <//>
     </div>
+  `
+}
+
+// ---------- Sources & decisions (#320, web/lib/referenceView.js) ----------
+// The toolbar toggle that swaps the Stage's Fields for its reference panels (Source documents, Review comments, Decisions log) and back.
+// Both sides stay mounted and are only hidden, so nothing typed in a Field is lost by switching.
+
+// Where the Fields were scrolled to when the toggle went on: switching it off again returns there.
+let fieldsScrollY = 0
+
+// Runs `fn` once the signal change just made is drawn (Preact queues its render as a microtask).
+const afterRender = (fn) => setTimeout(fn, 0)
+
+const toolbarHeight = () => document.querySelector('.toolbar')?.offsetHeight ?? 0
+
+// Switches the toggle on. `target` is a selector for the panel to go to (a link into one of them); without one the panels come up under the
+// toolbar if the page was scrolled past it.
+function showReferencePanels(target = null) {
+  if (!referenceView.peek()) {
+    fieldsScrollY = window.scrollY
+    referenceView.value = true
+  }
+  afterRender(() => {
+    const el = (target && document.querySelector(target)) || document.getElementById('reference-panels')
+    if (!el) return
+    const top = el.getBoundingClientRect().top
+    if (target || top < toolbarHeight()) window.scrollTo({ top: Math.max(0, top + window.scrollY - toolbarHeight()) })
+  })
+}
+
+// Switches the toggle off. `then` runs once the Fields are drawn again (to go to one of them); without it the page returns to where the
+// architect left the Fields.
+function showFields(then = null) {
+  if (!referenceView.peek()) {
+    then?.()
+    return
+  }
+  referenceView.value = false
+  afterRender(then ?? (() => window.scrollTo({ top: fieldsScrollY })))
+}
+
+// The toggle itself, to the right of Navigation. Its count is what needs attention: the review comment threads still unanswered plus the
+// Stage's open questions. With nothing in any of the three panels it is disabled rather than showing an empty view.
+function ReferenceToggle({ instance }) {
+  const on = referenceView.value
+  const review = reviewSummary.value
+  const decisions = decisionsSummary.value
+  const { count, disabled } = referenceToggleState({
+    sourcesOffered: offersSourceDocuments(instance),
+    review: review.key === instance.slug ? review : null,
+    decisions: decisions.key === `${instance.slug}|${instance.stage.id}` ? decisions : null,
+  })
+  const title = on ? 'Back to the Fields' : disabled ? NOTHING_HERE_YET : 'Show the Source documents, Review comments and Decisions log in place of the Fields'
+  return html`
+    <button
+      type="button"
+      class=${'btn small reference-toggle' + (on ? ' active' : '')}
+      data-testid="reference-toggle"
+      aria-pressed=${on}
+      disabled=${disabled && !on}
+      title=${title}
+      onClick=${() => (on ? showFields() : showReferencePanels())}
+    >
+      Sources & decisions${count > 0
+        ? html` <span class="reference-count" data-testid="reference-count">${count}<span class="visually-hidden"> need attention</span></span>`
+        : null}
+    </button>
   `
 }
 
@@ -4966,6 +5045,20 @@ function ReviewCommentsPanel({ instance }) {
       live = false
     }
   }, [key])
+  // #320: what the Sources & decisions toggle counts: the threads no Stage's decisions log has answered yet.
+  const logTick = decisionsLogTick.value
+  useEffect(() => {
+    if (state.phase === 'loading') return undefined
+    let live = true
+    const publish = (logs) => {
+      if (live) reviewSummary.value = { key: instance.slug, copies: state.copies.length, unanswered: unansweredThreadCount(state.copies, logs), error: state.phase === 'error' }
+    }
+    if (state.copies.length === 0 || !decisionsStore) publish({})
+    else Promise.all(instance.stages.map(async (st) => [st.id, await decisionsStore.read(st.id).catch(() => null)])).then((pairs) => publish(Object.fromEntries(pairs)))
+    return () => {
+      live = false
+    }
+  }, [state, decisionsStore, logTick])
 
   if (state.phase === 'error') return html`<p class="review-note" data-testid="review-copies-error">Couldn't list the Reviewed copies: ${state.error}</p>`
   if (state.copies.length === 0) return null
@@ -5061,13 +5154,11 @@ function StageScreen({ instance, onFieldRegistered, visibleFieldIds }) {
   }
 
   return html`
-    <main id="modules" data-view-mode=${viewMode.value}>
+    <main id="modules" data-view-mode=${viewMode.value} hidden=${referenceView.value}>
       <${ReopenStagePanel} instance=${instance} />
       <${MergedApprovalPanel} instance=${instance} />
       <${OutOfDatePanel} instance=${instance} />
       <${ChangedSinceApprovalPanel} instance=${instance} />
-      <${ReviewCommentsPanel} instance=${instance} />
-      <${DecisionsLogSection} instance=${instance} />
       ${advancedMode.value
         ? html`<${SyncedFieldsPanel} key=${instance.workItem ? 'linked' : 'unlinked'} instance=${instance} />`
         : null}
@@ -5145,10 +5236,16 @@ function DecisionsLogSection({ instance }) {
   useEffect(() => {
     if (!store) return undefined
     let live = true
+    const summaryKey = `${instance.slug}|${instance.stage.id}`
+    const show = (found) => {
+      if (!live) return
+      setLog(found)
+      decisionsSummary.value = { key: summaryKey, ...decisionsLogCounts(found) } // #320: the Sources & decisions toggle's count
+    }
     store
       .read(instance.stage.id)
-      .then((found) => live && setLog(found))
-      .catch(() => live && setLog(null))
+      .then(show)
+      .catch(() => show(null))
     return () => {
       live = false
     }
@@ -5412,7 +5509,7 @@ function SourceDocumentsSection({ instance }) {
     }
   }, [store])
   if (!store) return null
-  return html`<div class="source-documents-wrap">
+  return html`<div class="source-documents-wrap" data-testid="source-documents-section">
     <${SourceDocumentsPanel}
       store=${store}
       actor=${instance.assignee ?? ''}
@@ -5583,13 +5680,14 @@ function ViewModeToolbar({
             `
           : null}
         <${StageNavigation} modules=${navModules} visibleFieldIds=${visibleFieldIds} />
+        <${ReferenceToggle} instance=${instance} />
       </div>
       <div class="toolbar-actions">
         <button type="button" class=${'btn small' + (wrap.value ? ' active' : '')} aria-pressed=${wrap.value} onClick=${() => (wrap.value = !wrap.value)}>Wrap</button>
         <button type="button" class="btn" onClick=${onClearAllFields}>Clear all fields</button>
         <button type="button" class="btn primary" onClick=${afterUnsavedCheck(() => setRenderOpen(true))}>Render</button>
         ${requestApprovalSlug
-          ? html`<button type="button" class="btn request-approval-btn" onClick=${scrollToApprovalPanel}>Review / Sign-off</button>`
+          ? html`<button type="button" class="btn request-approval-btn" onClick=${() => showFields(scrollToApprovalPanel)}>Review / Sign-off</button>`
           : null}
       </div>
     </div>
@@ -5932,6 +6030,7 @@ function ModuleEditorPage({ slug: routeRef }) {
       loadError.value = null
       localGrantNeeded.value = false
       localDirHandle.value = null
+      referenceView.value = false // #320: every editor opens on the Fields
     })
 
     // A local-workspace instance (ADR-0029) is opened at
@@ -6884,7 +6983,14 @@ function ModuleEditorPage({ slug: routeRef }) {
       onClearAllFields=${clearAllFields}
       requestApprovalSlug=${advancedMode.value && instance.workspaceBacked ? instance.slug : null}
     />
-    ${offersSourceDocuments(instance) ? html`<${OutOfDateWatcher} instance=${instance} /><${SourceDocumentsSection} instance=${instance} />` : null}
+    ${offersSourceDocuments(instance) ? html`<${OutOfDateWatcher} instance=${instance} />` : null}
+    <div class="reference-panels" id="reference-panels" data-testid="reference-panels" hidden=${!referenceView.value}>
+      ${offersSourceDocuments(instance) ? html`<${SourceDocumentsSection} instance=${instance} />` : null}
+      <div class="reference-panels-body">
+        <${ReviewCommentsPanel} key=${instance.stage.id} instance=${instance} />
+        <${DecisionsLogSection} key=${instance.stage.id} instance=${instance} />
+      </div>
+    </div>
     <${StageScreen}
       key=${instance.stage.id}
       instance=${instance}

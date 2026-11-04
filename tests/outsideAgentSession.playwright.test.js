@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { showSourcesAndDecisions } from './helpers/referenceView.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { createInstance } from '../lib/instance.js'
 
@@ -52,6 +53,7 @@ test('a session an outside agent paused: its entries are labelled in the Decisio
 
         // The editor's read-only Decisions log panel says whose account each entry is.
         await page.goto(`${base}/instance/${SLUG}`)
+        await showSourcesAndDecisions(page)
         await page.waitForSelector('[data-testid="decisions-log-panel"]')
         assert.equal((await page.textContent('[data-testid="decisions-log-count"]')).trim(), '3')
         await page.click('[data-testid="decisions-history-toggle"]')

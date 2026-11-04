@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { showSourcesAndDecisions } from './helpers/referenceView.js'
 import { withRunningExamplesServer } from './helpers/lifecycle.js'
 import { unzip } from './helpers/reviewedCopyFixture.js'
 
@@ -39,7 +40,11 @@ test('the example’s Source documents, citations, decisions log and Reviewed co
       assert.match(await cited.textContent(), /Client brief, p\. 1/)
       assert.equal(await page.locator('.cm-vsource-removed, .cm-vsource-missing').count(), 0, 'every citation names a document in the pack')
 
-      // The Source documents are listed with their text read.
+      // The Source documents are listed with their text read, behind Sources & decisions, whose count is the three open questions (every
+      // review thread is answered).
+      await page.getByTestId('reference-count').waitFor()
+      assert.match(await page.getByTestId('reference-count').textContent(), /^3/)
+      await showSourcesAndDecisions(page)
       const panel = page.locator('[data-testid="source-documents"]')
       await panel.waitFor()
       if (!(await panel.evaluate((el) => el.open))) await panel.locator('[data-testid="source-documents-summary"]').click()

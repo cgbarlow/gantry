@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse as parseYAML } from 'yaml'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { showSourcesAndDecisions } from './helpers/referenceView.js'
 import { withRunningServer, withScratchInstances } from './helpers/lifecycle.js'
 import { RENDER_PROPERTIES, reviewedCopy } from './helpers/reviewedCopyFixture.js'
 
@@ -97,6 +98,7 @@ const groupOf = (copy, field) => copy.locator(`[data-testid="review-group"][data
 // What the editor shows of each copy: the Word-saved one placed by its bookmarks, the Google-exported
 // one by matching text, and the notice that says so.
 async function assertCopiesListed(page) {
+  await showSourcesAndDecisions(page)
   const panel = page.getByTestId('review-copies-panel')
   await panel.waitFor()
   assert.equal(await panel.locator('[data-testid="review-copy"]').count(), 2)
@@ -204,6 +206,10 @@ test('Local workspace: the same dialog writes the copy and the manifest into the
       assert.match(await dialog.getByTestId('review-import-done').textContent(), /workspace folder/)
       await dialog.getByRole('button', { name: 'Close' }).click()
 
+      // #320: behind Sources & decisions, which counts the seven threads not resolved in Word.
+      await page.getByTestId('reference-count').waitFor()
+      assert.match(await page.getByTestId('reference-count').textContent(), /^7/)
+      await showSourcesAndDecisions(page)
       const copy = copyNamed(page, 'HLD - word.docx')
       await copy.waitFor()
       assert.equal(await copy.getByTestId('review-notice').count(), 0)
@@ -223,6 +229,7 @@ test('Local workspace: the same dialog writes the copy and the manifest into the
       assert.deepEqual(kept.entries, [`${manifest[0].id}.docx`, 'manifest.yaml'].sort())
 
       await page.reload()
+      await showSourcesAndDecisions(page)
       await copyNamed(page, 'HLD - word.docx').waitFor()
     })
   })

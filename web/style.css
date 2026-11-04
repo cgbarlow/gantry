@@ -2146,6 +2146,15 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .decision-other-style { font-size: 12px; margin: 0 0 8px; }
 .decisions-problems { font-size: 12px; color: var(--warning, #b06a00); margin: 6px 0 8px; padding-left: 18px; }
 
+/* #320 — Sources & decisions: the reference panels shown under the editor toolbar in place of the Fields while the toggle is on. */
+.reference-panels-body { max-width: 1120px; margin: 0 auto; padding: 16px 32px 140px; }
+/* No .btn margin: like Navigation beside it, it stays level with the toolbar's other controls (and so does Save). */
+.toolbar .reference-toggle { margin: 0; }
+.reference-toggle .reference-count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; font-family: var(--font-mono); font-size: 11px; line-height: inherit; text-align: center; background: rgba(127, 127, 127, 0.25); border-radius: var(--radius); }
+@media (max-width: 720px) {
+  .reference-panels-body { padding: 16px 16px 140px; }
+}
+
 /* #279 — the Source documents panel under the editor toolbar: a collapsible strip with the upload control and one row per document. */
 .source-documents-wrap { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
 .source-documents { border-bottom: var(--hairline) solid var(--line); }

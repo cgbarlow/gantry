@@ -5,6 +5,7 @@ import { createServer as createHttpServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { showSourcesAndDecisions } from './helpers/referenceView.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { createInstance } from '../lib/instance.js'
 import { parse as parseYAML } from 'yaml'
@@ -220,6 +221,10 @@ test('server workspace: a stage Save writes the decisions log and the content in
 
           // Back in the editor: the read-only Decisions log panel.
           await page.click('[data-testid="interview-back"]')
+          // #320: behind Sources & decisions, which counts the one open question.
+          await page.getByTestId('reference-count').waitFor()
+          assert.match(await page.getByTestId('reference-count').textContent(), /^1/)
+          await showSourcesAndDecisions(page)
           await page.waitForSelector('[data-testid="decisions-log-panel"]')
           assert.equal((await page.textContent('[data-testid="decisions-log-count"]')).trim(), '3')
           assert.match(await page.textContent('[data-testid="decisions-latest"]'), /Is claims handling in scope\?/)
@@ -346,6 +351,7 @@ test('local workspace: the decisions log is written through the folder in the sa
 
           // The editor's panel reads it back from the folder.
           await page.click('[data-testid="interview-back"]')
+          await showSourcesAndDecisions(page)
           await page.waitForSelector('[data-testid="decisions-log-panel"]')
           assert.match(await page.textContent('[data-testid="decisions-log-panel"]'), /Nothing answered yet/)
         })

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
+import { showSourcesAndDecisions } from './helpers/referenceView.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { createInstance } from '../lib/instance.js'
 import { exampleModuleText } from './helpers/fixtureModules.js'
@@ -28,6 +29,7 @@ async function withPage(fn) {
 }
 
 const openPanel = async (page) => {
+  await showSourcesAndDecisions(page)
   const panel = page.locator('[data-testid="source-documents"]')
   await panel.waitFor({ timeout: 15_000 })
   if (!(await panel.evaluate((el) => el.open))) await panel.locator('[data-testid="source-documents-summary"]').click()
