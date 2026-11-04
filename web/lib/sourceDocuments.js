@@ -51,11 +51,44 @@ export const SOURCE_FILE_KINDS = Object.freeze({
 export const SOURCE_FILE_EXTENSIONS = Object.freeze(Object.values(SOURCE_FILE_KINDS).flat())
 
 /**
+ * The media type each extension an upload takes is served (and, #318, recognised when fetched) as: the one table the download headers
+ * (lib/sourceDocuments.js) and the fetch from a web address (lib/sourceFetch.js) both read, so the two can never take different types.
+ */
+export const SOURCE_MEDIA_TYPES = Object.freeze({
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pdf': 'application/pdf',
+  '.md': 'text/markdown; charset=utf-8',
+  '.markdown': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8',
+  '.tsv': 'text/tab-separated-values; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+})
+
+// How each kind is named when Gantry says what it takes.
+const SOURCE_KIND_LABELS = { word: 'Word', powerpoint: 'PowerPoint', spreadsheet: 'spreadsheets', pdf: 'PDFs', text: 'Markdown and text files', image: 'images' }
+
+/** "Word (.docx), PowerPoint (.pptx), …": every kind an upload takes, with its extensions, built from SOURCE_FILE_KINDS so the sentence can never fall behind it. */
+export function sourceAcceptedTypes() {
+  const parts = Object.entries(SOURCE_FILE_KINDS).map(([kind, extensions]) => `${SOURCE_KIND_LABELS[kind] ?? kind} (${extensions.join(', ')})`)
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)}` : parts.join('')
+}
+
+/**
  * #318 (docs/adr/0071): the kinds a document fetched from a web address may also be, beyond what an upload takes. An HTML page is kept as
  * its HTML and read to Markdown with Pandoc (web/lib/sourceExtract.js); its images and scripts are not captured. An HTML file is never
  * taken as an upload, so uploads behave exactly as before.
  */
 export const FETCHED_FILE_KINDS = Object.freeze({ html: ['.html', '.htm'] })
+
+/** The media type a fetched-only kind arrives as. Never used to serve one: a stored page always downloads as `application/octet-stream`. */
+export const FETCHED_MEDIA_TYPES = Object.freeze({ '.html': 'text/html' })
 
 /** The `accept` value for the upload's file picker. */
 export const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.join(',')
@@ -83,7 +116,7 @@ export function sourceFileTypeProblem(filename, { fetched = false } = {}) {
   const ext = sourceFileExtension(filename)
   const legacy = { '.doc': '.docx', '.ppt': '.pptx', '.xls': '.xlsx' }[ext]
   const hint = legacy ? ` Save it as ${legacy} and upload that.` : ''
-  return `Gantry can't take ${ext ? `${ext} files` : 'that file'}.${hint} It takes Word (.docx), PowerPoint (.pptx), spreadsheets (.xlsx, .csv, .tsv), PDFs, Markdown and text files, and images (.png, .jpg, .gif, .webp).`
+  return `Gantry can't take ${ext ? `${ext} files` : 'that file'}.${hint} It takes ${sourceAcceptedTypes()}.`
 }
 
 /** A problem with this Source document's weight, as a sentence naming the limit, or null when it is fine to upload. */
@@ -272,6 +305,28 @@ export function normalizeSourceOrigin(origin) {
 /** Whether a document was fetched from a web address (it has an origin), and so can be fetched again. */
 export function isFetchedSource(entry) {
   return normalizeSourceOrigin(entry?.origin) !== null
+}
+
+/**
+ * #318 (docs/adr/0071): why **Fetch again** is not offered for `entry`, as `{ code, status, message }`, or null when it is. `replacedByEntry`
+ * is `replacedByMap(entries)`. One rule for the panel, the store (and so the server route an outside agent calls) and the MCP tool: only the
+ * newest copy of a document fetched from a web address, still kept, is fetched again. An older copy that has been replaced is not, so one
+ * page always has one line of replacements, never two that branch from the same copy.
+ */
+export function fetchAgainRefusal(entry, replacedByEntry) {
+  if (isRemovedSource(entry)) return { code: 'removed', status: 409, message: `"${entry.title}" has been removed.` }
+  if (!isFetchedSource(entry)) {
+    return { code: 'not-fetched', status: 400, message: `"${entry.title}" was uploaded, not fetched from a web address, so there is nothing to fetch again.` }
+  }
+  const newer = replacedByEntry?.get(entry.id)
+  if (newer) {
+    return {
+      code: 'replaced',
+      status: 409,
+      message: `"${entry.title}" (${entry.id}) has already been replaced by "${newer.title}" (${newer.id}). Fetch again the newest copy instead, so the page keeps one line of replacements.`,
+    }
+  }
+  return null
 }
 
 /** Whether two documents' bytes are the same, byte for byte: what **Fetch again** asks before it adds anything. */
@@ -491,14 +546,13 @@ export function createSourceStore(io, options = {}) {
     },
 
     /**
-     * #318 (docs/adr/0071): **Fetch again** for document `id`, which must have been fetched from a web address. `data` is what the new fetch gave, as for `upload` with its `origin`. When its bytes are the same as the kept document's, nothing is added or flagged and `{ unchanged: true, entry, totalBytes, warning }` comes back, `entry` being the kept one (the panel says "unchanged since" its fetch). Otherwise the new bytes are added as a new document that replaces the old one under the old one's title (the existing Replaced rule, so the Fields that drew on it are flagged Out of date), and `{ unchanged: false, entry, totalBytes, warning }` comes back. `extract()`, when given, is called for the text only once the bytes are known to differ.
+     * #318 (docs/adr/0071): **Fetch again** for document `id`, which must have been fetched from a web address and not already replaced by a newer copy (`fetchAgainRefusal`, the rule the panel offers the button by). `data` is what the new fetch gave, as for `upload` with its `origin`. When its bytes are the same as the kept document's, nothing is added or flagged and `{ unchanged: true, entry, totalBytes, warning }` comes back, `entry` being the kept one (the panel says "unchanged since" its fetch). Otherwise the new bytes are added as a new document that replaces the old one under the old one's title (the existing Replaced rule, so the Fields that drew on it are flagged Out of date), and `{ unchanged: false, entry, totalBytes, warning }` comes back. `extract()`, when given, is called for the text only once the bytes are known to differ.
      */
     async fetchAgain(id, data, { extract } = {}) {
       const { entries } = await readManifest()
       const entry = liveEntry(entries, id)
-      if (!isFetchedSource(entry)) {
-        throw new SourceDocumentError(`"${entry.title}" was uploaded, not fetched from a web address, so there is nothing to fetch again.`, { code: 'not-fetched', status: 400 })
-      }
+      const refusal = fetchAgainRefusal(entry, replacedByMap(entries))
+      if (refusal) throw new SourceDocumentError(refusal.message, { code: refusal.code, status: refusal.status })
       const kept = await io.readBytes(sourceFilePath(entry.filename))
       if (sameSourceBytes(kept, data.bytes)) return { unchanged: true, entry, ...summary(entries) }
       const text = extract ? await extract() : data.text

@@ -10,6 +10,7 @@ import {
   SOURCE_FILE_ACCEPT,
   formatBytes,
   canUseSourceAsImage,
+  fetchAgainRefusal,
   isFetchedSource,
   isRemovedSource,
   replacedByMap,
@@ -333,7 +334,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
   ]
   // #318: adding by address is offered once the Gantry server says it fetches; a Local Workspace whose server can't be reached says why it isn't.
   const offersAddress = !readOnly && fetchStatus?.enabled === true
-  const canFetchAgain = (entry) => offersAddress && isFetchedSource(entry) && Boolean(store.fetchAgain) && !replacedByEntry.has(entry.id)
+  const canFetchAgain = (entry) => offersAddress && Boolean(store.fetchAgain) && !fetchAgainRefusal(entry, replacedByEntry)
   const addressForm = () =>
     offersAddress
       ? html`<form

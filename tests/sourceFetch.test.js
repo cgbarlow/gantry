@@ -4,8 +4,9 @@ import { EventEmitter } from 'node:events'
 import { createServer as createHttpServer } from 'node:http'
 import { PassThrough } from 'node:stream'
 import { gzipSync } from 'node:zlib'
-import { PRIVATE_ADDRESS_SETTINGS, checkAddress, isMetadataHost, privateAddressesAllowed } from '../lib/addressCheck.js'
-import { SourceFetchError, fetchSourceAddress, fetchedExtension, htmlTitle, sourceFetchDisabled, suggestedNames } from '../lib/sourceFetch.js'
+import { PRIVATE_ADDRESS_SETTINGS, checkAddress, isMetadataHost, operatorSettingOn, privateAddressesAllowed } from '../lib/addressCheck.js'
+import { CONTENT_TYPE_EXTENSIONS, SourceFetchError, fetchSourceAddress, fetchedExtension, htmlTitle, sourceFetchDisabled, suggestedNames } from '../lib/sourceFetch.js'
+import { SOURCE_FILE_EXTENSIONS, SOURCE_MEDIA_TYPES, sourceAcceptedTypes, sourceFileKind } from '../web/lib/sourceDocuments.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { textPdf } from './helpers/sourceFixtures.js'
 
@@ -49,6 +50,18 @@ test('the off switch reads GANTRY_SOURCE_FETCH_DISABLED, and an explicit option 
   assert.equal(sourceFetchDisabled(false, { GANTRY_SOURCE_FETCH_DISABLED: '1' }), false)
 })
 
+test('every on/off setting reads its value the one way the shared address check does', () => {
+  for (const value of ['1', 'true', 'YES', ' on ', 'True']) {
+    assert.equal(operatorSettingOn(value), true, value)
+    assert.equal(sourceFetchDisabled(undefined, { GANTRY_SOURCE_FETCH_DISABLED: value }), true, value)
+    assert.equal(privateAddressesAllowed(undefined, { GANTRY_SOURCE_FETCH_ALLOW_PRIVATE_URLS: value }, 'sourceFetch'), true, value)
+  }
+  for (const value of [undefined, '', '0', 'false', 'off', 'no', 'enabled']) {
+    assert.equal(operatorSettingOn(value), false, String(value))
+    assert.equal(sourceFetchDisabled(undefined, { GANTRY_SOURCE_FETCH_DISABLED: value }), false, String(value))
+  }
+})
+
 // ---------- names and types ----------
 
 test('the stored type comes from the content type, and the address only when the type says nothing more', () => {
@@ -59,6 +72,25 @@ test('the stored type comes from the content type, and the address only when the
   assert.equal(fetchedExtension('application/octet-stream', 'https://example.com/files/brief.docx'), '.docx')
   assert.equal(fetchedExtension('application/octet-stream', 'https://example.com/files/thing.bin'), null)
   assert.equal(fetchedExtension('application/zip', 'https://example.com/a.zip'), null)
+})
+
+test('a fetch takes exactly the types an upload does, plus an HTML page: its table is built from the upload\'s own', () => {
+  // Every type an upload is served as is recognised when fetched, and stored under an extension of the same kind.
+  for (const ext of SOURCE_FILE_EXTENSIONS) {
+    const type = SOURCE_MEDIA_TYPES[ext].split(';')[0]
+    const stored = fetchedExtension(type, 'https://example.com/download')
+    assert.ok(stored, `${type} is taken`)
+    assert.equal(sourceFileKind(`x${stored}`), sourceFileKind(`x${ext}`), `${type} is stored as the kind ${ext} is`)
+  }
+  // And nothing else: every type in the table is an upload's, an HTML page, or another name for one of those.
+  const known = new Set([...Object.values(SOURCE_MEDIA_TYPES).map((t) => t.split(';')[0]), 'text/html'])
+  for (const [type, ext] of Object.entries(CONTENT_TYPE_EXTENSIONS)) {
+    assert.ok(known.has(type) || ['application/xhtml+xml', 'text/x-markdown'].includes(type), `${type} is one an upload or a page has`)
+    assert.ok(sourceFileKind(`x${ext}`), `${ext} is a kind Gantry reads`)
+  }
+  assert.equal(CONTENT_TYPE_EXTENSIONS['application/xhtml+xml'], '.html')
+  assert.equal(CONTENT_TYPE_EXTENSIONS['text/x-markdown'], '.md')
+  assert.equal(CONTENT_TYPE_EXTENSIONS['image/jpeg'], '.jpg')
 })
 
 test('an HTML page is named after its title; anything else after its file name', () => {
@@ -261,6 +293,8 @@ test('a status error, an unsupported type, a document over the limit, a time-out
     await fails('/missing', 'status', /404.*Check the address/)
     await fails('/broken', 'status', /503.*Try again later/)
     await fails('/archive.zip', 'unsupported-type', /application\/zip, which Gantry can't take/)
+    // The refusal names what Gantry does take from the same sentence an upload's refusal uses, so the two can't drift apart.
+    await assert.rejects(fetchSourceAddress(`${base}/archive.zip`, { allowPrivate: true }), (err) => err.message.endsWith(`It takes web pages, ${sourceAcceptedTypes()}.`))
     await fails('/big', 'too-large', /over the 32 KB limit/, { maxBytes: 32 * 1024 })
     await fails('/big-chunked', 'too-large', /over the 32 KB limit/, { maxBytes: 32 * 1024 })
     await fails('/slow', 'timeout', /didn't answer within/, { timeoutMs: 300 })

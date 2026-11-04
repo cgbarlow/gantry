@@ -444,6 +444,18 @@ describe('a Source document added from a web address', () => {
       const flagged = await (await fetch(`${base}/api/instance/out-of-date`)).json()
       assert.deepEqual(flagged.fields.map((f) => f.flags[0].change), ['replaced'])
 
+      // The older copy, now replaced, is not fetched again (the panel never offers it): one page keeps one line of replacements.
+      pages['/guide'] = pages['/guide'].replace('50 requests', '25 requests')
+      const older = await again('vendor-api-guide')
+      assert.equal(older.status, 409, await older.clone().text())
+      const olderBody = await older.json()
+      assert.equal(olderBody.code, 'replaced')
+      assert.match(olderBody.error, /already been replaced by "Vendor API guide" \(vendor-api-guide-2\)\. Fetch again the newest copy instead/)
+      assert.equal((await (await fetch(`${base}/api/instance/sources`)).json()).entries.length, 2, 'nothing was added')
+      const newest = await again(changedBody.entry.id)
+      assert.equal(newest.status, 201, await newest.clone().text())
+      assert.equal((await newest.json()).entry.replaces, changedBody.entry.id)
+
       const notes = await (await upload(base, { filename: 'notes.txt', dataBase64: b64('x'), extractText: true })).json()
       const notFetched = await send(base, 'POST', `/api/instance/sources/${notes.entry.id}/fetch-again`, { filename: 'notes.txt', dataBase64: b64('y') })
       assert.equal(notFetched.status, 400)

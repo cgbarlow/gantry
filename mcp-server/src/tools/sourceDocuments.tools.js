@@ -192,6 +192,12 @@ async function fetchSourceDocumentAgain(args, context) {
   if (!entry) return errorResult(`No Source document "${id}" in this instance.`)
   if (entry.removedAt) return errorResult(`"${entry.title}" has been removed.`)
   if (!entry.origin?.address) return errorResult(`"${entry.title}" was uploaded, not fetched from a web address, so there is nothing to fetch again.`)
+  // As in the panel: only the newest copy is fetched again, so one page keeps one line of replacements. Asked before fetching, so a refused
+  // call costs no fetch; gantry serve's fetch-again route refuses it too (web/lib/sourceDocuments.js fetchAgainRefusal), whoever calls it.
+  const newer = (listed.body?.entries ?? []).filter((candidate) => candidate.replaces === id).sort((a, b) => String(b.uploadedAt ?? '').localeCompare(String(a.uploadedAt ?? '')))[0]
+  if (newer) {
+    return errorResult(`"${entry.title}" (${entry.id}) has already been replaced by "${newer.title}" (${newer.id}). Fetch again the newest copy instead, so the page keeps one line of replacements.`, { code: 'replaced' })
+  }
   const { fetched, result: refused } = await fetchAddress(entry.origin.address, context)
   if (refused) return refused
   const { res, result } = await callInstanceRoute(args, context, {
@@ -338,11 +344,12 @@ export const tools = [
       '1. Fetches a Source document that was added from a web address (it has an "origin") again, from the address it was added from. Nothing ever refetches on its own: this is the only way. ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" is required (from list_source_documents). ' +
       '3. If the fetched bytes are identical, nothing is added or flagged and the response says "unchanged": true. If they differ, the new copy is added as a new document that replaces the old one (the old one stays, citable and marked "replaced by"), and the Fields that drew on the old one are flagged Out of date — bring them up to date with the architect. ' +
-      '4. The same address check, limits and failures as add_source_document_from_address. A real write when the page changed — treat it as final once called. ' +
-      '5. Only listed when the operator has not switched adding by address off.',
+      '4. Only the newest copy of a page is fetched again, as in the app: a document that has already been replaced (another document\'s "replaces" names it) is refused. ' +
+      '5. The same address check, limits and failures as add_source_document_from_address. A real write when the page changed — treat it as final once called. ' +
+      '6. Only listed when the operator has not switched adding by address off.',
     inputSchema: {
       ...slugRefShape,
-      id: z.string().describe('The Source document id, from list_source_documents. It must have an "origin".'),
+      id: z.string().describe('The Source document id, from list_source_documents. It must have an "origin" and be the newest copy: one another document "replaces" is refused, so fetch that newer one again instead.'),
       uploadedBy: z.string().optional().describe('Who is fetching it again, recorded on the new document if the page changed.'),
     },
     available: sourceFetchOffered,

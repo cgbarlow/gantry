@@ -8,16 +8,22 @@ import {
   INSTANCE_SOURCES_WARN_BYTES,
   MAX_SOURCE_BYTES,
   SOURCE_FILE_ACCEPT,
+  SOURCE_FILE_EXTENSIONS,
+  SOURCE_FILE_KINDS,
+  SOURCE_MEDIA_TYPES,
   SourceDocumentError,
   cleanSourceFilename,
   createSourceStore,
   defaultSourceTitle,
+  fetchAgainRefusal,
   formatBytes,
   instanceSourcesWarning,
   isFetchedSource,
   normalizeSourceOrigin,
   parseSourceManifest,
   replacedBy,
+  replacedByMap,
+  sourceAcceptedTypes,
   sourceFileKind,
   sourceFileTypeProblem,
   sourceIdFor,
@@ -83,6 +89,16 @@ describe('names and ids', () => {
     assert.equal(sourceFileTypeProblem('a.docx'), null)
     assert.match(sourceFileTypeProblem('old.doc'), /Save it as \.docx/)
     assert.match(sourceFileTypeProblem('thing.zip'), /can't take \.zip files/)
+  })
+
+  test('the sentence naming what Gantry takes is built from the kinds, so it names every extension an upload takes', () => {
+    const sentence = sourceAcceptedTypes()
+    for (const ext of SOURCE_FILE_EXTENSIONS) assert.ok(sentence.includes(ext), `${ext} is named`)
+    assert.match(sentence, /^Word \(\.docx\), PowerPoint \(\.pptx\), spreadsheets \(\.xlsx, \.csv, \.tsv\), PDFs \(\.pdf\), .*, and images \(\.png, /)
+    assert.ok(sourceFileTypeProblem('thing.zip').endsWith(`It takes ${sentence}.`))
+    // Every extension an upload takes is served with a type of its own.
+    for (const ext of SOURCE_FILE_EXTENSIONS) assert.ok(SOURCE_MEDIA_TYPES[ext], `${ext} has a media type`)
+    assert.deepEqual(Object.keys(SOURCE_MEDIA_TYPES).sort(), Object.values(SOURCE_FILE_KINDS).flat().sort())
   })
 
   test('the size limits read as sentences', () => {
@@ -398,6 +414,39 @@ describe('documents fetched from a web address', () => {
     const { entry: page } = await store.upload({ filename: 'p.html', bytes: bytes('x'), origin: origin() })
     await store.remove(page.id)
     await assert.rejects(store.fetchAgain(page.id, { filename: 'p.html', bytes: bytes('y'), origin: origin() }), (err) => err.code === 'removed')
+  })
+
+  test('Fetch again is refused for an older copy that has already been replaced, as the panel never offers it: one page keeps one line of replacements', async () => {
+    const io = memoryIo()
+    const store = createSourceStore(io)
+    const { entry: first } = await store.upload({ filename: 'guide.html', bytes: bytes('<p>v1</p>'), text: 'v1', title: 'Vendor guide', origin: origin() })
+    const { entry: second } = await store.fetchAgain(first.id, { filename: 'guide.html', bytes: bytes('<p>v2</p>'), origin: origin('2026-11-10T08:00:00.000Z') })
+    assert.equal(second.replaces, first.id)
+    const manifestBefore = io.files.get('sources/manifest.yaml')
+    await assert.rejects(store.fetchAgain(first.id, { filename: 'guide.html', bytes: bytes('<p>v3</p>'), origin: origin('2026-11-11T08:00:00.000Z') }), (err) => {
+      assert.ok(err instanceof SourceDocumentError)
+      assert.equal(err.code, 'replaced')
+      assert.equal(err.status, 409)
+      assert.match(err.message, /"Vendor guide" \(guide\) has already been replaced by "Vendor guide" \(guide-2\)\. Fetch again the newest copy instead/)
+      return true
+    })
+    assert.equal(io.files.get('sources/manifest.yaml'), manifestBefore, 'nothing is added')
+    // The newest copy is still fetched again as before.
+    const third = await store.fetchAgain(second.id, { filename: 'guide.html', bytes: bytes('<p>v3</p>'), origin: origin('2026-11-11T08:00:00.000Z') })
+    assert.equal(third.entry.replaces, second.id)
+    assert.deepEqual((await store.list()).entries.map((e) => [e.id, e.replaces ?? null]), [['guide', null], ['guide-2', 'guide'], ['guide-3', 'guide-2']])
+  })
+
+  test('one rule says when Fetch again is offered: a kept, fetched document that is the newest copy', () => {
+    const page = { id: 'guide', title: 'Guide', filename: 'guide.html', uploadedAt: '2026-11-03T09:00:00.000Z', origin: origin() }
+    const newer = { id: 'guide-2', title: 'Guide', filename: 'guide-2.html', uploadedAt: '2026-11-10T09:00:00.000Z', origin: origin('2026-11-10T09:00:00.000Z'), replaces: 'guide' }
+    const upload = { id: 'brief', title: 'Brief', filename: 'brief.txt', uploadedAt: '2026-11-03T09:00:00.000Z' }
+    const removed = { ...page, id: 'old', removedAt: '2026-11-04T00:00:00.000Z' }
+    assert.equal(fetchAgainRefusal(page, replacedByMap([page])), null)
+    assert.equal(fetchAgainRefusal(page, replacedByMap([page, newer])).code, 'replaced')
+    assert.equal(fetchAgainRefusal(newer, replacedByMap([page, newer])), null)
+    assert.equal(fetchAgainRefusal(upload, replacedByMap([upload])).code, 'not-fetched')
+    assert.equal(fetchAgainRefusal(removed, replacedByMap([removed])).code, 'removed')
   })
 })
 

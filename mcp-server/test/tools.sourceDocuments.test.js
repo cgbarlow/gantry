@@ -344,6 +344,41 @@ test('fetch_source_document_again fetches the document\'s own address and report
   )
 })
 
+test('fetch_source_document_again refuses an older copy that has already been replaced, as the app does, without fetching anything', async () => {
+  const origin = (fetchedAt) => ({ address: FETCHED.address, finalAddress: FETCHED.finalAddress, fetchedAt })
+  const listed = {
+    entries: [
+      { id: 'vendor-api-guide', title: 'Vendor API guide', filename: 'Vendor API guide.html', uploadedAt: '2026-11-01T00:00:00.000Z', origin: origin('2026-11-01T00:00:00.000Z') },
+      { id: 'vendor-api-guide-2', title: 'Vendor API guide', filename: 'Vendor API guide-2.html', uploadedAt: '2026-11-02T00:00:00.000Z', origin: origin('2026-11-02T00:00:00.000Z'), replaces: 'vendor-api-guide' },
+    ],
+  }
+  await withClient(
+    ({ url, method }) => (url.pathname === '/api/instance/sources' && method === 'GET' ? { status: 200, body: listed } : undefined),
+    async (gantryClient, fetch) => {
+      const result = await tool('fetch_source_document_again').handler({ slug: 'my-instance', id: 'vendor-api-guide' }, { gantryClient })
+      assert.equal(result.isError, true)
+      assert.match(payload(result).error, /"Vendor API guide" \(vendor-api-guide\) has already been replaced by "Vendor API guide" \(vendor-api-guide-2\)\. Fetch again the newest copy instead/)
+      assert.equal(payload(result).detail.code, 'replaced')
+      assert.equal(fetch.calls.some((c) => c.url.pathname === '/api/sources/fetch'), false, 'nothing was fetched')
+      assert.equal(fetch.calls.some((c) => c.url.pathname.endsWith('/fetch-again')), false, 'nothing was sent')
+    }
+  )
+  // gantry serve's own refusal (another caller replaced it between the list and the call) comes back as it said it.
+  await withClient(
+    ({ url, method }) => {
+      if (url.pathname === '/api/instance/sources' && method === 'GET') return { status: 200, body: { entries: [listed.entries[0]] } }
+      if (url.pathname === '/api/sources/fetch' && method === 'POST') return { status: 200, body: FETCHED }
+      if (url.pathname === '/api/instance/sources/vendor-api-guide/fetch-again') return { status: 409, body: { error: '"Vendor API guide" (vendor-api-guide) has already been replaced by "Vendor API guide" (vendor-api-guide-2).', code: 'replaced' } }
+      return undefined
+    },
+    async (gantryClient) => {
+      const result = await tool('fetch_source_document_again').handler({ slug: 'my-instance', id: 'vendor-api-guide' }, { gantryClient })
+      assert.equal(result.isError, true)
+      assert.match(JSON.stringify(payload(result)), /already been replaced/)
+    }
+  )
+})
+
 test('the add-by-address tools are offered only when gantry serve says adding by address is on', async () => {
   for (const tool of tools.filter((t) => ['add_source_document_from_address', 'fetch_source_document_again'].includes(t.name))) assert.equal(tool.available, sourceFetchOffered)
   for (const [answer, offered] of [[{ status: 200, body: { enabled: true } }, true], [{ status: 200, body: { enabled: false } }, false], [{ status: 404, body: {} }, false]]) {
