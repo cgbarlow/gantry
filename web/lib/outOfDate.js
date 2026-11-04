@@ -310,6 +310,15 @@ export function outOfDateBannerLines(flags) {
   })
 }
 
+/**
+ * #319: the line for a code repository Out of date could not compare just now (web/lib/outOfDateLoad.js's `unchecked`), so the architect knows
+ * the Fields that drew on it were not checked, and why: `Billing API was not checked for changes: You can't read … without a token. …`.
+ */
+export function uncheckedRepositoryLine({ title, code, reason }) {
+  const fix = code === 'no-access' ? ' Give a token that can read it with "Your token" on its row in Source documents.' : ''
+  return `${title} was not checked for changes, so the Fields that drew on it may be out of date: ${reason}${fix}`
+}
+
 /** #319: why a Field that drew on a code repository is flagged: `orders/service.ts in Billing API changed (now at 3f2a9c1)`. */
 export function codeChangeReason(flag) {
   const paths = asList(flag.paths)

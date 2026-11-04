@@ -135,3 +135,52 @@ test('the AI lists, searches and reads a repository through tools, skipped paths
   )
   assert.match(snap.drafts['details.summary'].value, /source:billing-api\?path=src\/orders\/limits\.ts&commit=c0ffee/)
 })
+
+test('an existing pointer this architect cannot read: the thread says so plainly, once, as well as the AI, and nothing is recorded as read', async () => {
+  const p = providers.addAiProvider({ name: 'Work Anthropic', type: 'anthropic', address: 'https://api.anthropic.com', key: 'sk-ant-1', model: 'claude-x' })
+  providers.setAiProviderTest(p.id, { status: 'passed', testedAt: 'now', questionCards: 'native', readsImages: false, steps: [], message: 'ok' }, null)
+  const { SourceDocumentError } = await import('../web/lib/sourceDocuments.js')
+  const refusal = "You can't read the GitHub repository acme/billing-api without a token. If it is private, give a token that can read it."
+  const ai = fakeAi((_request, n) => {
+    if (n === 0) {
+      return anthropicReply({
+        tools: [
+          { id: 'l1', name: 'list_repository_folder', input: { id: 'billing-api' } },
+          { id: 'r1', name: 'read_repository_file', input: { id: 'billing-api', path: 'src/orders/limits.ts' } },
+        ],
+      })
+    }
+    if (n === 1) return anthropicReply({ tools: [{ id: 'r2', name: 'read_repository_file', input: { id: 'billing-api', path: 'node_modules/x.js' } }] })
+    return anthropicReply({ text: 'I could not read the repository.' })
+  })
+  // The Gantry server as a teammate (or another browser) without a token for this repository sees it: every read refused, with the server's sentence.
+  const refuse = async () => Promise.reject(new SourceDocumentError(refusal, { code: 'no-access', status: 403 }))
+  const refusing = { list: refuse, read: refuse, search: refuse }
+  const skipping = { ...refusing, read: async ({ path }) => Promise.reject(new SourceDocumentError(`${path} is vendored code or build output, which Gantry never reads.`, { code: 'skipped', status: 400 })) }
+  let calls = 0
+  const context = {
+    definition: definition(),
+    stageId: 'shape',
+    artefactId: 'light',
+    size: 'medium',
+    saved: [{ id: 'details', status: 'draft', fields: [{ id: 'summary', value: '' }] }],
+    sources: [{ id: 'billing-api', title: 'Billing API', uploadedAt: '2026-11-01T00:00:00.000Z', repository: { provider: 'github', location: { owner: 'acme', repository: 'billing-api' }, branch: 'main' } }],
+    skills,
+    readRepository: () => (calls++ < 2 ? refusing : skipping),
+  }
+  const session = createInterviewSession({ providerId: p.id, getContext: () => context, fetchImpl: ai.fetchImpl })
+  await session.start()
+
+  const results = toolResults(ai.calls[1])
+  assert.deepEqual(results.map((r) => [r.tool_use_id, Boolean(r.is_error)]), [['l1', true], ['r1', true]])
+  assert.match(results[0].content, /Billing API: You can't read the GitHub repository acme\/billing-api without a token/, 'the AI is told')
+  const snap = session.snapshot()
+  const blocked = snap.thread.filter((t) => t.repositoryBlocked)
+  assert.equal(blocked.length, 1, 'the architect is told once, not once per attempt')
+  assert.equal(blocked[0].who, 'sys')
+  assert.equal(blocked[0].repositoryBlocked, 'billing-api')
+  assert.match(blocked[0].text, /^Can't read the code repository Billing API: You can't read the GitHub repository acme\/billing-api without a token\./)
+  assert.match(blocked[0].text, /Give a token that can read it with "Your token" on its row in the Source documents list/)
+  assert.deepEqual(snap.thread.filter((t) => t.read), [], 'nothing was read, so nothing is recorded as read')
+  assert.ok(!snap.thread.some((t) => /vendored/.test(t.text)), "a skipped path is the AI's to sort out, not the architect's")
+})

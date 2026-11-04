@@ -86,7 +86,7 @@ import { approvalStatusLine } from './lib/interviewApproval.js'
 import { sentBackOf } from './lib/prRevision.js'
 import { DecisionsLogPanel } from './lib/decisionsLogPanel.js'
 import { NOTHING_HERE_YET, decisionsLogCounts, decisionsSummary, referenceToggleState, referenceView, reviewSummary } from './lib/referenceView.js'
-import { flagsForField, outOfDateBannerLines, outOfDateCountByStage, outOfDateFieldNote } from './lib/outOfDate.js'
+import { flagsForField, outOfDateBannerLines, outOfDateCountByStage, outOfDateFieldNote, uncheckedRepositoryLine } from './lib/outOfDate.js'
 import { loadOutOfDate, outOfDateState, sourceListTick } from './lib/outOfDateState.js'
 import { firstFlaggedStage } from './lib/bringUpToDate.js'
 import { createServerSourceClient } from './lib/serverSourceDocuments.js'
@@ -5305,7 +5305,7 @@ function OutOfDateWatcher({ instance }) {
       compareRepository,
     })
       .then((result) => live && (outOfDateState.value = { key, ...result }))
-      .catch(() => live && (outOfDateState.value = { key, flags: [], newSince: [], sources: [] }))
+      .catch(() => live && (outOfDateState.value = { key, flags: [], newSince: [], sources: [], unchecked: [] }))
     return () => {
       live = false
     }
@@ -5316,15 +5316,15 @@ function OutOfDateWatcher({ instance }) {
 // What the watcher last found for the Instance and Stage on screen (nothing for another one's).
 function useOutOfDate(instance) {
   const state = outOfDateState.value
-  return state.key === `${instance.slug}|${instance.stage.id}` ? state : { key: '', flags: [], newSince: [], sources: [] }
+  return state.key === `${instance.slug}|${instance.stage.id}` ? state : { key: '', flags: [], newSince: [], sources: [], unchecked: [] }
 }
 
 // The editor's banner: one line per changed document, such as "4 Fields drew on Client brief, now replaced", with the way to bring them up to date (the Interview page, which works on the current Stage of a local or server workspace).
 function OutOfDatePanel({ instance }) {
-  const { flags } = useOutOfDate(instance)
+  const { flags, unchecked = [] } = useOutOfDate(instance)
   const location = useLocation()
   const lines = outOfDateBannerLines(flags)
-  if (lines.length === 0) return null
+  if (lines.length === 0 && unchecked.length === 0) return null
   // #298: "Bring up to date" opens the Interview page on just the flagged Fields, stage by stage in order. A local or server workspace begins at
   // the first Stage that has any; a remote one can only write its current Stage, so it goes there.
   const stageIds = (instance.stages ?? []).map((s) => s.id)
@@ -5361,6 +5361,12 @@ function OutOfDatePanel({ instance }) {
               ? html`<span class="ood-fields" title=${reason}>Bring up to date from the Interview page (${reason})</span>`
               : html`<a class="btn small" href=${`${here.pathname}${here.search}`} data-testid="bring-up-to-date" onClick=${bringUpToDate}>Bring up to date</a>`}
             <span class="ood-fields">${line.fields.map(fieldName).join(', ')}</span>
+          </li>`
+        )}
+        ${unchecked.map(
+          // #319: a code repository that could not be compared (most often: no access from this browser) is named, never silently skipped.
+          (u) => html`<li key=${`unchecked|${u.source}`} data-source=${u.source} data-change="unchecked">
+            <span data-testid="out-of-date-unchecked">${uncheckedRepositoryLine(u)}</span>
           </li>`
         )}
       </ul>

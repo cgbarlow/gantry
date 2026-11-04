@@ -16,7 +16,8 @@ import {
 import { SourceDocumentError, createSourceStore, parseSourceManifest, stringifySourceManifest } from '../web/lib/sourceDocuments.js'
 import { buildSourceAppendix, citedCommits, citedSourceIds, findSourceCitations, recitedMarkdown, sourceCitationFor, sourceCitationsForWord } from '../web/lib/sourceCitations.js'
 import { citedSourceIds as draftCitedSourceIds, citationSegments } from '../web/lib/interviewDraft.js'
-import { findOutOfDateFields, outOfDateBannerLines, outOfDateFieldNote, repositoryReadsOf } from '../web/lib/outOfDate.js'
+import { findOutOfDateFields, outOfDateBannerLines, outOfDateFieldNote, repositoryReadsOf, uncheckedRepositoryLine } from '../web/lib/outOfDate.js'
+import { describeOutOfDate } from '../lib/outOfDateServer.js'
 import { loadOutOfDate } from '../web/lib/outOfDateLoad.js'
 import { describeInput, inputsForDraft, planSourceAccess, runRepositoryCall } from '../web/lib/interviewSources.js'
 import { buildInterviewBrief } from '../web/lib/interviewBrief.js'
@@ -293,7 +294,33 @@ describe('Out of date for a repository: only a real change to a file a Field dre
     })
     assert.deepEqual(asked, [['billing-api', [{ path: 'src/orders/limits.ts', commit: OLD }, { path: 'README.md', commit: OLD }]]])
     assert.deepEqual(result.flags.map((f) => f.field), ['details.summary'])
-    const unreadable = await loadOutOfDate({ sourceStore, decisionsStore, stages: [{ id: 'shape' }], currentStageId: 'shape', currentModules: modules, loadStageModules: async () => [], compareRepository: async () => Promise.reject(new Error('no access')) })
-    assert.deepEqual(unreadable.flags, [])
+    assert.deepEqual(result.unchecked, [])
+    const refusal = "You can't read the GitHub repository acme/billing-api without a token. If it is private, give a token that can read it."
+    const noAccess = Object.assign(new Error(refusal), { code: 'no-access' })
+    const unreadable = await loadOutOfDate({ sourceStore, decisionsStore, stages: [{ id: 'shape' }], currentStageId: 'shape', currentModules: modules, loadStageModules: async () => [], compareRepository: async () => Promise.reject(noAccess) })
+    assert.deepEqual(unreadable.flags, [], 'no evidence either way, so nothing is flagged')
+    // ...but the architect is told it was not checked, and why, rather than it being skipped in silence.
+    assert.deepEqual(unreadable.unchecked, [{ source: 'billing-api', title: sources.find((s) => s.id === 'billing-api').title, code: 'no-access', reason: refusal }])
+    const line = uncheckedRepositoryLine(unreadable.unchecked[0])
+    assert.match(line, /was not checked for changes, so the Fields that drew on it may be out of date: You can't read the GitHub repository acme\/billing-api without a token\./)
+    assert.match(line, /Give a token that can read it with "Your token" on its row in Source documents\./)
+    assert.doesNotMatch(uncheckedRepositoryLine({ title: 'Billing API', code: 'server-unreachable', reason: 'The server is down.' }), /Your token/, 'a token is offered only when access is the problem')
+  })
+
+  test("over MCP, get_instance's Out of date names a repository it could not compare, with the reason", async () => {
+    const definition = { stages: [{ id: 'shape', modules: ['details'] }], modules: new Map([['details', { title: 'Details', fields: [{ id: 'summary', title: 'Summary' }] }]]) }
+    const noAccess = Object.assign(new Error("You can't read the Azure DevOps repository acme/Billing/billing-api with the token you gave."), { code: 'no-access' })
+    const out = await describeOutOfDate({
+      sourceStore: { list: async () => ({ entries: sources }) },
+      readLog: async (id) => logs[id],
+      definition,
+      currentStageId: 'shape',
+      readStageModules: async () => modules,
+      compareRepository: async () => Promise.reject(noAccess),
+    })
+    assert.deepEqual(out.fields, [])
+    assert.deepEqual(out.uncheckedRepositories, [{ id: 'billing-api', title: sources.find((s) => s.id === 'billing-api').title, reason: noAccess.message }])
+    assert.equal(out.summary.length, 1)
+    assert.match(out.summary[0], /was not checked for changes.*with the token you gave/)
   })
 })

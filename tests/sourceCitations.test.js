@@ -216,7 +216,7 @@ const MANIFEST = [
 const CITED = 'Median time to payment is 12.4 working days [Client brief, p. 4](source:client-brief), confirmed in the [notes](source:old-notes).'
 
 // A scratch copy of the example Instance (design v3) with a citation in its Background, a Source documents manifest, and a copy of the bundled Definitions whose Solution on a Page (and only it) turns the appendix on when `appendix` is true.
-async function withCitingExample({ appendix, manifest = MANIFEST }, fn) {
+async function withCitingExample({ appendix, manifest = MANIFEST, citing = CITED }, fn) {
   const root = mkdtempSync(join(tmpdir(), 'gantry-citations-'))
   try {
     const instancesDir = join(root, 'instances')
@@ -227,7 +227,7 @@ async function withCitingExample({ appendix, manifest = MANIFEST }, fn) {
     writeFileSync(join(instancesDir, SLUG, 'instance.yaml'), instanceYaml)
     const backgroundPath = join(instancesDir, SLUG, 'modules', 'background.md')
     const background = readFileSync(backgroundPath, 'utf8')
-    const cited = background.replace(/\n## Affected domains/, `\n${CITED}\n\n## Affected domains`)
+    const cited = background.replace(/\n## Affected domains/, `\n${citing}\n\n## Affected domains`)
     assert.notEqual(cited, background, 'the citation lands in the Background')
     writeFileSync(backgroundPath, cited)
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
@@ -375,5 +375,70 @@ describe('a Local Workspace render request', () => {
     await assert.rejects(runLocalWorkspaceCompute('compile', payload({ sources: [{ id: 'a', filename: 7 }] }), { definitionsDir: 'definitions' }), /must carry a filename/)
     const many = Array.from({ length: 501 }, (_, i) => ({ id: `s${i}`, filename: 'x.txt' }))
     await assert.rejects(runLocalWorkspaceCompute('compile', payload({ sources: many }), { definitionsDir: 'definitions' }), (err) => err.status === 413)
+  })
+})
+
+// --- #319: a code repository in the render -------------------------------------------------------------------------
+// A repository is cited by a file at a commit. Word prints the words only; the Sources appendix gives its title, address, branch and the
+// commits cited, through the real render (lib/render.js) on a server workspace and through a Local Workspace's compute request.
+
+describe('a code repository in the render (#319)', () => {
+  const HEAD = 'c0ffee1234567890abcdef1234567890abcdef12'
+  const OLD = '0ld0ld1234567890abcdef1234567890abcdef12'
+  const repository = { provider: 'github', location: { owner: 'acme', repository: 'billing-api' }, branch: 'main' }
+  const REPO_MANIFEST = [...MANIFEST, { id: 'billing-api', title: 'Billing API', uploadedBy: 'a.architect', uploadedAt: '2026-11-01T00:00:00.000Z', repository }]
+  const REPO_CITED = `${CITED} Orders are capped [Billing API, limits](source:billing-api?path=src/orders/limits.ts&commit=${HEAD}) as the [readme](source:billing-api?path=README.md&commit=${OLD}) says.`
+  const APPENDIX = [
+    '# Sources',
+    '',
+    '| Document | File | Added |',
+    '| --- | --- | --- |',
+    '| Client brief | Client brief v3.docx | 4 Mar 2026 |',
+    '| Old notes (removed) | notes.txt | 15 Jan 2026 |',
+    '| Billing API | https://github.com/acme/billing-api/tree/main | branch main, commits c0ffee1, 0ld0ld1 |',
+  ].join('\n')
+  const appendixOf = (text) => text.slice(text.lastIndexOf('# Sources')).trim()
+
+  test('Word prints a repository citation as its words, and the Sources appendix (Word and .md) gives its title, address, branch and commits cited', async () => {
+    await withCitingExample({ appendix: true, manifest: REPO_MANIFEST, citing: REPO_CITED }, ({ instancesDir, definitionsDir }) => {
+      for (const options of [{ wordTags: false }, {}]) {
+        const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir, dryRun: true, ...options })
+        assert.match(result.markdown, new RegExp(`\\[Billing API, limits\\]\\(source:billing-api\\?path=src/orders/limits\\.ts&commit=${HEAD}\\)`), 'the .md keeps the citation as written')
+        assert.match(result.docxMarkdown, /Orders are capped \(Billing API, limits\) as the \(readme\) says\./)
+        assert.doesNotMatch(result.docxMarkdown, /\]\(source:/)
+        for (const text of [result.markdown, result.docxMarkdown]) assert.equal(appendixOf(text), APPENDIX)
+      }
+    })
+  })
+
+  test('the real .docx carries the appendix row and no link to the repository citation', async () => {
+    await withCitingExample({ appendix: true, manifest: REPO_MANIFEST, citing: REPO_CITED }, async ({ instancesDir, definitionsDir }) => {
+      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
+      const { execFileSync } = await import('node:child_process')
+      const xml = execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], { encoding: 'utf8' })
+      const text = [...xml.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1]).join('')
+      assert.match(text, /Orders are capped \(Billing API, limits\) as the \(readme\) says\./)
+      assert.match(text, /Billing API.*https:\/\/github\.com\/acme\/billing-api\/tree\/main.*branch main, commits c0ffee1, 0ld0ld1/)
+      assert.doesNotMatch(xml, /source:/)
+    })
+  })
+
+  test('a Local Workspace render request takes a repository entry with no filename and prints the same appendix', async () => {
+    const instanceYaml = readFileSync(join(EXAMPLE, 'instance.yaml'), 'utf8').replace(/^definitionVersion: \d+$/m, 'definitionVersion: 3')
+    const moduleFiles = {}
+    for (const file of readdirSync(join(EXAMPLE, 'modules'))) {
+      const text = readFileSync(join(EXAMPLE, 'modules', file), 'utf8')
+      moduleFiles[file.replace(/\.md$/, '')] = file === 'background.md' ? text.replace(/\n## Affected domains/, `\n${REPO_CITED}\n\n## Affected domains`) : text
+    }
+    const assets = readdirSync(join(EXAMPLE, 'assets')).map((file) => ({ id: file, base64: readFileSync(join(EXAMPLE, 'assets', file)).toString('base64') }))
+    // What web/app.js's buildLocalComputePayload sends: the cited entries' id, filename, title, dates, origin and (#319) pointer.
+    const sources = REPO_MANIFEST.filter((e) => e.id !== 'never-cited').map(({ id, filename, title, uploadedAt, removedAt, origin, repository }) => ({ id, filename, title, uploadedAt, removedAt, origin, repository }))
+    assert.equal(sources.find((s) => s.id === 'billing-api').filename, undefined)
+    const request = (list) => ({ definitionId: 'design', definitionVersion: 3, instanceYaml, moduleFiles, assets, artefact: 'soap', sources: list })
+    const result = await runLocalWorkspaceCompute('compile', request(sources), { definitionsDir: 'definitions' })
+    assert.match(result.docxMarkdown, /Orders are capped \(Billing API, limits\) as the \(readme\) says\./)
+    for (const text of [result.markdown, result.docxMarkdown]) assert.equal(appendixOf(text), APPENDIX)
+    // An entry with neither a filename nor a pointer is still refused.
+    await assert.rejects(runLocalWorkspaceCompute('compile', request([{ id: 'billing-api', title: 'Billing API' }]), { definitionsDir: 'definitions' }), /must carry a filename/)
   })
 })

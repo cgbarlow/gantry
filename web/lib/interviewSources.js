@@ -147,9 +147,19 @@ export async function runRepositoryCall(name, input, { lookup, reader }) {
     }
     return { ok: false, content: `There is no tool called ${name}.` }
   } catch (err) {
-    return { ok: false, content: `${title}: ${err?.message ?? 'it could not be read'}` }
+    const message = err?.message ?? 'it could not be read'
+    // #319: a refusal the architect has to act on (no access, no server, a branch that has gone) is also theirs to see, not only the AI's.
+    const blocked = REPOSITORY_BLOCKED_CODES.includes(err?.code) ? { blocked: { source: doc.id, title, code: err.code, message } } : {}
+    return { ok: false, content: `${title}: ${message}`, ...blocked }
   }
 }
+
+/**
+ * #319: the refusals of a repository read that come from where the architect stands, not from what the AI asked: they can't read it (or
+ * can't with the token this browser holds), the Gantry server or the Provider can't be reached, or the branch is gone. The interview tells
+ * the architect these, as well as the AI; a bad path or a skipped file is the AI's to sort out.
+ */
+export const REPOSITORY_BLOCKED_CODES = Object.freeze(['no-access', 'server-unreachable', 'unreachable', 'no-branch', 'base-url-not-allowed'])
 
 // ---------- the text fallback ----------
 

@@ -216,6 +216,99 @@ describe('POST /api/sources/repository and adding a pointer to an Instance', () 
       })
     ))
 
+  // AC1 on every Provider, not only GitHub: a private Azure DevOps repository with the architect's token and a public one with none, a
+  // private GitLab one and a private Bitbucket one. Each is checked through the route, added, listed, renamed and removed, and the
+  // Instance's sources folder never holds more than its manifest.
+  const providerCases = [
+    {
+      name: 'Azure DevOps (private, with a token)',
+      fake: () => createFakeAzureDevOpsServer({ organization: 'contoso', project: 'Payments', repository: 'billing', validPat: TOKEN, files: CODE }),
+      repository: (baseUrl) => ({ provider: 'azure-devops', location: { organization: 'contoso', project: 'Payments', repository: 'billing', baseUrl } }),
+      options: { allowAzureDevOpsBaseUrlOverride: true },
+      token: TOKEN,
+      refusal: /^You can't read the Azure DevOps repository contoso\/Payments\/billing without a token\./,
+      id: 'billing',
+    },
+    {
+      name: 'Azure DevOps (public, with no token)',
+      fake: () => createFakeAzureDevOpsServer({ organization: 'contoso', project: 'Payments', repository: 'open-billing', validPat: 'nobody', files: CODE, anonymousRead: true }),
+      repository: (baseUrl) => ({ provider: 'azure-devops', location: { organization: 'contoso', project: 'Payments', repository: 'open-billing', baseUrl } }),
+      options: { allowAzureDevOpsBaseUrlOverride: true },
+      token: null,
+      id: 'open-billing',
+    },
+    {
+      name: 'GitLab (private, with a token)',
+      fake: () => createFakeGitLabServer({ namespace: 'acme/payments', repository: 'billing-api', validPat: TOKEN, files: CODE }),
+      apiRoot: '/api/v4',
+      repository: (baseUrl) => ({ provider: 'gitlab', location: { namespace: 'acme/payments', repository: 'billing-api', baseUrl } }),
+      options: { allowGitLabBaseUrlOverride: true },
+      token: TOKEN,
+      refusal: /^You can't read the GitLab repository acme\/payments\/billing-api without a token\./,
+      id: 'billing-api',
+    },
+    {
+      name: 'Bitbucket (private, with a token)',
+      fake: () => createFakeBitbucketServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: CODE }),
+      apiRoot: '/2.0',
+      repository: () => ({ provider: 'atlassian', location: { owner: 'acme', repository: 'billing-api' } }),
+      options: (baseUrl) => ({ atlassianBitbucketBaseUrl: baseUrl }),
+      token: TOKEN,
+      refusal: /^You can't read the Bitbucket repository acme\/billing-api without a token\./,
+      id: 'billing-api',
+    },
+  ]
+  for (const c of providerCases) {
+    test(`on a server workspace, ${c.name}: checked, added, listed, renamed and removed, with only the manifest written`, () =>
+      withFake(c.fake(), (codeBase) =>
+        withScratchInstances(async (instancesDir) => {
+          createInstance('design', SLUG, { instancesDir })
+          const options = typeof c.options === 'function' ? c.options(codeBase) : c.options
+          await withRunningServer({ slug: SLUG, instancesDir, ...options }, async (base) => {
+            const repository = c.repository(codeBase)
+            const ask = (body, token) => fetch(`${base}/api/sources/repository`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: basicAuthHeader(token) } : {}) }, body: JSON.stringify(body) })
+            const sources = (method, path = '', body) => fetch(`${base}/api/instance/sources${path}?slug=${SLUG}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+
+            if (c.refusal) {
+              const refused = await ask({ action: 'check', repository })
+              assert.equal(refused.status, 403)
+              const body = await refused.json()
+              assert.equal(body.code, 'no-access')
+              assert.match(body.error, c.refusal, 'a plain sentence, never a raw Provider error')
+            }
+            const checkedRes = await ask({ action: 'check', repository }, c.token)
+            assert.equal(checkedRes.status, 200, await checkedRes.clone().text())
+            const checked = await checkedRes.json()
+            assert.equal(checked.branch, 'main')
+            assert.match(checked.commit, /^\S{7,}$/)
+
+            const added = await sources('POST', '', { repository: { ...repository, branch: checked.branch }, uploadedBy: 'a.architect' })
+            assert.equal(added.status, 201, await added.clone().text())
+            const { entry } = await added.json()
+            assert.equal(entry.id, c.id)
+            assert.deepEqual(entry.repository, { ...repository, branch: 'main' })
+            const folder = join(instancesDir, 'default', SLUG, 'sources')
+            assert.deepEqual(readdirSync(folder), ['manifest.yaml'], 'nothing from the repository is stored')
+
+            // Read through the route with the same token, at the pointer's branch, naming its commit.
+            const read = await (await ask({ action: 'read', repository: entry.repository, path: 'src/orders/limits.ts' }, c.token)).json()
+            assert.equal(read.text, CODE['src/orders/limits.ts'])
+            assert.equal(read.commit, checked.commit)
+
+            assert.deepEqual((await (await sources('GET')).json()).entries.map((e) => [e.id, e.repository?.provider]), [[c.id, repository.provider]])
+            const renamed = await sources('PATCH', `/${c.id}`, { title: 'Billing service' })
+            assert.equal((await renamed.json()).entry.title, 'Billing service')
+            assert.equal((await (await sources('GET')).json()).entries[0].title, 'Billing service')
+            const removed = await sources('DELETE', `/${c.id}`, { removedBy: 'a.architect' })
+            const gone = (await removed.json()).entry
+            assert.ok(gone.removedAt)
+            assert.deepEqual(gone.repository, { ...repository, branch: 'main' }, 'a removed pointer still names its repository')
+            assert.deepEqual(readdirSync(folder), ['manifest.yaml'], 'still only the manifest')
+          })
+        }),
+      c.apiRoot ?? ''))
+  }
+
   test('a self-hosted address this server does not take for a workspace is refused for a pointer too', () =>
     withRunningServer({}, async (base) => {
       const res = await fetch(`${base}/api/sources/repository`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'check', repository: github('http://127.0.0.1:1') }) })
@@ -258,6 +351,20 @@ describe('POST /api/sources/repository and adding a pointer to an Instance', () 
             const flagged = await (await api('GET', '/api/instance/out-of-date')).json()
             assert.deepEqual(flagged.fields.map((f) => [f.field, f.flags[0].change, f.flags[0].paths]), [[`${moduleId}.${fieldId}`, 'code-changed', ['src/orders/limits.ts']]])
             assert.match(flagged.fields[0].note, /^Out of date: src\/orders\/limits\.ts in billing-api changed \(now at \S{7}\)$/)
+
+            // Renamed and removed like any Source document, each a change of the manifest alone on the Stage's branch.
+            const renamed = await api('PATCH', '/api/instance/sources/billing-api', { title: 'Billing API' })
+            assert.equal(renamed.status, 200, await renamed.clone().text())
+            assert.equal((await renamed.json()).entry.title, 'Billing API')
+            const listed = await (await api('GET', '/api/instance/sources')).json()
+            assert.deepEqual(listed.entries.map((e) => [e.id, e.title, e.repository?.branch]), [['billing-api', 'Billing API', 'main']])
+            const removed = await api('DELETE', '/api/instance/sources/billing-api', { removedBy: 'a.architect' })
+            assert.equal(removed.status, 200, await removed.clone().text())
+            assert.ok((await removed.json()).entry.removedAt)
+            const after = (await workspace.listFolder('gantry-workspace/acme/sources', { branch: `gantry-workspace/acme/${instance.stage.id}` })).map((f) => f.path.replace(/^\//, ''))
+            assert.deepEqual(after, ['gantry-workspace/acme/sources/manifest.yaml'], 'still only the manifest: the repository itself is untouched')
+            const manifest = await workspace.getFileContent('gantry-workspace/acme/sources/manifest.yaml', { branch: `gantry-workspace/acme/${instance.stage.id}` })
+            for (const part of [/title: Billing API/, /removedAt: /, /removedBy: a\.architect/, /repository:\n\s+provider: github/]) assert.match(manifest, part, 'the removed pointer keeps its name and what it pointed at')
           })
         )
       ))

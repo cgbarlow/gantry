@@ -126,6 +126,12 @@ const opened = (modules, stageTitle) =>
   `${stageTitle} was approved and merged, so these Modules are no longer held and are now in scope: ${modules.map((m) => `${m.title ?? m.id} (${m.id})`).join(', ')}. ` +
   'Extend their Fields now, from the Source documents, the answers so far and what that Stage settled. Then ask your next round of cards: every question whose prerequisites are settled.'
 
+/** #319: the thread line for a code repository read refused for a reason the architect has to act on (web/lib/interviewSources.js). */
+export function repositoryBlockedLine({ title, code, message }) {
+  const fix = code === 'no-access' ? ' Give a token that can read it with "Your token" on its row in the Source documents list, then carry on.' : ''
+  return `Can't read the code repository ${title}: ${message}${fix} The AI is told so and won't rely on it.`
+}
+
 const LAST_ROUND_NOTE = 'That was the last round. Redraft the Fields these answers feed. Ask nothing more: the architect has chosen to finish.'
 
 function sessionNote({ cardMode, textDrafts, reader, repositories = false, handEdits = [] }) {
@@ -314,6 +320,7 @@ export function createInterviewSession(config = {}) {
   let cardFailures = 0
   let controller = null
   let readsSinceDraft = [] // the reads made since the last drafts landed (#292)
+  const repositoryBlocks = new Set() // #319: the repositories (and why) the architect has been told this session they can't be read
   let plan = new Map() // how each Source document reaches the AI Provider in use (#292)
   let announced = '' // what the thread last said about unreadable documents, so a repeat is not said twice
   const attachmentCache = new Map()
@@ -536,6 +543,14 @@ export function createInterviewSession(config = {}) {
       readsSinceDraft.push(result.read)
       say('sys', `Read ${describeInput(result.read)}`, { read: result.read.source })
       emit()
+    } else if (result.blocked) {
+      // Said once per repository and reason: the AI may try several reads in a row, and the architect needs to hear it once.
+      const said = `${result.blocked.source}|${result.blocked.code}`
+      if (!repositoryBlocks.has(said)) {
+        repositoryBlocks.add(said)
+        say('sys', repositoryBlockedLine(result.blocked), { repositoryBlocked: result.blocked.source })
+        emit()
+      }
     }
     return result
   }

@@ -40,13 +40,14 @@ import {
   repositoryWebAddress,
   shortCommit,
 } from './sourceRepository.js'
-import { callRepository, rememberRepositoryToken } from './sourceRepositoryClient.js'
+import { callRepository, rememberRepositoryToken, repositoryToken } from './sourceRepositoryClient.js'
 
 // #318: how the panel asks the Gantry server whether it fetches web addresses, and has it fetch one. Tests pass their own.
 const SERVER_SOURCE_FETCH = { status: () => sourceFetchStatus(), fetch: (address) => fetchSourceAddress(address) }
 
-// #319: how the panel asks the Gantry server whether the architect can read a repository (with their own token, or none), and keeps that token.
-const SERVER_REPOSITORY_ACCESS = { check: (repository, token) => callRepository('check', repository, {}, { token }), remember: rememberRepositoryToken }
+// #319: how the panel asks the Gantry server whether the architect can read a repository (with their own token, or none), keeps that token,
+// and finds the one this browser already holds for it.
+const SERVER_REPOSITORY_ACCESS = { check: (repository, token) => callRepository('check', repository, {}, { token }), remember: rememberRepositoryToken, token: repositoryToken }
 
 const EMPTY_REPOSITORY_FORM = { provider: 'github', location: {}, branch: '', folders: '', token: '' }
 
@@ -117,7 +118,7 @@ export async function openSourceDocument(store, entry) {
 /**
  * #297: `newSince` is the set of document ids marked **New since last interview** (worked out from the decisions logs by the caller). Each document that a newer one replaces shows "replaced by <new>", and the upload has a "This replaces…" picker that records the link in the manifest.
  *
- * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default. `archiveName` is the file **Download all** saves (#310). `compact` draws the list as the Interview page's narrow rail does (#286): titles, a "+ Add Source document" button and a drop zone, with no table; `onList(list)` is told whenever the list has been read (after a load or a change). `sourceFetch` (#318) is `{ status(), fetch(address) }`, the Gantry server's by default: adding by address is offered only when `status()` says the server has it on. `repositoryAccess` (#319) is `{ check(repository, token), remember(repository, token) }`, the Gantry server's and the browser's credential store by default; `citedCommits(id)` lists the commits the Instance's content cites a repository at, for the links file **Download all** adds.
+ * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default. `archiveName` is the file **Download all** saves (#310). `compact` draws the list as the Interview page's narrow rail does (#286): titles, a "+ Add Source document" button and a drop zone, with no table; `onList(list)` is told whenever the list has been read (after a load or a change). `sourceFetch` (#318) is `{ status(), fetch(address) }`, the Gantry server's by default: adding by address is offered only when `status()` says the server has it on. `repositoryAccess` (#319) is `{ check(repository, token), remember(repository, token), token(repository) }`, the Gantry server's and the browser's credential store by default. Each code repository in the list is checked once on opening with the token this browser holds for it (none for a public one): one this reader can't read says so on its row, and **Your token** lets any reader (a teammate, another browser, after the browser's storage is cleared) give their own; `citedCommits(id)` lists the commits the Instance's content cites a repository at, for the links file **Download all** adds.
  */
 export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null, compact = false, newSince = null, archiveName = 'Source documents.zip', sourceFetch = SERVER_SOURCE_FETCH, repositoryAccess = SERVER_REPOSITORY_ACCESS, citedCommits = () => [] }) {
   const [list, setList] = useState(null)
@@ -133,6 +134,10 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
   const [address, setAddress] = useState('')
   // #319: the "Add a code repository" form, null while it is closed.
   const [repoForm, setRepoForm] = useState(null)
+  // #319: whether this reader can read each code repository in the list, by id: { ok: true } or { ok: false, code, text }; absent until checked.
+  const [access, setAccess] = useState({})
+  // #319: the "Your token" form of one repository's row, { id, token }, or null.
+  const [tokenFor, setTokenFor] = useState(null)
 
   useEffect(() => {
     let current = true
@@ -162,8 +167,26 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
     setMessage(null)
     setRenaming(null)
     setConfirmRemove(null)
+    setAccess({})
+    setTokenFor(null)
     reload()
   }, [reload])
+
+  // #319: each code repository is checked once, with the token this browser holds for it, so a reader who can't read one (a teammate, another
+  // browser, or after the browser's storage was cleared) is told so on its row, not left to find out when a read fails later.
+  useEffect(() => {
+    if (!list || !repositoryAccess?.check) return undefined
+    const unchecked = (list.entries ?? []).filter((e) => isRepositorySource(e) && !e.removedAt && !(e.id in access))
+    if (unchecked.length === 0) return undefined
+    setAccess((a) => ({ ...a, ...Object.fromEntries(unchecked.map((e) => [e.id, { checking: true }])) }))
+    for (const entry of unchecked) {
+      Promise.resolve()
+        .then(() => repositoryAccess.check(entry.repository, repositoryAccess.token?.(entry.repository) ?? null))
+        .then(() => setAccess((a) => (a[entry.id]?.checking ? { ...a, [entry.id]: { ok: true } } : a)))
+        .catch((err) => setAccess((a) => (a[entry.id]?.checking ? { ...a, [entry.id]: { ok: false, code: err?.code ?? null, text: err?.message ?? `You can't read ${repositoryName(entry.repository)}.` } } : a)))
+    }
+    return undefined
+  }, [list, repositoryAccess])
 
   async function run(work) {
     setBusy(true)
@@ -252,12 +275,36 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       const repository = { ...wanted, branch: checked.branch, ...(folders.length ? { folders } : {}) }
       const { entry } = await store.addRepository({ repository, uploadedBy: actor })
       repositoryAccess.remember?.(repository, token ?? '')
+      setAccess((a) => ({ ...a, [entry.id]: { ok: true } }))
       setRepoForm(null)
       await reload()
       setMessage({
         kind: 'ok',
         text: `Added "${entry.title}", the ${checked.branch} branch of ${repositoryName(repository)}${folders.length ? ` (${folders.join(', ')})` : ''}. Nothing from it is kept here: the AI reads it live, and each read records the commit it saw (now ${shortCommit(checked.commit)}).`,
       })
+    })
+
+  // #319: **Your token**: any reader of an existing pointer gives the token they read it with (blank: none, for a public one). The Gantry server
+  // checks it first; only a token that can read the repository is kept, in this browser, as when adding it. The Instance is not changed.
+  const giveToken = (entry, given) =>
+    run(async () => {
+      const name = repositoryName(entry.repository)
+      const token = String(given ?? '').trim() || null
+      setMessage({ kind: 'info', text: `Checking you can read ${name}…` })
+      let checked
+      try {
+        checked = await repositoryAccess.check(entry.repository, token)
+      } catch (err) {
+        setAccess((a) => ({ ...a, [entry.id]: { ok: false, code: err?.code ?? null, text: err?.message ?? `You can't read ${name}.` } }))
+        throw err
+      }
+      repositoryAccess.remember?.(entry.repository, token ?? '')
+      setAccess((a) => ({ ...a, [entry.id]: { ok: true } }))
+      setTokenFor(null)
+      // Out of date looks again, now that the repository can be compared.
+      sourceListTick.value += 1
+      const at = checked?.commit ? ` (its ${checked.branch ?? entry.repository.branch} branch is at ${shortCommit(checked.commit)})` : ''
+      setMessage({ kind: 'ok', text: token ? `You can read ${name} with this token${at}. It is kept in this browser, as a workspace's is.` : `You can read ${name} without a token${at}.` })
     })
 
   // #318: **Fetch again**, only ever when the architect asks. Identical bytes add nothing; changed ones are added as a new document that replaces this one, which flags the Fields that drew on it Out of date.
@@ -476,6 +523,32 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
   }
   const repositoryLink = (entry) =>
     html`<a class="source-documents-origin" data-testid="source-repository-link" href=${repositoryWebAddress(entry.repository)} target="_blank" rel="noopener noreferrer" title=${`${repositoryProviderLabel(entry.repository.provider)}, read live`}>${repositoryName(entry.repository)}</a>`
+  // #319: a repository this reader can't read says so on its row; **Your token** opens a small form to give theirs.
+  const noAccessNote = (entry) => {
+    const state = isRepositorySource(entry) ? access[entry.id] : null
+    return state && state.ok === false ? html`<p class="inline-error source-repository-no-access" role="alert" data-testid="source-repository-no-access">${state.text}</p>` : null
+  }
+  const tokenButton = (entry) =>
+    isRepositorySource(entry) && tokenFor?.id !== entry.id
+      ? html`<button type="button" class="btn small ghost" disabled=${busy} data-testid="source-repository-token-open" onClick=${() => setTokenFor({ id: entry.id, token: '' })} title=${`Give the token this browser reads ${repositoryName(entry.repository)} with`}>Your token</button>`
+      : null
+  const tokenForm = (entry) =>
+    isRepositorySource(entry) && tokenFor?.id === entry.id
+      ? html`<form
+          class="source-repository-token-form"
+          data-testid="source-repository-token-form"
+          onSubmit=${(e) => {
+            e.preventDefault()
+            giveToken(entry, tokenFor.token)
+          }}
+        >
+          <label>Your token for ${repositoryName(entry.repository)} (blank for a public repository)
+            <input type="password" autocomplete="off" data-testid="source-repository-token-input" value=${tokenFor.token} disabled=${busy} onInput=${(e) => setTokenFor({ id: entry.id, token: e.currentTarget.value })} />
+          </label>
+          <button type="submit" class="btn small primary" disabled=${busy} data-testid="source-repository-token-save">Check and keep</button>
+          <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => setTokenFor(null)}>Cancel</button>
+        </form>`
+      : null
   const repositoryWhere = (entry) => `${entry.repository.branch} branch${entry.repository.folders ? ` · ${entry.repository.folders.join(', ')}` : ''}`
 
   const originLink = (entry) =>
@@ -501,6 +574,9 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                   <span class="srcdoc-title" title=${isRepositorySource(entry) ? repositoryWebAddress(entry.repository) : isFetchedSource(entry) ? `${entry.origin.address}, fetched ${formatWhen(entry.origin.fetchedAt)}` : entry.filename}>${entry.title}</span>
                   <span class="meta">${isRepositorySource(entry) ? `code repository · ${repositoryWhere(entry)}` : `${formatBytes(entry.size)}${entry.text ? '' : ' · no text'}`}</span>
                   ${marks(entry)}
+                  ${noAccessNote(entry)}
+                  ${tokenButton(entry)}
+                  ${tokenForm(entry)}
                   ${sourceFileKind(entry.filename) === 'pdf' && store.setReadVisually
                     ? html`<label class="srcdoc-visual" title="Send the PDF itself to an AI Provider that takes PDFs, instead of its text">
                         <input type="checkbox" data-testid="source-read-visually" checked=${entry.readVisually === true} disabled=${busy || readOnly} onChange=${() => toggleReadVisually(entry)} />
@@ -594,12 +670,14 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                         : html`<span class="source-documents-title-text">${entry.title}</span>`}
                       ${marks(entry)}
                     </td>
-                    <td class="source-documents-file">${isRepositorySource(entry) ? html`${repositoryLink(entry)}<br /><span class="muted">${repositoryWhere(entry)}</span>` : entry.filename}${isFetchedSource(entry) ? html`<br />${originLink(entry)}` : null}</td>
+                    <td class="source-documents-file">${isRepositorySource(entry) ? html`${repositoryLink(entry)}<br /><span class="muted">${repositoryWhere(entry)}</span>${noAccessNote(entry)}${tokenForm(entry)}` : entry.filename}${isFetchedSource(entry) ? html`<br />${originLink(entry)}` : null}</td>
                     <td>${isRepositorySource(entry) ? '' : formatBytes(entry.size)}</td>
                     <td>${isFetchedSource(entry) ? `fetched ${formatWhen(entry.origin.fetchedAt)}` : formatWhen(entry.uploadedAt)}${entry.uploadedBy ? html`<br /><span class="muted">${entry.uploadedBy}</span>` : null}</td>
                     <td>
                       ${isRepositorySource(entry)
-                        ? html`<span class="stamp agreed" data-testid="source-repository-stamp" title="Nothing from the repository is kept: the AI reads it live, and each read records the commit it saw">READ LIVE</span>`
+                        ? access[entry.id]?.ok === false
+                          ? html`<span class="stamp review" data-testid="source-repository-stamp" title="This browser can't read the repository: give a token that can with Your token">CAN'T READ</span>`
+                          : html`<span class="stamp agreed" data-testid="source-repository-stamp" title="Nothing from the repository is kept: the AI reads it live, and each read records the commit it saw">READ LIVE</span>`
                         : entry.text
                         ? html`<span class="stamp agreed" title="The text read from this document is kept with it">TEXT READ</span>`
                         : html`<span class="stamp review" title="No text was kept: the AI looks at the original">NO TEXT</span>`}
@@ -615,6 +693,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                         : html`<div class="source-documents-actions">
                             <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => downloadOriginal(entry)} title=${isRepositorySource(entry) ? `Open ${repositoryName(entry.repository)} at its ${entry.repository.branch} branch on ${repositoryProviderLabel(entry.repository.provider)}` : undefined}>Download</button>
                             <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => copyCitation(entry)} title="Copy a citation of this document to paste into a field">Copy citation</button>
+                            ${tokenButton(entry)}
                             ${readOnly || !canUseSourceAsImage(entry.filename) || !store.useAsImage
                               ? null
                               : html`<button type="button" class="btn small ghost" disabled=${busy} onClick=${() => useAsImage(entry)} title="Copy this picture into the Instance's images">Use as image</button>`}
