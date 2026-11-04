@@ -67,12 +67,12 @@ async function withBrowser(aiBase, fn) {
   }
 }
 
-async function withChoiceServer(fn) {
+async function withChoiceServer(fn, trio = {}) {
   const root = mkdtempSync(join(tmpdir(), 'gantry-332-'))
   const definitionsDir = join(root, 'definitions')
   const instancesDir = join(root, 'instances')
   try {
-    writeTrio(definitionsDir, { choice: true })
+    writeTrio(definitionsDir, { choice: true, ...trio })
     mkdirSync(instancesDir)
     createInstance('trio', SLUG, { instancesDir, definitionsDir, definitionVersion: 1 })
     await withFakeAnthropic(script, (aiBase, posts) =>
@@ -153,7 +153,8 @@ test('server workspace: the kickoff has a row per Stage of the run, and each Sta
     const second = await open()
     await second.goto(`${base}/instance/${SLUG}?interview=1`)
     await second.waitForSelector('[data-testid="interview-resume-recap"]')
-    assert.deepEqual((await rows(second)).map((r) => [r[0], r[2]]), [['s2', FULL]])
+    // The kickoff is between sessions, so the row can still be changed there (as Run until can); it shows the run's choice.
+    assert.deepEqual((await rows(second)).map((r) => [r[0], r[2], r[3]]), [['s2', FULL, false]])
     await second.waitForSelector('[data-testid="interview-start"]:not([disabled])')
     await second.click('[data-testid="interview-start"]')
     const resumed = (await waitForRequests(posts, 3))[2]
@@ -178,12 +179,29 @@ test('server workspace: a run stopped after a Stage and resumed in a fresh brows
     const second = await open()
     await second.goto(`${base}/instance/${SLUG}?interview=1`)
     await second.waitForSelector('[data-testid="interview-resume-note"]')
+    // With Run until on Shape, Shape's row shows the run's choice, which can be changed before resuming (the kickoff is between sessions).
+    await second.selectOption('[data-testid="interview-run-until"]', 's2')
+    assert.deepEqual((await rows(second)).map((r) => [r[0], r[2], r[3]]), [['s1', 'art-s1', true], ['s2', FULL, false]], "the paused run's choices come back, and can be changed before resuming")
     await second.waitForSelector('[data-testid="interview-resume"]:not([disabled])')
     await second.click('[data-testid="interview-resume"]')
     await second.waitForSelector('[data-testid="interview-field"][data-field-key="m2.more"]')
     const shape = (await waitForRequests(posts, 2))[1]
     assert.deepEqual([shape.stage, aimedFor(shape)], ['s2', FULL])
   })
+})
+
+test('server workspace: a Stage whose Gate no Artefact can pass shows a ghosted "No Artefact passes this Gate" row', async () => {
+  await withChoiceServer(
+    async ({ open, base }) => {
+      const page = await open()
+      await page.goto(`${base}/instance/${SLUG}?interview=1`)
+      await page.waitForSelector('[data-testid="interview-run-until"]')
+      await page.selectOption('[data-testid="interview-run-until"]', 's3')
+      assert.deepEqual((await rows(page))[2], ['s3', 'Ship (gate: g3)', '', true, 'No Artefact passes this Gate'])
+      assert.equal(await page.getAttribute('[data-testid="interview-artefact"][data-stage-id="s3"]', 'title'), 'No Artefact passes this Gate')
+    },
+    { bareShip: true }
+  )
 })
 
 // ---------- a GitHub workspace ----------

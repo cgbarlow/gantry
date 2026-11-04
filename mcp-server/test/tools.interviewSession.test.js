@@ -136,16 +136,19 @@ const STAGE_ARTEFACTS = [
   { stageId: 'shape', title: 'Shape', gate: 'g1', candidates: [{ id: 'soap', title: 'SOAP' }, { id: 'soap-full', title: 'SOAP (full)' }], lightest: 'soap' },
   { stageId: 'design', title: 'Design', gate: 'g2', candidates: [{ id: 'ssad', title: 'SSAD' }, { id: 'sad', title: 'SAD' }], lightest: 'ssad' },
 ]
+// The brief as gantry serve gives it: aiming for the artefact asked for (none: the candidates are listed and the agent asks). `asked` collects them.
+function aimedBrief(url, asked, recap = BRIEF.recap) {
+  const artefact = url.searchParams.get('artefact')
+  asked.push(artefact)
+  return { ...BRIEF, recap, artefact: artefact ? { id: artefact, title: artefact } : null, stageArtefacts: STAGE_ARTEFACTS }
+}
 
 test('#332 start_interview_session aims each stage of the run at the artefact chosen for it, and the rest at their lightest', async () => {
   const asked = []
   await withClient(
     ({ url }) => {
       if (url.pathname === '/api/instance') return { status: 200, body: INSTANCE }
-      if (url.pathname === '/api/instance/interview-brief') {
-        asked.push(url.searchParams.get('artefact'))
-        return { status: 200, body: { ...BRIEF, stageArtefacts: STAGE_ARTEFACTS } }
-      }
+      if (url.pathname === '/api/instance/interview-brief') return { status: 200, body: aimedBrief(url, asked) }
       return undefined
     },
     async (gantryClient) => {
@@ -153,7 +156,8 @@ test('#332 start_interview_session aims each stage of the run at the artefact ch
       const chosen = payload(await start({ artefacts: { design: 'sad' } }))
       assert.deepEqual(chosen.session.artefacts, { shape: 'soap', design: 'sad' }, 'a stage left out gets its lightest')
       assert.match(chosen.next, /session\.artefacts/)
-      assert.equal(asked.at(-1), null, 'the first stage, left out, is briefed with no artefact named')
+      assert.equal(asked.at(-1), 'soap', 'the first stage, left out, is briefed aiming for its lightest, as its saves record')
+      assert.equal(chosen.artefact.id, 'soap', 'the brief handed back aims for the lightest, not the list of candidates')
 
       const both = payload(await start({ artefacts: { shape: 'soap-full', design: 'sad' } }))
       assert.deepEqual(both.session.artefacts, { shape: 'soap-full', design: 'sad' })
@@ -185,6 +189,66 @@ test('#332 a lone artefactId still works against a gantry serve that lists no ar
       const refused = await tool('start_interview_session').handler({ slug: 'my-instance', artefacts: { shape: 'soap' } }, { gantryClient })
       assert.match(payload(refused).error, /does not list the artefacts each stage can aim for/)
     }
+  )
+})
+
+test('#332 resume_interview_session keeps the artefact the run chose for each stage, briefs the resumed stage at its own, and chooses again only when asked', async () => {
+  const asked = []
+  const paused = { session: 's-b1', who: 'a.architect', state: 'paused', target: 'design', artefact: 'soap-full', artefacts: { shape: 'soap-full', design: 'sad' } }
+  await withClient(
+    ({ url }) => {
+      if (url.pathname === '/api/instance') return { status: 200, body: INSTANCE }
+      if (url.pathname === '/api/instance/interview-brief') return { status: 200, body: aimedBrief(url, asked, { ...BRIEF.recap, resuming: true, sessions: [paused], adoptable: paused }) }
+      return undefined
+    },
+    async (gantryClient) => {
+      const resume = (args) => tool('resume_interview_session').handler({ slug: 'my-instance', who: 'a.architect', ...args }, { gantryClient })
+      const body = payload(await resume({}))
+      assert.equal(body.session.id, 's-b1')
+      assert.deepEqual(body.session.artefacts, { shape: 'soap-full', design: 'sad' }, 'the run\'s choices, from the session taken over')
+      assert.equal(asked.at(-1), 'soap-full', 'the resumed stage is briefed at the artefact chosen for it')
+      assert.equal(body.artefact.id, 'soap-full')
+      assert.match(body.next, /session\.artefacts/, 'and the agent is told to brief each later stage with its own')
+
+      const again = payload(await resume({ artefacts: { design: 'ssad' } }))
+      assert.deepEqual(again.session.artefacts, { shape: 'soap-full', design: 'ssad' }, 'a stage named again aims for the new choice; the rest keep theirs')
+      const lone = payload(await resume({ artefactId: 'soap' }))
+      assert.deepEqual(lone.session.artefacts, { shape: 'soap', design: 'sad' })
+      assert.equal(asked.at(-1), 'soap')
+
+      const wrong = await resume({ artefacts: { design: 'soap' } })
+      assert.equal(wrong.isError, true)
+      assert.match(payload(wrong).error, /"soap" can't pass the gate of stage "Design"/)
+    }
+  )
+})
+
+test('#332 resume_interview_session after the earlier stage merged keeps the run\'s choices from the log, with no session on the new stage to take over', async () => {
+  const asked = []
+  let checked = 0
+  await withClient(
+    ({ url }) => {
+      if (url.pathname === '/api/instance') {
+        const moved = checked > 0
+        return { status: 200, body: { ...INSTANCE, workspaceBacked: true, pullRequests: { shape: 7 }, stage: { id: moved ? 'design' : 'shape' }, currentStageId: moved ? 'design' : 'shape' } }
+      }
+      if (url.pathname === '/api/instance/check-status') {
+        checked++
+        return { status: 200, body: { merged: true, advancedTo: { id: 'design', title: 'Design' } } }
+      }
+      if (url.pathname === '/api/instance/interview-brief') {
+        const body = aimedBrief(url, asked, { ...BRIEF.recap, runArtefacts: { shape: 'soap', design: 'sad' } })
+        return { status: 200, body: { ...body, stage: { id: 'design' }, stageArtefacts: STAGE_ARTEFACTS.slice(1) } }
+      }
+      return undefined
+    },
+    async (gantryClient) => {
+      const body = payload(await tool('resume_interview_session').handler({ slug: 'ado-instance', runUntil: 'design' }, { gantryClient }))
+      assert.equal(body.adopted, false)
+      assert.deepEqual(body.session.artefacts, { shape: 'soap', design: 'sad' })
+      assert.equal(asked.at(-1), 'sad', 'Design is briefed at the artefact the run chose for it, not its lightest')
+    },
+    { 'ws-1': 'pat' }
   )
 })
 

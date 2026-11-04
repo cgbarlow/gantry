@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { artefactRows, beginRun, chosenArtefacts, clearRun, getRun, interviewRuns, nextStage, planRows, resumableRun, runArtefacts, runOpening, runTargets, saveOutcome, updateRun } from '../web/lib/interviewRun.js'
+import { artefactRows, beginRun, chosenArtefacts, clearRun, getRun, interviewRuns, nextStage, planRows, resumableRun, resumedArtefacts, runArtefacts, runOpening, runTargets, saveOutcome, updateRun } from '../web/lib/interviewRun.js'
 import { applyDecisionsDelta, emptyDecisionsLog, sessionStatus } from '../web/lib/decisionsLog.js'
 import { createInterviewSession } from '../web/lib/interviewSession.js'
 
@@ -188,6 +188,22 @@ test('#332 the status block keeps the Artefact chosen for each Stage of the run,
   const sent = session.decisionsDelta({ runState: 'paused', saving: true }).status
   assert.equal(sent.artefact, 'full', 'the Stage records the Artefact it aims for')
   assert.deepEqual(sent.artefacts, { one: 'brief', two: 'full' })
+})
+
+test('#332 Resume the run keeps the Artefact the run chose for each Stage, unless the architect chooses another on the kickoff', () => {
+  const stages = CHOICE_DEFINITION.stages
+  // Paused on One after its Save, in a run to Two that chose the heavier Artefact for Two.
+  const log = applyDecisionsDelta(emptyDecisionsLog('one'), { status: { session: 's-1', who: 'Alex', state: 'paused', target: 'two', artefact: 'brief', artefacts: { one: 'brief', two: 'full' } } }, 'one')
+  const resume = (extra) => resumedArtefacts({ definition: CHOICE_DEFINITION, stages, currentStageId: 'two', targetStageId: 'two', log, fromStageId: 'one', ...extra })
+  assert.deepEqual(resume(), { one: 'brief', two: 'full' }, 'the run carries on aiming Two at what it chose, not the lightest')
+  // The kickoff is between sessions: its rows can still be changed, as Run until can.
+  assert.deepEqual(resume({ picked: { two: 'light' } }), { one: 'brief', two: 'light' }, "the architect's pick on the resume kickoff wins")
+  assert.deepEqual(resume({ picked: { two: 'brief' } }), { one: 'brief', two: 'full' }, 'a pick that cannot pass the Gate is not used')
+  // Run until moved on to a Stage the run never chose for: it aims for its lightest; one with no candidate has none.
+  assert.deepEqual(resume({ targetStageId: 'four' }), { one: 'brief', two: 'full' })
+  const further = resumedArtefacts({ definition: { ...CHOICE_DEFINITION, artefacts: [...CHOICE_DEFINITION.artefacts, { id: 'last', gate: 'g4' }] }, stages, currentStageId: 'two', targetStageId: 'four', log, fromStageId: 'one' })
+  assert.deepEqual(further, { one: 'brief', two: 'full', four: 'last' })
+  assert.deepEqual(resumedArtefacts({ definition: CHOICE_DEFINITION, stages, currentStageId: 'two', targetStageId: 'two', log: null, fromStageId: 'one' }), { two: 'light' }, 'no log: the lightest')
 })
 
 test('the run held in the tab is replaced, changed and cleared by Instance', () => {

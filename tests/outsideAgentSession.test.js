@@ -16,7 +16,7 @@ const session = (extra = {}) => parseSession({ id: 's-a1', runUntil: 'shape', st
 describe('parseSession', () => {
   test('keeps the session the agent says it is in, and defaults the state', () => {
     assert.deepEqual(parseSession({ id: 's-a1', runUntil: 'shape', model: 'claude-opus-4-1' }), {
-      id: 's-a1', runUntil: 'shape', state: 'in-progress', model: 'claude-opus-4-1', who: '', artefact: null, stages: undefined, instructions: null,
+      id: 's-a1', runUntil: 'shape', state: 'in-progress', model: 'claude-opus-4-1', who: '', artefact: null, stages: undefined, artefacts: undefined, instructions: null,
     })
   })
 

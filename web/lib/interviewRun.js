@@ -234,6 +234,17 @@ export function runArtefacts(log, stageId) {
   return { ...(status.artefacts ?? {}), ...(stageId && status.artefact ? { [stageId]: status.artefact } : {}) }
 }
 
+/**
+ * The Artefact each Stage aims for when **Resume the run** carries a paused run on (#332): what the run chose, from the status block of
+ * `fromStageId` (the Stage it was paused on), unless the architect chose another on this kickoff. The kickoff is between sessions, so its rows
+ * can be changed there, as Run until can; while a session is running they can't. A Stage the run never chose for (Run until now reaches it)
+ * aims for its lightest, and the Stages behind this one keep the run's choice.
+ */
+export function resumedArtefacts({ definition, stages, currentStageId, targetStageId, picked = {}, log, fromStageId }) {
+  const chose = runArtefacts(log, fromStageId)
+  return { ...chose, ...chosenArtefacts(artefactRows({ definition, stages, currentStageId, targetStageId, picked, remembered: chose })) }
+}
+
 // ---------- the run held in this tab ----------
 
 /**

@@ -19,7 +19,8 @@ const requiresOf = (id, mod, shared) => (shared && id === 's1' ? [`${mod}.body`,
 // run has a choice of Artefact at a later Gate.
 const CHOICE_ARTEFACT = ['  - id: art-s2-full', '    title: Shape document (full)', '    template: templates/s2-full.md.tmpl', '    gate: g2', '    requires: [m2.body, m2.more]']
 
-export function writeTrio(definitionsDir, { shared = false, choice = false } = {}) {
+// #332: with `bareShip`, no Artefact names Ship's Gate, so a run to Ship has a Stage with nothing to aim for.
+export function writeTrio(definitionsDir, { shared = false, choice = false, bareShip = false } = {}) {
   const dir = join(definitionsDir, 'trio', '1')
   mkdirSync(join(dir, 'modules'), { recursive: true })
   mkdirSync(join(dir, 'templates'), { recursive: true })
@@ -33,7 +34,7 @@ export function writeTrio(definitionsDir, { shared = false, choice = false } = {
       'stages:',
       ...TRIO_STAGES.flatMap(([id, title, gate, mod]) => [`  - id: ${id}`, `    title: ${title}`, `    purpose: PURPOSE-${id}`, `    gate: ${gate}`, `    modules: [${mountsOf(id, mod, shared).join(', ')}]`]),
       'artefacts:',
-      ...TRIO_STAGES.flatMap(([id, title, gate, mod]) => [`  - id: art-${id}`, `    title: ${title} document`, `    template: templates/${id}.md.tmpl`, `    gate: ${gate}`, `    requires: [${requiresOf(id, mod, shared).join(', ')}]`]),
+      ...TRIO_STAGES.filter(([id]) => !(bareShip && id === 's3')).flatMap(([id, title, gate, mod]) => [`  - id: art-${id}`, `    title: ${title} document`, `    template: templates/${id}.md.tmpl`, `    gate: ${gate}`, `    requires: [${requiresOf(id, mod, shared).join(', ')}]`]),
       ...(choice ? CHOICE_ARTEFACT : []),
       '',
     ].join('\n')

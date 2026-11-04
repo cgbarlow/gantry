@@ -155,6 +155,11 @@ describe('the interview brief an outside agent gets', () => {
       assert.equal(log.status[0].artefact, 'soap', 'the stage aims for the one its run chose for it')
       const brief = await json(await call(base, 'GET', '/api/instance/interview-brief?who=a.architect'))
       assert.deepEqual(brief.recap.adoptable.artefacts, { shape: 'soap', 'hld-define': 'hld', 'detailed-design': 'sad' }, 'a session taken over keeps them')
+      assert.equal(brief.recap.adoptable.artefact, 'soap', 'and what its own stage aimed for')
+      assert.deepEqual(brief.recap.runArtefacts, { shape: 'soap', 'hld-define': 'hld', 'detailed-design': 'sad' })
+      // The next stage, once the run reaches it (after a merge, say), reads the run's choices from the stage before it.
+      const next = await json(await call(base, 'GET', '/api/instance/interview-brief?stage=hld-define'))
+      assert.deepEqual(next.recap.runArtefacts, { shape: 'soap', 'hld-define': 'hld', 'detailed-design': 'sad' })
     })
   })
 })

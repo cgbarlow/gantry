@@ -55,13 +55,26 @@ async function readBriefFor(args, context, { stage, stageState } = {}) {
   if (instanceError) return { result: instanceError }
   const instance = instanceRes.body
   const stageId = stage ?? instance.stage?.id
+  // #332: a run's Artefact for this Stage, else the lone "artefactId".
+  const got = await readBrief(args, context, { stageId, stageState, artefact: args.artefacts?.[stageId] ?? args.artefactId })
+  if (got.result) return got
+  return { instance, brief: got.brief }
+}
+
+async function readBrief(args, context, { stageId, stageState, artefact }) {
   const { res, result } = await callInstanceRoute(args, context, {
     path: '/api/instance/interview-brief',
-    // #332: a run's Artefact for this Stage, else the lone "artefactId".
-    query: { stage: stageId, artefact: args.artefacts?.[stageId] ?? args.artefactId, who: args.who, stageState },
+    query: { stage: stageId, artefact, who: args.who, stageState },
   })
   if (result) return { result }
-  return { instance, brief: res.body }
+  return { brief: res.body }
+}
+
+// #332: the brief a session hands back aims for the Artefact the run chose for its Stage, which is what each save records as aimed for. When
+// the brief was read aiming elsewhere (or nowhere, listing the candidates), it is read again aiming for that one.
+async function briefAimingFor(args, context, { brief, stageId, stageState, artefact }) {
+  if (!artefact || brief.artefact?.id === artefact) return { brief }
+  return readBrief(args, context, { stageId, stageState, artefact })
 }
 
 // ---------------------------------------------------------------------------
@@ -95,9 +108,11 @@ function notesFor(brief) {
 }
 
 // #332: the Artefact each Stage of the run aims for, by stage id: the one "artefacts" names (for the first Stage, "artefactId" too), else the
-// lightest that can pass its Gate. `{ error }` when a choice names a Stage outside the run or an Artefact that can't pass that Stage's Gate.
-function runArtefactsFor({ stageArtefacts, stages, from, goal, artefacts = {}, artefactId }) {
-  const run = stages.slice(stageIndex(stages, from), stageIndex(stages, goal) + 1).map((s) => s.id)
+// one the run already chose for it (`remembered`, from the decisions log, on a resume), else the lightest that can pass its Gate. Stages outside
+// the run keep what the run chose for them. `{ error }` when a choice names a Stage outside the run or an Artefact that can't pass its Gate.
+function runArtefactsFor({ stageArtefacts, stages, from, goal, artefacts = {}, artefactId, remembered = {} }) {
+  const fromAt = stageIndex(stages, from)
+  const run = stages.slice(fromAt, Math.max(stageIndex(stages, goal), fromAt) + 1).map((s) => s.id)
   const wanted = { ...(artefactId ? { [from]: artefactId } : {}), ...artefacts }
   // A gantry serve from before #332 lists no candidates: a lone "artefactId" goes to the brief as it always did.
   if (!Array.isArray(stageArtefacts)) {
@@ -107,11 +122,12 @@ function runArtefactsFor({ stageArtefacts, stages, from, goal, artefacts = {}, a
   }
   const outside = Object.keys(wanted).filter((id) => !run.includes(id))
   if (outside.length) return { error: `"artefacts" names ${outside.map((id) => `"${id}"`).join(', ')}, which ${outside.length === 1 ? 'is' : 'are'} not a stage of this run: ${run.join(', ')}.` }
-  const chosen = {}
+  const chosen = Object.fromEntries(Object.entries(remembered).filter(([id]) => !run.includes(id)))
   for (const id of run) {
     const row = stageArtefacts.find((r) => r.stageId === id)
     const candidates = row?.candidates ?? []
-    if (wanted[id] && !candidates.some((a) => a.id === wanted[id])) {
+    const passes = (artefact) => candidates.some((a) => a.id === artefact)
+    if (wanted[id] && !passes(wanted[id])) {
       const title = row?.title ?? id
       return {
         error: candidates.length
@@ -119,11 +135,16 @@ function runArtefactsFor({ stageArtefacts, stages, from, goal, artefacts = {}, a
           : `No artefact can pass the gate of stage "${title}" (gate: ${row?.gate ?? '?'}), so it has none to aim for: leave it out of "artefacts".`,
       }
     }
-    const pick = wanted[id] ?? row?.lightest
+    const pick = wanted[id] ?? (passes(remembered[id]) ? remembered[id] : undefined) ?? row?.lightest
     if (pick) chosen[id] = pick
   }
   return { artefacts: chosen }
 }
+
+// What a paused session chose for each Stage of its run, with what its own Stage aimed for (a log from before #332 has only that).
+const sessionArtefacts = (line, stageId) => (line ? { ...(line.artefacts ?? {}), ...(line.artefact && stageId ? { [stageId]: line.artefact } : {}) } : {})
+
+const LATER_STAGES = ' When the run moves on to a later stage, brief it with get_interview_brief, passing that stage and the artefact "session.artefacts" names for it as "artefactId".'
 
 async function startInterviewSession(args, context) {
   const { runUntil, stage, model, who } = args
@@ -136,14 +157,17 @@ async function startInterviewSession(args, context) {
   if (stageIndex(stages, goal) < stageIndex(stages, target)) return errorResult(`"runUntil" (${goal}) comes before the stage being interviewed (${target}). A run goes forward.`)
   const aimed = runArtefactsFor({ stageArtefacts: got.brief.stageArtefacts, stages, from: target, goal, artefacts: args.artefacts, artefactId: args.artefactId })
   if (aimed.error) return errorResult(aimed.error)
+  // A first stage left out aims for its lightest, so its brief does too, as the session's saves record.
+  const aiming = await briefAimingFor(args, context, { brief: got.brief, stageId: target, artefact: aimed.artefacts[target] })
+  if (aiming.result) return aiming.result
   return okResult({
     session: sessionHandle({ id: newSessionId(), runUntil: goal, who, model, artefacts: aimed.artefacts }),
     stageVersion: got.instance.stageVersion,
     currentStageId: got.instance.currentStageId ?? got.instance.stage?.id,
     workspaceBacked: Boolean(got.instance.workspaceBacked),
-    notes: notesFor(got.brief),
-    ...got.brief,
-    next: `Read the Source documents the brief lists, draft what they support, then interview the architect in your own chat. Nothing is saved until they confirm the stage summary (update_instance_modules with this session) or ask to pause (pause_interview_session).${goal !== target ? ' When the run moves on to a later stage, brief it with get_interview_brief, passing that stage and the artefact "session.artefacts" names for it as "artefactId".' : ''}`,
+    notes: notesFor(aiming.brief),
+    ...aiming.brief,
+    next: `Read the Source documents the brief lists, draft what they support, then interview the architect in your own chat. Nothing is saved until they confirm the stage summary (update_instance_modules with this session) or ask to pause (pause_interview_session).${goal !== target ? LATER_STAGES : ''}`,
   })
 }
 
@@ -171,18 +195,26 @@ async function resumeInterviewSession(args, context) {
   const stages = got.instance.stages ?? []
   const recap = got.brief.recap ?? {}
   const adopted = (wanted ? (recap.sessions ?? []).find((s) => s.session === wanted) : null) ?? recap.adoptable ?? null
-  const goal = runUntil ?? adopted?.target ?? got.brief.stage?.id
+  const here = got.brief.stage?.id ?? got.instance.stage?.id
+  const goal = runUntil ?? adopted?.target ?? here
   if (stageIndex(stages, goal) === -1) return errorResult(`"runUntil" must be a stage id of this instance: ${stages.map((s) => s.id).join(', ')}.`)
+  // #332: the run keeps the Artefact it chose for each Stage (the session taken over, else the latest status on this Stage or the one before
+  // it, as the browser's kickoff reads them); "artefacts" and "artefactId" choose again, as the kickoff's rows do on a resume.
+  const remembered = { ...(recap.runArtefacts ?? {}), ...sessionArtefacts(adopted, here) }
+  const aimed = runArtefactsFor({ stageArtefacts: got.brief.stageArtefacts, stages, from: here, goal, artefacts: args.artefacts, artefactId: args.artefactId, remembered })
+  if (aimed.error) return errorResult(aimed.error)
+  const aiming = await briefAimingFor(args, context, { brief: got.brief, stageId: here, stageState: checkStatus.merged ? undefined : stageState, artefact: aimed.artefacts[here] })
+  if (aiming.result) return aiming.result
   return okResult({
-    session: sessionHandle({ id: adopted?.session ?? newSessionId(), runUntil: goal, who: who ?? adopted?.who, model, artefacts: adopted?.artefacts }),
+    session: sessionHandle({ id: adopted?.session ?? newSessionId(), runUntil: goal, who: who ?? adopted?.who, model, artefacts: aimed.artefacts }),
     adopted: Boolean(adopted),
     checkStatus,
     stageVersion: got.instance.stageVersion,
     currentStageId: got.instance.currentStageId ?? got.instance.stage?.id,
     workspaceBacked: Boolean(got.instance.workspaceBacked),
-    notes: notesFor(got.brief),
-    ...got.brief,
-    next: `Open with the recap (${JSON.stringify(recap.line ?? '')}) in one short line, then ask the next round. You do not have the earlier conversation: the brief holds the saved content and the decisions log, and the committed log wins over anything you remember. Do not ask again what the log settles.`,
+    notes: notesFor(aiming.brief),
+    ...aiming.brief,
+    next: `Open with the recap (${JSON.stringify(recap.line ?? '')}) in one short line, then ask the next round. You do not have the earlier conversation: the brief holds the saved content and the decisions log, and the committed log wins over anything you remember. Do not ask again what the log settles.${goal !== here ? LATER_STAGES : ''}`,
   })
 }
 
@@ -286,7 +318,8 @@ export const tools = [
       '1. Resumes an interview session from the last commit, whichever side paused it (you, or the architect in the browser). Runs Check status once first on a workspace whose stage has a Pull Request (what the Provider reports wins over the log), then returns the brief and a recap. The committed decisions log wins over anything you remember or hold: you do not have the earlier conversation. ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". "who" is the architect (a session they paused by name is taken over); "session" names a specific session id to take over; with neither, the most recent paused session on the stage is taken over; with none to take over a new session starts. "runUntil" overrides the run target the paused session had. ' +
       '3. The response carries the "session" to pass on, "adopted" (true when it carries on an earlier session, whose status line and models are kept), "checkStatus" (what Check status found, including "merged" when the earlier stage was approved and the instance moved on: you then carry on with the new current stage), "stageVersion", the brief and "recap". Open with the recap in one short line, then ask the next round. ' +
-      '4. Nothing is written by this call.',
+      '4. The run keeps the artefact it chose for each stage: "session.artefacts" is what each stage aims for, and the brief returned aims the resumed stage at its own. "artefacts" ({ <stageId>: <artefactId> }) or "artefactId" (the resumed stage) chooses again, as the browser\'s kickoff does on a resume; a stage the run never chose for aims for its lightest. Brief each later stage with get_interview_brief and its artefact from "session.artefacts". ' +
+      '5. Nothing is written by this call.',
     inputSchema: {
       ...slugRefShape,
       stage: z.string().optional().describe('A stage id to resume at instead of the instance\'s current stage.'),
@@ -294,7 +327,8 @@ export const tools = [
       session: z.string().optional().describe('A session id to take over.'),
       who: z.string().optional().describe('The architect; a session they paused is taken over.'),
       model: z.string().optional().describe('The model you are, as you report it.'),
-      artefactId: z.string().optional().describe('The artefact aimed for.'),
+      artefacts: z.record(z.string(), z.string()).optional().describe('The artefact to aim for on stages of the run, { <stageId>: <artefactId> }, instead of what the run chose. A stage left out keeps the run\'s choice, else its lightest.'),
+      artefactId: z.string().optional().describe('The artefact the resumed stage aims for, instead of what the run chose (the same as naming it in "artefacts").'),
     },
     handler: resumeInterviewSession,
   },

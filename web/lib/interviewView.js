@@ -29,7 +29,7 @@ import { planUpdateRound, stagesToUpdate } from './bringUpToDate.js'
 import { answeredCounts, assignChoices, planReview, reviewerLabels } from './reviewRound.js'
 import { ReviewContext, ReviewInputs, ReviewSection } from './reviewView.js'
 import { downloadReviewResponseList, hasReviewResponses, reviewResponseRows } from './reviewResponse.js'
-import { artefactRows, beginRun, chosenArtefacts, clearRun, interviewRuns, nextStage, planRows, resumableRun, runArtefacts, runOpening, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
+import { artefactRows, beginRun, chosenArtefacts, clearRun, interviewRuns, nextStage, planRows, resumableRun, resumedArtefacts, runArtefacts, runOpening, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
 import { isRemoteInstance, lastSavedBy, openApproval, pullRequestLink, remoteRecord } from './interviewApproval.js'
@@ -853,9 +853,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     setPickedTarget(resume.targetStageId)
     // #331: the run carries on with the opening message it was started with, unless the architect typed a new one here.
     const words = opening.trim() || runOpening(resumeLogs?.[resume.fromStageId])
-    // #332: and with the Artefact it chose for each Stage, unless the architect chose another here.
-    const chose = runArtefacts(resumeLogs?.[resume.fromStageId], resume.fromStageId)
-    const artefacts = { ...chose, ...chosenArtefacts(artefactRows({ definition: setup.definition, stages: stagesList, currentStageId: instance.stage.id, targetStageId: resume.targetStageId, picked: pickedArtefacts, remembered: chose })) }
+    // #332: and with the Artefact it chose for each Stage, unless the architect chose another here (the kickoff is between sessions).
+    const artefacts = resumedArtefacts({ definition: setup.definition, stages: stagesList, currentStageId: instance.stage.id, targetStageId: resume.targetStageId, picked: pickedArtefacts, log: resumeLogs?.[resume.fromStageId], fromStageId: resume.fromStageId })
     if (resume.mode === 'advance' && remote) {
       // #295: a remote Stage was saved but its approval never asked for (Save and stop here, or the request failed): resuming asks for it, then the session waits for the Owner.
       const startStageId = runStartStage(stagesList, resumeLogs?.[resume.fromStageId], resume.fromStageId)
