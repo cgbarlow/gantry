@@ -101,6 +101,8 @@ before drafting, so figures and names come from a document and not from the agen
 | `list_source_documents` | The Instance's Source documents: id, title, filename, size, whether text was read, and which are `replacedBy` a newer upload or `removed`. |
 | `read_source_document` | One document's committed extracted text, a `page` at a time (a PDF by its own page numbers; anything else in sections of about 20,000 characters). A picture comes back as an image block. A document with no text says why. |
 | `upload_source_document` | Adds a document under the browser's rules: the same file types, 25 MB, one commit on the current stage's branch on an Azure DevOps or GitHub workspace, an optional `replaces` link, the same manifest entry. |
+| `add_source_document_from_address` | Adds a document from a web address, as the browser's **Add from address** does (#318, `docs/adr/0071`): `gantry serve` fetches a snapshot (private, loopback and cloud-metadata addresses refused at every redirect, 25 MB, the upload types plus HTML), then it is added like an upload with its `origin` (`address`, `finalAddress`, `fetchedAt`). |
+| `fetch_source_document_again` | **Fetch again** for a document with an `origin`: identical bytes add nothing (`unchanged: true`); changed ones are added as a new document that replaces the old one, which flags the Fields drawn on it Out of date. |
 | `read_decisions_log` | A stage's decisions log (or `allStages`). Server, Azure DevOps and GitHub workspaces; GitLab and Atlassian answer 400 until their module Save lands. |
 | `list_reviewed_copies` | The Reviewed copies brought in to the Instance. |
 | `read_reviewed_copy` | One copy's comment threads and tracked changes, grouped by the Field each traces to (with `mode` and `notice` when they were placed by matching text). |
@@ -115,6 +117,11 @@ the response carries `outOfDateError` and the instance is still returned.
 `upload_source_document` sends the file with `extractText: true` and `gantry serve` runs the same extractors (officeparser, with
 Gantry's own Word-comment reader for a Reviewed copy), so a document uploaded here and in the browser gives the same text. The
 response says whether any text was read and why not (a picture, a scanned PDF, an unreadable file). The document is kept either way.
+
+**Adding by address follows the operator.** The two address tools are listed only while `gantry serve` offers adding by address:
+an operator who sets `GANTRY_SOURCE_FETCH_DISABLED` on `gantry serve` switches them off here as well as in the browser (the MCP
+server asks `GET /api/sources/fetch`, at most every 30 seconds). Private addresses are allowed only by `gantry serve`'s own
+`GANTRY_SOURCE_FETCH_ALLOW_PRIVATE_URLS`. Neither is set on the MCP server.
 
 **Access control is unchanged.** These are files in the same repository an agent could already read with the workspace's PAT;
 no new credential, route or permission is involved. A Local workspace's files are on the architect's computer and are not reachable

@@ -972,6 +972,14 @@ An architect's **AI Providers** (Anthropic, OpenAI, OpenRouter, Ollama, LM Studi
 
 **`GANTRY_AI_ALLOW_PRIVATE_URLS`** (off by default; set it to `1`, `true`, `yes` or `on`): by default the relay **refuses private and loopback addresses**, both an address written that way (`localhost`, `127.0.0.1`, `10.x.x.x`, `172.16-31.x.x`, `192.168.x.x`, `169.254.x.x`, `::1` and the like, plus names ending `.local`, `.internal` or `.lan`) and a public name that *resolves* to one. Otherwise a hosted Gantry could be pointed at its own internal network or a cloud metadata service. Set it only when an AI Provider genuinely lives on the server's own network, such as an Ollama or LM Studio the architects have registered as running on **The Gantry server**, and only on a deployment you trust every visitor to. It has no effect on an Ollama or LM Studio registered as running on **This computer**: the browser calls those directly, and the architect allows the Gantry page in `OLLAMA_ORIGINS` (Ollama) or the CORS setting (LM Studio).
 
+### Source documents from a web address
+
+An architect, or an outside agent over MCP, can add a **Source document** by giving its web address (`docs/adr/0071-a-source-document-can-be-fetched-from-a-web-address-by-the-server-as-a-snapshot.md`). The server fetches it, `POST /api/sources/fetch`, and hands the bytes back to be stored like an upload; it keeps a snapshot, never a live link. It follows at most 5 redirects, gives up after 30 seconds, takes at most 25 MB, sends a fixed `User-Agent` and `Accept` and nothing else (no cookies, no credentials: a page behind a sign-in can't be fetched), and needs outbound HTTPS to the sites your architects cite (see **Outbound network**). Uploads are unaffected by both settings below: they never leave the architect's machine to be read.
+
+**`GANTRY_SOURCE_FETCH_DISABLED`** (off by default; set it to `1`, `true`, `yes` or `on`): switches adding by address off, for a locked-down deployment that must not make outbound requests on an architect's behalf. The editor, the Interview page and the MCP server then don't offer it, and the route refuses with a message saying to save the page as a PDF and upload it.
+
+**`GANTRY_SOURCE_FETCH_ALLOW_PRIVATE_URLS`** (off by default; set it to `1`, `true`, `yes` or `on`): by default the fetch **refuses private and loopback addresses** exactly as the AI relay does, at **every redirect hop** and on what a public name resolves to, so a public page can't bounce the server into its own network. Set it to let architects cite an intranet page the server can reach. It is a setting of its own: it never opens the AI relay to private addresses, and `GANTRY_AI_ALLOW_PRIVATE_URLS` never opens Source document fetches. Cloud metadata addresses (`169.254.169.254`, `metadata.google.internal` and the like) stay refused even with it on.
+
 ### Health and restart
 
 The `runtime` stage declares a `HEALTHCHECK`:

@@ -76,6 +76,28 @@ test('a real MCP client can list and call list_workspaces end-to-end over stream
   })
 })
 
+// #318 (docs/adr/0071): with gantry serve's off switch set, an MCP client is not offered adding by address at all.
+test('the add-by-address tools are listed only while gantry serve has adding by address on', async () => {
+  for (const enabled of [true, false]) {
+    const fetchImpl = fakeGantryFetch(({ url }) => (url.pathname === '/api/sources/fetch' ? { status: 200, body: { enabled } } : undefined))
+    await withRunningApp({ fetchImpl }, async (base) => {
+      const client = new Client({ name: 'test-client', version: '0.0.0' })
+      const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+        requestInit: { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } },
+      })
+      await client.connect(transport)
+      try {
+        const names = (await client.listTools()).tools.map((t) => t.name)
+        assert.equal(names.includes('add_source_document_from_address'), enabled)
+        assert.equal(names.includes('fetch_source_document_again'), enabled)
+        assert.ok(names.includes('upload_source_document'), 'uploads are offered either way')
+      } finally {
+        await client.close()
+      }
+    })
+  }
+})
+
 // #201: the server instructions an MCP client receives on connect carry the one authoring rule —
 // the rest of the steering lives in each Field's guidance and the example instance it reads.
 test('a connected MCP client receives the authoring rule in the server instructions', async () => {

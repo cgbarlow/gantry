@@ -7,13 +7,17 @@ import { parse as parseYAML } from 'yaml'
 import {
   INSTANCE_SOURCES_WARN_BYTES,
   MAX_SOURCE_BYTES,
+  SOURCE_FILE_ACCEPT,
   SourceDocumentError,
   cleanSourceFilename,
   createSourceStore,
   defaultSourceTitle,
   formatBytes,
   instanceSourcesWarning,
+  isFetchedSource,
+  normalizeSourceOrigin,
   parseSourceManifest,
+  replacedBy,
   sourceFileKind,
   sourceFileTypeProblem,
   sourceIdFor,
@@ -304,6 +308,99 @@ describe('the lifecycle', () => {
   })
 })
 
+// #318 (docs/adr/0071): a document fetched from a web address is an ordinary Source document with an origin.
+describe('documents fetched from a web address', () => {
+  const origin = (fetchedAt = '2026-11-03T09:00:00.000Z', extra = {}) => ({ address: 'https://vendor.example.com/api', finalAddress: 'https://docs.vendor.example.com/api', fetchedAt, ...extra })
+
+  test('an HTML page is a kind of its own that only ever comes from an address: an upload still refuses it', () => {
+    assert.equal(sourceFileKind('API guide.html'), 'html')
+    assert.equal(sourceFileKind('page.htm'), 'html')
+    assert.match(sourceFileTypeProblem('page.html'), /can't take \.html files/)
+    assert.equal(sourceFileTypeProblem('page.html', { fetched: true }), null)
+    assert.match(sourceFileTypeProblem('thing.exe', { fetched: true }), /can't take \.exe files/)
+    assert.ok(!SOURCE_FILE_ACCEPT.includes('.html'), 'the upload picker does not offer HTML')
+  })
+
+  test('the origin is kept in a fixed order, and anything that is not one is no origin at all', () => {
+    assert.deepEqual(normalizeSourceOrigin({ fetchedAt: '2026-11-03T09:00:00.000Z', finalAddress: 'https://b.example/x', address: 'https://a.example/x', extra: 1 }), {
+      address: 'https://a.example/x',
+      finalAddress: 'https://b.example/x',
+      fetchedAt: '2026-11-03T09:00:00.000Z',
+    })
+    assert.equal(normalizeSourceOrigin({ address: 'https://a.example/x', fetchedAt: '2026-11-03T09:00:00.000Z' }).finalAddress, 'https://a.example/x')
+    assert.equal(normalizeSourceOrigin({ address: 'javascript:alert(1)', fetchedAt: '2026-11-03T09:00:00.000Z' }), null)
+    assert.equal(normalizeSourceOrigin({ address: 'https://a.example/x', fetchedAt: 'yesterday' }), null)
+    assert.equal(normalizeSourceOrigin(null), null)
+    assert.equal(isFetchedSource({ id: 'a' }), false)
+    assert.equal(isFetchedSource({ id: 'a', origin: origin() }), true)
+  })
+
+  test('an upload with an origin is stored like any other, its entry records where it came from, and an upload without one is unchanged', async () => {
+    const io = memoryIo()
+    const store = createSourceStore(io, { now: fixedNow('2026-11-03T09:00:05.000Z', '2026-11-03T09:01:00.000Z') })
+    const { entry } = await store.upload({ filename: 'Vendor API guide.html', bytes: bytes('<h1>Limits</h1>'), text: '# Limits', title: 'Vendor API guide', uploadedBy: 'Ana', origin: origin() })
+    assert.deepEqual(entry, {
+      id: 'vendor-api-guide',
+      filename: 'Vendor API guide.html',
+      title: 'Vendor API guide',
+      uploadedBy: 'Ana',
+      uploadedAt: '2026-11-03T09:00:05.000Z',
+      size: 15,
+      text: '.text/Vendor API guide.html.md',
+      origin: origin(),
+    })
+    const manifest = parseYAML(new TextDecoder().decode(io.files.get('sources/manifest.yaml')))
+    assert.deepEqual(Object.keys(manifest[0]), ['id', 'filename', 'title', 'uploadedBy', 'uploadedAt', 'size', 'text', 'origin'])
+    assert.deepEqual(Object.keys(manifest[0].origin), ['address', 'finalAddress', 'fetchedAt'])
+    const { entry: upload } = await store.upload({ filename: 'brief.txt', bytes: bytes('x') })
+    assert.equal('origin' in upload, false)
+    await assert.rejects(store.upload({ filename: 'x.html', bytes: bytes('x'), origin: { address: 'nope' } }), (err) => err instanceof SourceDocumentError && err.code === 'bad-origin')
+    // Renamed and removed like an upload, and the origin stays with the entry.
+    assert.deepEqual((await store.rename(entry.id, 'API guide')).origin, origin())
+    assert.deepEqual((await store.remove(entry.id)).origin, origin())
+  })
+
+  test('Fetch again with the very same bytes adds nothing and hands back the kept document', async () => {
+    const io = memoryIo()
+    const store = createSourceStore(io)
+    const { entry } = await store.upload({ filename: 'guide.html', bytes: bytes('<p>same</p>'), text: 'same', origin: origin() })
+    const manifestBefore = io.files.get('sources/manifest.yaml')
+    let extracted = 0
+    const result = await store.fetchAgain(entry.id, { filename: 'guide.html', bytes: bytes('<p>same</p>'), origin: origin('2026-11-10T00:00:00.000Z') }, { extract: async () => (extracted++, 'same') })
+    assert.equal(result.unchanged, true)
+    assert.equal(result.entry.id, entry.id)
+    assert.equal(result.entry.origin.fetchedAt, '2026-11-03T09:00:00.000Z', 'the kept document says when it was fetched, for "unchanged since"')
+    assert.equal(extracted, 0, 'nothing is read when nothing changed')
+    assert.equal(io.files.get('sources/manifest.yaml'), manifestBefore, 'the manifest is not written')
+    assert.equal((await store.list()).entries.length, 1)
+  })
+
+  test('Fetch again with changed bytes adds a new document that replaces the old one under its title', async () => {
+    const io = memoryIo()
+    const store = createSourceStore(io, { now: fixedNow('2026-11-03T09:00:05.000Z', '2026-11-10T08:00:05.000Z') })
+    const { entry } = await store.upload({ filename: 'guide.html', bytes: bytes('<p>v1</p>'), text: 'v1', title: 'Vendor guide', origin: origin() })
+    const result = await store.fetchAgain(entry.id, { filename: 'guide.html', bytes: bytes('<p>v2</p>'), uploadedBy: 'Ben', origin: origin('2026-11-10T08:00:00.000Z') }, { extract: async () => 'v2' })
+    assert.equal(result.unchanged, false)
+    assert.equal(result.entry.id, 'guide-2')
+    assert.equal(result.entry.title, 'Vendor guide')
+    assert.equal(result.entry.replaces, entry.id)
+    assert.equal(result.entry.uploadedBy, 'Ben')
+    assert.equal(result.entry.origin.fetchedAt, '2026-11-10T08:00:00.000Z')
+    assert.equal(await store.readText('guide-2'), 'v2')
+    assert.equal(await store.readText(entry.id), 'v1', 'the old one is kept and can still be cited')
+    assert.equal(replacedBy((await store.list()).entries, entry.id).id, 'guide-2')
+  })
+
+  test('Fetch again is refused for an upload and for a removed document', async () => {
+    const store = createSourceStore(memoryIo())
+    const { entry: upload } = await store.upload({ filename: 'brief.txt', bytes: bytes('x') })
+    await assert.rejects(store.fetchAgain(upload.id, { filename: 'brief.txt', bytes: bytes('y'), origin: origin() }), (err) => err.code === 'not-fetched')
+    const { entry: page } = await store.upload({ filename: 'p.html', bytes: bytes('x'), origin: origin() })
+    await store.remove(page.id)
+    await assert.rejects(store.fetchAgain(page.id, { filename: 'p.html', bytes: bytes('y'), origin: origin() }), (err) => err.code === 'removed')
+  })
+})
+
 describe('the user guide', () => {
   test('has a Source documents section under Workspaces & Instances that states the limits and the kept-apart rule', () => {
     const guide = readFileSync('docs/user-guide/index.md', 'utf8')
@@ -311,7 +408,7 @@ describe('the user guide', () => {
     assert.ok(start > guide.indexOf('## Workspaces & Instances'), 'it sits inside Workspaces & Instances')
     assert.ok(start < guide.indexOf('## Stages & Gates'), 'and before the next top-level section')
     const section = guide.slice(start, guide.indexOf('\n### ', start + 5))
-    for (const needle of ['25 MB', '100 MB', 'sources/manifest.yaml', 'Extract text again', 'Rename', 'Remove', 'NO TEXT', 'nothing is fetched from the internet', 'separately']) {
+    for (const needle of ['25 MB', '100 MB', 'sources/manifest.yaml', 'Extract text again', 'Rename', 'Remove', 'NO TEXT', 'fetches nothing from the internet', 'separately', 'Add from address', 'Fetch again', 'unchanged since', 'save it as a PDF', 'GANTRY_SOURCE_FETCH_DISABLED', 'GANTRY_SOURCE_FETCH_ALLOW_PRIVATE_URLS']) {
       assert.ok(section.includes(needle), `the section mentions "${needle}"`)
     }
   })

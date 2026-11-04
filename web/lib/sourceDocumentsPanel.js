@@ -1,6 +1,8 @@
 // #279 (map #238, decided in #245): the **Source documents** panel in the Instance editor. An architect can upload evidence (a brief, requirements, meeting notes, a spreadsheet, a screenshot) to an Instance, rename it, read its text again, download it and remove it, before connecting any AI Provider. Every rule about the list lives in web/lib/sourceDocuments.js; the text is read out of each document here, in the browser (web/lib/sourceExtract.js); this file draws the panel and runs the steps in order.
 //
-// The panel is given a `store` with the methods web/lib/sourceDocuments.js's createSourceStore has (`list`, `upload`, `rename`, `remove`, `setText`, `readOriginal`): a Local Workspace's own folder (web/lib/localSourceDocuments.js) or the server's routes (web/lib/serverSourceDocuments.js).
+// The panel is given a `store` with the methods web/lib/sourceDocuments.js's createSourceStore has (`list`, `upload`, `rename`, `remove`, `setText`, `readOriginal`, `fetchAgain`): a Local Workspace's own folder (web/lib/localSourceDocuments.js) or the server's routes (web/lib/serverSourceDocuments.js).
+//
+// #318 (docs/adr/0071): a document can also be added from a web address. The Gantry server fetches it (web/lib/sourceAddress.js), the text is read here exactly as for an upload, and it is stored through the same `store` with its **origin**. **Fetch again** asks the store to add the page again only when its bytes changed.
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useState } from 'preact/hooks'
 import {
@@ -8,6 +10,7 @@ import {
   SOURCE_FILE_ACCEPT,
   formatBytes,
   canUseSourceAsImage,
+  isFetchedSource,
   isRemovedSource,
   replacedByMap,
   sourceFileExtension,
@@ -19,6 +22,10 @@ import { extractSourceText, noTextNote } from './sourceExtract.js'
 import { sourceCitationFor } from './sourceCitations.js'
 import { sourceListTick } from './outOfDateState.js'
 import { storedZip } from './storedZip.js'
+import { SOURCE_FETCH_NEEDS_SERVER, fetchSourceAddress, originOf, sourceFetchStatus } from './sourceAddress.js'
+
+// #318: how the panel asks the Gantry server whether it fetches web addresses, and has it fetch one. Tests pass their own.
+const SERVER_SOURCE_FETCH = { status: () => sourceFetchStatus(), fetch: (address) => fetchSourceAddress(address) }
 
 function formatWhen(iso) {
   if (!iso) return ''
@@ -77,9 +84,9 @@ export async function openSourceDocument(store, entry) {
 /**
  * #297: `newSince` is the set of document ids marked **New since last interview** (worked out from the decisions logs by the caller). Each document that a newer one replaces shows "replaced by <new>", and the upload has a "This replaces…" picker that records the link in the manifest.
  *
- * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default. `archiveName` is the file **Download all** saves (#310). `compact` draws the list as the Interview page's narrow rail does (#286): titles, a "+ Add Source document" button and a drop zone, with no table; `onList(list)` is told whenever the list has been read (after a load or a change).
+ * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default. `archiveName` is the file **Download all** saves (#310). `compact` draws the list as the Interview page's narrow rail does (#286): titles, a "+ Add Source document" button and a drop zone, with no table; `onList(list)` is told whenever the list has been read (after a load or a change). `sourceFetch` (#318) is `{ status(), fetch(address) }`, the Gantry server's by default: adding by address is offered only when `status()` says the server has it on.
  */
-export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null, compact = false, newSince = null, archiveName = 'Source documents.zip' }) {
+export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null, compact = false, newSince = null, archiveName = 'Source documents.zip', sourceFetch = SERVER_SOURCE_FETCH }) {
   const [list, setList] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState(null)
@@ -88,6 +95,19 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
   const [confirmRemove, setConfirmRemove] = useState(null)
   // #297: the older document the next upload replaces ('' for none).
   const [replaces, setReplaces] = useState('')
+  // #318: whether the Gantry server fetches web addresses (null while asking), and the address being typed.
+  const [fetchStatus, setFetchStatus] = useState(null)
+  const [address, setAddress] = useState('')
+
+  useEffect(() => {
+    let current = true
+    Promise.resolve(sourceFetch?.status?.() ?? { enabled: false })
+      .then((status) => current && setFetchStatus(status))
+      .catch(() => current && setFetchStatus({ enabled: false, unreachable: true }))
+    return () => {
+      current = false
+    }
+  }, [sourceFetch])
 
   const reload = useCallback(async () => {
     try {
@@ -151,6 +171,57 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       })
     }
   }
+
+  // #318: the Gantry server fetches the address; the text is read here, as for an upload, and the document is stored with its origin.
+  const addFromAddress = (given) =>
+    run(async () => {
+      const wanted = given.trim()
+      if (!wanted) return
+      setMessage({ kind: 'info', text: `Fetching ${wanted}…` })
+      const fetched = await sourceFetch.fetch(wanted)
+      setMessage({ kind: 'info', text: `Reading ${fetched.title}…` })
+      const extraction = await extract(fetched.filename, fetched.bytes)
+      const older = replaces ? entries.find((e) => e.id === replaces) : null
+      const { entry } = await store.upload({
+        filename: fetched.filename,
+        bytes: fetched.bytes,
+        text: extraction.text ?? undefined,
+        title: fetched.title,
+        uploadedBy: actor,
+        origin: originOf(fetched),
+        ...(replaces ? { replaces } : {}),
+      })
+      setAddress('')
+      setReplaces('')
+      await reload()
+      const replacing = older ? ` It replaces "${older.title}", which stays in the list and can still be cited.` : ''
+      setMessage(
+        extraction.text !== null
+          ? { kind: 'ok', text: `Added "${entry.title}" from ${fetched.finalAddress} and read its text.${replacing}` }
+          : { kind: extraction.problem ? 'warn' : 'ok', text: `Added "${entry.title}" from ${fetched.finalAddress}. ${noTextNote(extraction)}${replacing}` }
+      )
+    })
+
+  // #318: **Fetch again**, only ever when the architect asks. Identical bytes add nothing; changed ones are added as a new document that replaces this one, which flags the Fields that drew on it Out of date.
+  const fetchAgain = (entry) =>
+    run(async () => {
+      setMessage({ kind: 'info', text: `Fetching ${entry.origin.address} again…` })
+      const fetched = await sourceFetch.fetch(entry.origin.address)
+      const result = await store.fetchAgain(
+        entry.id,
+        { filename: fetched.filename, bytes: fetched.bytes, uploadedBy: actor, origin: originOf(fetched) },
+        { extract: async () => (await extract(fetched.filename, fetched.bytes)).text ?? undefined }
+      )
+      if (result.unchanged) {
+        setMessage({ kind: 'ok', text: `"${entry.title}" is unchanged since ${formatWhen(entry.origin.fetchedAt)}. Nothing was added.` })
+        return
+      }
+      await reload()
+      setMessage({
+        kind: 'ok',
+        text: `"${entry.title}" has changed since ${formatWhen(entry.origin.fetchedAt)}. The new copy is added and replaces the old one, which stays in the list and can still be cited. Fields that drew on it are flagged Out of date.`,
+      })
+    })
 
   async function onPick(event) {
     const input = event.currentTarget
@@ -260,6 +331,36 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       ? html`<span class="stamp new" data-testid="source-new-since" title="Added since the last AI interview. The next interview reads it against what is saved.">New since last interview</span>`
       : null,
   ]
+  // #318: adding by address is offered once the Gantry server says it fetches; a Local Workspace whose server can't be reached says why it isn't.
+  const offersAddress = !readOnly && fetchStatus?.enabled === true
+  const canFetchAgain = (entry) => offersAddress && isFetchedSource(entry) && Boolean(store.fetchAgain) && !replacedByEntry.has(entry.id)
+  const addressForm = () =>
+    offersAddress
+      ? html`<form
+          class="source-documents-address"
+          data-testid="source-address-form"
+          onSubmit=${(e) => {
+            e.preventDefault()
+            addFromAddress(address)
+          }}
+        >
+          <input
+            type="url"
+            inputmode="url"
+            placeholder="https://… a web page or document"
+            aria-label="Web address of a Source document"
+            data-testid="source-address-input"
+            value=${address}
+            disabled=${busy}
+            onInput=${(e) => setAddress(e.currentTarget.value)}
+          />
+          <button type="submit" class="btn small" disabled=${busy || !address.trim()} data-testid="source-address-add">Add from address</button>
+        </form>`
+      : !readOnly && fetchStatus?.unreachable
+        ? html`<p class="muted source-documents-address-note" data-testid="source-address-unreachable">${SOURCE_FETCH_NEEDS_SERVER}</p>`
+        : null
+  const originLink = (entry) =>
+    html`<a class="source-documents-origin" data-testid="source-origin" href=${entry.origin.address} target="_blank" rel="noopener noreferrer" title=${`Fetched ${formatWhen(entry.origin.fetchedAt)} from ${entry.origin.finalAddress}`}>${entry.origin.address}</a>`
   const replacesPicker = () =>
     live.length > 0 && !readOnly
       ? html`<select class="source-replaces" data-testid="source-replaces" aria-label="This replaces…" value=${replaces} disabled=${busy} onChange=${(e) => setReplaces(e.currentTarget.value)}>
@@ -278,7 +379,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
           ? html`<ul class="srcdocs" data-testid="source-documents-list">
               ${live.map(
                 (entry) => html`<li key=${entry.id} data-source-id=${entry.id}>
-                  <span class="srcdoc-title" title=${entry.filename}>${entry.title}</span>
+                  <span class="srcdoc-title" title=${isFetchedSource(entry) ? `${entry.origin.address}, fetched ${formatWhen(entry.origin.fetchedAt)}` : entry.filename}>${entry.title}</span>
                   <span class="meta">${formatBytes(entry.size)}${entry.text ? '' : ' · no text'}</span>
                   ${marks(entry)}
                   ${sourceFileKind(entry.filename) === 'pdf' && store.setReadVisually
@@ -308,6 +409,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
               + Add Source document
               <input type="file" multiple accept=${SOURCE_FILE_ACCEPT} aria-label="Add Source documents" data-testid="source-documents-input" style="display:none" disabled=${busy} onChange=${onPick} />
             </label>`}
+        ${addressForm()}
         <p class=${`source-documents-message ${message ? message.kind : ''}`} role="status" aria-live="polite" data-testid="source-documents-message">${message ? message.text : ''}</p>
       </div>
     `
@@ -318,7 +420,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       <summary data-testid="source-documents-summary">Source documents${list ? html` <span class="source-documents-count">(${live.length})</span>` : null}</summary>
       <div class="source-documents-body">
         <p class="guidance source-documents-intro">
-          Evidence this Instance's content is drawn from: briefs, requirements, meeting notes, spreadsheets, screenshots. They are kept with the Instance, separate from its images, and Gantry reads the text out of each one when you add it. Word, PowerPoint, spreadsheets, PDFs, Markdown, text and images, up to ${formatBytes(MAX_SOURCE_BYTES)} each.
+          Evidence this Instance's content is drawn from: briefs, requirements, meeting notes, spreadsheets, screenshots. They are kept with the Instance, separate from its images, and Gantry reads the text out of each one when you add it. Word, PowerPoint, spreadsheets, PDFs, Markdown, text and images, up to ${formatBytes(MAX_SOURCE_BYTES)} each${offersAddress ? ', or a web page or document from its address: the Gantry server fetches a copy and keeps where it came from' : ''}.
         </p>
         ${commitNote ? html`<p class="guidance source-documents-commit-note" data-testid="source-documents-commit-note">${commitNote}</p>` : null}
         ${loadError ? html`<p class="inline-error" role="alert" data-testid="source-documents-load-error">${loadError}</p>` : null}
@@ -332,6 +434,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
               </label>
               ${replacesPicker()}
             </div>`}
+        ${addressForm()}
         ${live.length > 0
           ? html`<div class="source-documents-pack"><button type="button" class="btn small ghost" disabled=${busy} data-testid="source-documents-download-all" onClick=${downloadAll} title="Save every document, as uploaded, in one zip">Download all (.zip)</button></div>`
           : null}
@@ -370,9 +473,9 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                         : html`<span class="source-documents-title-text">${entry.title}</span>`}
                       ${marks(entry)}
                     </td>
-                    <td class="source-documents-file">${entry.filename}</td>
+                    <td class="source-documents-file">${entry.filename}${isFetchedSource(entry) ? html`<br />${originLink(entry)}` : null}</td>
                     <td>${formatBytes(entry.size)}</td>
-                    <td>${formatWhen(entry.uploadedAt)}${entry.uploadedBy ? html`<br /><span class="muted">${entry.uploadedBy}</span>` : null}</td>
+                    <td>${isFetchedSource(entry) ? `fetched ${formatWhen(entry.origin.fetchedAt)}` : formatWhen(entry.uploadedAt)}${entry.uploadedBy ? html`<br /><span class="muted">${entry.uploadedBy}</span>` : null}</td>
                     <td>
                       ${entry.text
                         ? html`<span class="stamp agreed" title="The text read from this document is kept with it">TEXT READ</span>`
@@ -396,6 +499,9 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                               ? null
                               : html`<button type="button" class="btn small ghost" disabled=${busy} onClick=${() => setRenaming({ id: entry.id, title: entry.title })}>Rename</button>
                                   <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => extractAgain(entry)}>Extract text again</button>
+                                  ${canFetchAgain(entry)
+                                    ? html`<button type="button" class="btn small ghost" disabled=${busy} data-testid="source-fetch-again" onClick=${() => fetchAgain(entry)} title=${`Fetch ${entry.origin.address} again. A changed page is added as a new document that replaces this one; an unchanged one adds nothing.`}>Fetch again</button>`
+                                    : null}
                                   ${sourceFileKind(entry.filename) === 'pdf' && store.setReadVisually
                                     ? html`<button type="button" class="btn small ghost" disabled=${busy} data-testid="source-read-visually" aria-pressed=${entry.readVisually === true} onClick=${() => toggleReadVisually(entry)} title="Send the PDF itself to an AI Provider that takes PDFs, instead of its text. Suits diagrams and layouts.">${entry.readVisually ? 'Read as text' : 'Read visually'}</button>`
                                     : null}

@@ -2356,6 +2356,14 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .source-documents .stamp.new { text-transform: none; letter-spacing: 0.02em; }
 .source-replaces { font: inherit; font-size: 12px; padding: 4px 6px; margin-left: 8px; max-width: 100%; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
 .interview-rail .source-replaces { margin: 6px 0 0; width: 100%; box-sizing: border-box; }
+
+/* #318: adding a Source document from a web address */
+.source-documents-address { display: flex; gap: 8px; align-items: center; margin: 6px 0; max-width: 760px; }
+.source-documents-address input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 4px 8px; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.interview-rail .source-documents-address { flex-wrap: wrap; }
+.interview-rail .source-documents-address input { flex-basis: 100%; }
+.source-documents-address-note { margin: 6px 0; font-size: 12px; }
+.source-documents-origin { font-size: 12px; word-break: break-all; }
 .interview-rail .srcdocs .stamp { flex-basis: auto; font-size: 9px; }
 .out-of-date-banner { margin: 0 0 16px; padding: 10px 12px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); font-size: 13px; }
 .out-of-date-banner h2 { margin: 0 0 6px; font-size: 14px; }

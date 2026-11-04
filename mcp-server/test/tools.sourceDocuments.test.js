@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createGantryClient } from '../src/gantryClient.js'
-import { tools } from '../src/tools/sourceDocuments.tools.js'
+import { sourceFetchOffered, tools } from '../src/tools/sourceDocuments.tools.js'
 import { tools as instanceTools } from '../src/tools/instanceContent.tools.js'
 import { stubFetch } from './helpers/fakeFetch.js'
 
@@ -32,7 +32,7 @@ const withClient = async (handler, fn, workspacePats = {}) => {
 }
 
 test('every tool in the cluster is registered with the instance addressing arguments', () => {
-  const names = ['list_source_documents', 'read_source_document', 'upload_source_document', 'read_decisions_log', 'list_reviewed_copies', 'read_reviewed_copy', 'upload_reviewed_copy']
+  const names = ['list_source_documents', 'read_source_document', 'upload_source_document', 'add_source_document_from_address', 'fetch_source_document_again', 'read_decisions_log', 'list_reviewed_copies', 'read_reviewed_copy', 'upload_reviewed_copy']
   assert.deepEqual(tools.map((t) => t.name), names)
   for (const t of tools) {
     for (const key of ['slug', 'scope', 'ref']) assert.ok(t.inputSchema[key], `${t.name} takes ${key}`)
@@ -229,6 +229,136 @@ test('upload_source_document checks its own arguments before calling gantry serv
       assert.equal((await tool('upload_source_document').handler({ slug: 's', filename: 'a.pdf', contentBase64: '!!!' }, { gantryClient })).isError, true)
       assert.equal(fetch.calls.length, 0)
     }
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Source documents from a web address (#318)
+// ---------------------------------------------------------------------------
+
+const FETCHED = {
+  address: 'https://vendor.example.com/api',
+  finalAddress: 'https://docs.vendor.example.com/api',
+  fetchedAt: '2026-11-03T09:00:00.000Z',
+  contentType: 'text/html',
+  filename: 'Vendor API guide.html',
+  title: 'Vendor API guide',
+  size: 10,
+  dataBase64: Buffer.from('<p>page</p>').toString('base64'),
+}
+
+test('add_source_document_from_address has gantry serve fetch the address, then adds it like an upload with its origin', async () => {
+  await withClient(
+    ({ url, method, body }) => {
+      if (url.pathname === '/api/sources/fetch' && method === 'POST') return { status: 200, body: { ...FETCHED, address: JSON.parse(body).address } }
+      if (url.pathname === '/api/instance/sources' && method === 'POST') {
+        const sent = JSON.parse(body)
+        return { status: 201, body: { entry: { id: 'vendor-api-guide', filename: sent.filename, title: sent.title, origin: sent.origin }, extraction: { read: true, note: 'The text was read from it.' } } }
+      }
+      return undefined
+    },
+    async (gantryClient, fetch) => {
+      const result = await tool('add_source_document_from_address').handler({ slug: 'my-instance', address: 'https://vendor.example.com/api', uploadedBy: 'an.agent' }, { gantryClient })
+      assert.equal(result.isError, undefined)
+      assert.deepEqual(payload(result).entry.origin, { address: FETCHED.address, finalAddress: FETCHED.finalAddress, fetchedAt: FETCHED.fetchedAt })
+      const fetchCall = fetch.calls.find((c) => c.url.pathname === '/api/sources/fetch')
+      assert.deepEqual(JSON.parse(fetchCall.body), { address: 'https://vendor.example.com/api' })
+      assert.equal(fetchCall.headers.authorization, undefined, 'the fetch carries no workspace credential')
+      const sent = JSON.parse(fetch.calls.find((c) => c.url.pathname === '/api/instance/sources').body)
+      assert.deepEqual(sent, {
+        filename: 'Vendor API guide.html',
+        dataBase64: FETCHED.dataBase64,
+        extractText: true,
+        title: 'Vendor API guide',
+        origin: { address: FETCHED.address, finalAddress: FETCHED.finalAddress, fetchedAt: FETCHED.fetchedAt },
+        uploadedBy: 'an.agent',
+      })
+    }
+  )
+})
+
+test('add_source_document_from_address passes on gantry serve\'s own sentence for a refused or failed fetch, and stores nothing', async () => {
+  for (const [status, error, code] of [
+    [400, "Gantry won't fetch 10.0.0.5: it is a private or loopback address...", 'address-refused'],
+    [422, 'https://wiki.example.com needs a sign-in... save it as a PDF and upload that instead.', 'sign-in'],
+    [413, 'https://example.com/big.pdf is over the 25 MB limit for a Source document.', 'too-large'],
+    [403, 'Adding Source documents by web address is switched off on this Gantry server.', 'source-fetch-off'],
+  ]) {
+    await withClient(
+      ({ url }) => (url.pathname === '/api/sources/fetch' ? { status, body: { error, code } } : undefined),
+      async (gantryClient, fetch) => {
+        const result = await tool('add_source_document_from_address').handler({ slug: 'my-instance', address: 'https://example.com/x' }, { gantryClient })
+        assert.equal(result.isError, true)
+        assert.equal(payload(result).error, error)
+        assert.equal(payload(result).detail.code, code)
+        assert.equal(fetch.calls.some((c) => c.url.pathname === '/api/instance/sources'), false)
+      }
+    )
+  }
+})
+
+test('fetch_source_document_again fetches the document\'s own address and reports an unchanged page or a replacement', async () => {
+  const listed = {
+    entries: [
+      { id: 'vendor-api-guide', title: 'Vendor API guide', filename: 'Vendor API guide.html', origin: { address: FETCHED.address, finalAddress: FETCHED.finalAddress, fetchedAt: '2026-11-01T00:00:00.000Z' } },
+      { id: 'brief', title: 'Brief', filename: 'brief.docx' },
+    ],
+  }
+  for (const unchanged of [true, false]) {
+    await withClient(
+      ({ url, method, body }) => {
+        if (url.pathname === '/api/instance/sources' && method === 'GET') return { status: 200, body: listed }
+        if (url.pathname === '/api/sources/fetch' && method === 'POST') return { status: 200, body: { ...FETCHED, address: JSON.parse(body).address } }
+        if (url.pathname === '/api/instance/sources/vendor-api-guide/fetch-again' && method === 'POST') {
+          return unchanged
+            ? { status: 200, body: { unchanged: true, entry: listed.entries[0] } }
+            : { status: 201, body: { unchanged: false, entry: { id: 'vendor-api-guide-2', replaces: 'vendor-api-guide', origin: JSON.parse(body).origin } } }
+        }
+        return undefined
+      },
+      async (gantryClient, fetch) => {
+        const result = await tool('fetch_source_document_again').handler({ slug: 'my-instance', id: 'vendor-api-guide' }, { gantryClient })
+        assert.equal(result.isError, undefined)
+        assert.equal(JSON.parse(fetch.calls.find((c) => c.url.pathname === '/api/sources/fetch').body).address, FETCHED.address)
+        const sent = JSON.parse(fetch.calls.find((c) => c.url.pathname.endsWith('/fetch-again')).body)
+        assert.equal(sent.extractText, true)
+        assert.equal(sent.origin.fetchedAt, FETCHED.fetchedAt)
+        if (unchanged) {
+          assert.equal(payload(result).unchanged, true)
+          assert.match(payload(result).note, /Unchanged since 2026-11-01T00:00:00\.000Z: nothing was added/)
+        } else {
+          assert.equal(payload(result).entry.replaces, 'vendor-api-guide')
+          assert.match(payload(result).note, /flagged Out of date/)
+        }
+      }
+    )
+  }
+  await withClient(
+    ({ url, method }) => (url.pathname === '/api/instance/sources' && method === 'GET' ? { status: 200, body: listed } : undefined),
+    async (gantryClient, fetch) => {
+      const result = await tool('fetch_source_document_again').handler({ slug: 'my-instance', id: 'brief' }, { gantryClient })
+      assert.equal(result.isError, true)
+      assert.match(payload(result).error, /uploaded, not fetched/)
+      assert.equal(fetch.calls.some((c) => c.url.pathname === '/api/sources/fetch'), false)
+    }
+  )
+})
+
+test('the add-by-address tools are offered only when gantry serve says adding by address is on', async () => {
+  for (const tool of tools.filter((t) => ['add_source_document_from_address', 'fetch_source_document_again'].includes(t.name))) assert.equal(tool.available, sourceFetchOffered)
+  for (const [answer, offered] of [[{ status: 200, body: { enabled: true } }, true], [{ status: 200, body: { enabled: false } }, false], [{ status: 404, body: {} }, false]]) {
+    await withClient(
+      ({ url }) => (url.pathname === '/api/sources/fetch' ? answer : undefined),
+      async (gantryClient) => {
+        assert.equal(await sourceFetchOffered({ gantryClient }), offered)
+      }
+    )
+  }
+  await withClient(
+    () => {
+      throw new Error('gantry serve is down')
+    },
+    async (gantryClient) => assert.equal(await sourceFetchOffered({ gantryClient }), false)
   )
 })
 

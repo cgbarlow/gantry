@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createServer as createHttpServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as officeparser from 'officeparser'
@@ -331,5 +332,121 @@ describe('GET /api/instance/out-of-date', () => {
   test('is a 404 for an Instance the server does not know', () =>
     withInstance(async (base) => {
       assert.equal((await fetch(`${base}/api/instance/out-of-date?slug=ghost`)).status, 404)
+    }))
+})
+
+// #318 (docs/adr/0071): what an outside agent (or the browser) does to add a page by address: POST /api/sources/fetch for the bytes, then
+// the ordinary upload with the `origin` it gave. Fetch again goes through POST /api/instance/sources/:id/fetch-again. A local site stands in
+// for the web, allowed by the Source document setting as an intranet page would be.
+describe('a Source document added from a web address', () => {
+  async function withSiteAndInstance(fn) {
+    const pages = { '/guide': '<html><head><title>Vendor API guide</title></head><body><h1>Limits</h1><p>100 requests a minute.</p></body></html>' }
+    const site = createHttpServer((req, res) => {
+      if (req.url === '/spec.pdf') {
+        res.writeHead(200, { 'Content-Type': 'application/pdf' })
+        res.end(Buffer.from(textPdf([['The service must answer within two seconds']])))
+        return
+      }
+      if (!pages[req.url]) {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(pages[req.url])
+    })
+    await new Promise((resolve) => site.listen(0, '127.0.0.1', resolve))
+    const siteBase = `http://127.0.0.1:${site.address().port}`
+    const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
+    try {
+      createInstance('design', SLUG, { instancesDir })
+      await withRunningServer({ slug: SLUG, instancesDir, allowPrivateSourceUrls: true }, (base) => fn({ base, siteBase, pages, folder: join(instancesDir, 'default', SLUG) }))
+    } finally {
+      site.closeAllConnections?.()
+      site.close()
+      rmSync(instancesDir, { recursive: true, force: true })
+    }
+  }
+  const fetchAddress = async (base, address) => (await send(base, 'POST', '/api/sources/fetch', { address })).json()
+  const originOf = (fetched) => ({ address: fetched.address, finalAddress: fetched.finalAddress, fetchedAt: fetched.fetchedAt })
+  const addFrom = async (base, address) => {
+    const fetched = await fetchAddress(base, address)
+    return upload(base, { filename: fetched.filename, dataBase64: fetched.dataBase64, title: fetched.title, origin: originOf(fetched), extractText: true })
+  }
+
+  test('a page and a PDF are stored like uploads with their origin and their text read, and can be downloaded, renamed and removed', () =>
+    withSiteAndInstance(async ({ base, siteBase, folder }) => {
+      const res = await addFrom(base, `${siteBase}/guide`)
+      assert.equal(res.status, 201, await res.clone().text())
+      const { entry, extraction } = await res.json()
+      assert.equal(entry.id, 'vendor-api-guide')
+      assert.equal(entry.filename, 'Vendor API guide.html')
+      assert.equal(entry.origin.address, `${siteBase}/guide`)
+      assert.equal(entry.origin.finalAddress, `${siteBase}/guide`)
+      assert.equal(extraction.read, true)
+      assert.match(readFileSync(join(folder, 'sources', '.text', 'Vendor API guide.html.md'), 'utf8'), /^# Limits\n\n100 requests a minute\.$/m)
+      assert.match(readFileSync(join(folder, 'sources', 'manifest.yaml'), 'utf8'), /origin:\n {4}address: http:\/\/127\.0\.0\.1:\d+\/guide\n {4}finalAddress: .*\n {4}fetchedAt: /)
+
+      const download = await fetch(`${base}/api/instance/sources/vendor-api-guide/file`)
+      assert.equal(download.status, 200)
+      assert.equal(download.headers.get('content-type'), 'application/octet-stream', "a stored page never runs in the app's own origin")
+      assert.match(download.headers.get('content-disposition'), /^attachment;/)
+
+      const pdf = await (await addFrom(base, `${siteBase}/spec.pdf`)).json()
+      assert.equal(pdf.entry.filename, 'spec.pdf')
+      assert.equal(pdf.extraction.read, true)
+      const page = await (await fetch(`${base}/api/instance/sources/spec/content?page=1`)).json()
+      assert.match(page.text, /answer within two seconds/)
+
+      assert.equal((await send(base, 'PATCH', '/api/instance/sources/vendor-api-guide', { title: 'API guide' })).status, 200)
+      assert.equal((await send(base, 'DELETE', '/api/instance/sources/spec', {})).status, 200)
+      const { entries } = await (await fetch(`${base}/api/instance/sources`)).json()
+      assert.equal(entries.find((e) => e.id === 'vendor-api-guide').title, 'API guide')
+      assert.ok(entries.find((e) => e.id === 'spec').removedAt)
+    }))
+
+  test('an HTML file is still refused as an upload: only an address brings one in', () =>
+    withSiteAndInstance(async ({ base }) => {
+      const res = await upload(base, { filename: 'page.html', dataBase64: b64('<p>x</p>'), extractText: true })
+      assert.equal(res.status, 400)
+      assert.match((await res.json()).error, /can't take \.html files/)
+    }))
+
+  test('Fetch again adds nothing for the same page, and for a changed one adds a replacement that flags the Fields drawn on it', () =>
+    withSiteAndInstance(async ({ base, siteBase, pages }) => {
+      const instance = await (await fetch(`${base}/api/instance`)).json()
+      const moduleId = instance.modules[0].id
+      const fieldId = instance.modules[0].fields.find((f) => f.type === 'markdown' || f.type === 'text')?.id ?? instance.modules[0].fields[0].id
+      const { entry } = await (await addFrom(base, `${siteBase}/guide`)).json()
+      await send(base, 'PUT', '/api/instance/modules', { modules: { [moduleId]: { fields: { [fieldId]: 'At most 100 requests a minute ([Vendor API guide](source:vendor-api-guide)).' } } } })
+
+      const again = async (id = entry.id) => {
+        const fetched = await fetchAddress(base, entry.origin.address)
+        return send(base, 'POST', `/api/instance/sources/${id}/fetch-again`, { filename: fetched.filename, dataBase64: fetched.dataBase64, extractText: true, origin: originOf(fetched) })
+      }
+      const same = await again()
+      assert.equal(same.status, 200)
+      const sameBody = await same.json()
+      assert.equal(sameBody.unchanged, true)
+      assert.equal(sameBody.entry.origin.fetchedAt, entry.origin.fetchedAt)
+      assert.equal('extraction' in sameBody, false, 'nothing was read')
+      assert.equal((await (await fetch(`${base}/api/instance/sources`)).json()).entries.length, 1)
+      assert.deepEqual((await (await fetch(`${base}/api/instance/out-of-date`)).json()).fields, [])
+
+      pages['/guide'] = pages['/guide'].replace('100 requests', '50 requests')
+      const changed = await again()
+      assert.equal(changed.status, 201, await changed.clone().text())
+      const changedBody = await changed.json()
+      assert.equal(changedBody.unchanged, false)
+      assert.equal(changedBody.entry.replaces, 'vendor-api-guide')
+      assert.equal(changedBody.entry.title, 'Vendor API guide')
+      assert.equal(changedBody.extraction.read, true)
+      const flagged = await (await fetch(`${base}/api/instance/out-of-date`)).json()
+      assert.deepEqual(flagged.fields.map((f) => f.flags[0].change), ['replaced'])
+
+      const notes = await (await upload(base, { filename: 'notes.txt', dataBase64: b64('x'), extractText: true })).json()
+      const notFetched = await send(base, 'POST', `/api/instance/sources/${notes.entry.id}/fetch-again`, { filename: 'notes.txt', dataBase64: b64('y') })
+      assert.equal(notFetched.status, 400)
+      assert.equal((await notFetched.json()).code, 'not-fetched')
     }))
 })

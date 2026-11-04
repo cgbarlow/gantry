@@ -384,13 +384,13 @@ async function buildLocalComputePayload(instance) {
     moduleFiles[moduleId] = await readLocalTextFile(handle, `gantry-workspace/${slug}/modules/${entry.name}`)
   }
   const payload = { definitionId: instance.definition, definitionVersion: instance.localDefinitionVersion, instanceYaml, moduleFiles }
-  // #281: a render prints the title of each Source document the content cites, and the Sources appendix lists them. Only the manifest entries of the ones cited go (their title, filename and dates), and only when something cites one: a Source document and its text never leave the folder.
+  // #281: a render prints the title of each Source document the content cites, and the Sources appendix lists them. Only the manifest entries of the ones cited go (their title, filename and dates, and #318 a fetched one's origin), and only when something cites one: a Source document and its text never leave the folder.
   const citedSources = citedSourceIds(Object.values(moduleFiles).join('\n'))
   if (citedSources.length) {
     const { entries: sourceEntries } = await createLocalSourceStore(handle, slug).list()
     payload.sources = sourceEntries
       .filter((e) => citedSources.includes(e.id))
-      .map(({ id, filename, title, uploadedAt, removedAt }) => ({ id, filename, title, uploadedAt, removedAt }))
+      .map(({ id, filename, title, uploadedAt, removedAt, origin }) => ({ id, filename, title, uploadedAt, removedAt, origin }))
   }
   // #224: the instance's own Logo, which the render puts in its documents' page header, rides along
   // as an asset at the path its instance.yaml names (`assets/instance-logo.png`).

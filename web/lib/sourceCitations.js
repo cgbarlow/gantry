@@ -6,7 +6,7 @@
 //
 // In the editor the link is clickable and opens the document (web/app.js's renderPreview). Word readers usually have no repo access, so the Word render prints it as plain "(Client brief, p. 4)" with no hyperlink. The exported `.md` keeps the link as written, as it keeps a diagram caption's syntax. Only a link is a citation: an image (`![…](source:…)`) is not, and neither is anything inside a code span or a fenced code block.
 //
-// An Artefact whose Definition sets `source-appendix: true` ends with a Sources list of the documents it cites: each with its title, original filename and upload date. A removed document is still listed, marked removed. With the key off (its default) there is no list.
+// An Artefact whose Definition sets `source-appendix: true` ends with a Sources list of the documents it cites: each with its title, original filename and upload date (or, #318, for a page fetched from a web address, its address and "retrieved <date>"). A removed document is still listed, marked removed. With the key off (its default) there is no list.
 //
 // Pure (no DOM, no Node built-ins), so the server's compile step (lib/render.js), the Definition checks (lib/definition.js, web/lib/localStatus.js) and the browser (web/app.js) share one copy of the syntax, as web/lib/diagramCaptions.js does.
 
@@ -121,17 +121,21 @@ const cell = (text) => String(text ?? '').replace(/\r?\n/g, ' ').replace(/\\/g, 
 export const SOURCE_APPENDIX_HEADING = 'Sources'
 
 /**
- * The Sources list an Artefact ends with: a heading and a table of the documents `markdown` cites, in the order they are first cited, each with its title, original filename and upload date. A removed document is listed too, marked "(removed)". A cited id the manifest does not list is left out (there is nothing to say about it), and `''` is returned when nothing is left, so an Artefact that cites nothing ends exactly as it did.
+ * The Sources list an Artefact ends with: a heading and a table of the documents `markdown` cites, in the order they are first cited, each with its title, original filename and upload date. #318: a document fetched from a web address (it has an `origin`) shows the address and "retrieved <date>" in place of the filename and upload date. A removed document is listed too, marked "(removed)". A cited id the manifest does not list is left out (there is nothing to say about it), and `''` is returned when nothing is left, so an Artefact that cites nothing ends exactly as it did.
  *
  * @param {string} markdown  the compiled text of the Artefact
- * @param {{ id: string, title?: string, filename?: string, uploadedAt?: string, removedAt?: string }[]} entries  the Instance's manifest
+ * @param {{ id: string, title?: string, filename?: string, uploadedAt?: string, removedAt?: string, origin?: { address: string, fetchedAt: string } }[]} entries  the Instance's manifest
  */
 export function buildSourceAppendix(markdown, entries) {
   const byId = new Map((entries ?? []).map((e) => [e.id, e]))
   const rows = citedSourceIds(markdown)
     .map((id) => byId.get(id))
     .filter(Boolean)
-    .map((e) => `| ${cell(e.title || e.id)}${e.removedAt ? ' (removed)' : ''} | ${cell(e.filename)} | ${appendixDate(e.uploadedAt)} |`)
+    .map((e) => {
+      const title = `${cell(e.title || e.id)}${e.removedAt ? ' (removed)' : ''}`
+      if (typeof e.origin?.address === 'string' && e.origin.address) return `| ${title} | ${cell(e.origin.address)} | retrieved ${appendixDate(e.origin.fetchedAt)} |`
+      return `| ${title} | ${cell(e.filename)} | ${appendixDate(e.uploadedAt)} |`
+    })
   if (!rows.length) return ''
   return `# ${SOURCE_APPENDIX_HEADING}\n\n| Document | File | Added |\n| --- | --- | --- |\n${rows.join('\n')}\n`
 }

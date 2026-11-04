@@ -124,6 +124,87 @@ async function uploadSourceDocument(args, context) {
 }
 
 // ---------------------------------------------------------------------------
+// Source documents from a web address (#318, docs/adr/0071)
+// ---------------------------------------------------------------------------
+
+// Whether gantry serve offers adding by address (its operator's GANTRY_SOURCE_FETCH_DISABLED off switch), asked once per gantry client
+// and kept briefly, like the workspace classification, so a burst of MCP requests asks once. Anything but a clear "on" leaves the tools
+// out: a server that can't say has nothing to fetch with.
+const FETCH_STATUS_TTL_MS = 30_000
+const fetchStatusCache = new WeakMap()
+
+export async function sourceFetchOffered({ gantryClient }) {
+  const cached = fetchStatusCache.get(gantryClient)
+  if (cached && Date.now() - cached.at < FETCH_STATUS_TTL_MS) return cached.enabled
+  let enabled = false
+  try {
+    const res = await gantryClient.request({ path: '/api/sources/fetch' })
+    enabled = res.ok && res.body?.enabled === true
+  } catch {
+    enabled = false
+  }
+  fetchStatusCache.set(gantryClient, { at: Date.now(), enabled })
+  return enabled
+}
+
+// gantry serve fetches the address (every redirect hop checked, 25 MB, the same types); nothing is stored by this call. `{ fetched }` or
+// `{ result }` — a refusal already shaped for return, carrying gantry serve's own sentence for what to do.
+async function fetchAddress(address, { gantryClient }) {
+  const res = await gantryClient.request({ path: '/api/sources/fetch', method: 'POST', body: { address } })
+  if (!res.ok) return { result: errorResult(res.body?.error ?? `gantry serve responded ${res.status}`, { status: res.status, code: res.body?.code }) }
+  if (typeof res.body?.dataBase64 !== 'string') return { result: errorResult('gantry serve returned an unexpected shape fetching that address', res.body) }
+  return { fetched: res.body }
+}
+
+const originOf = (fetched) => ({ address: fetched.address, finalAddress: fetched.finalAddress, fetchedAt: fetched.fetchedAt })
+
+async function addSourceDocumentFromAddress(args, context) {
+  const { address, title, uploadedBy, replaces, slug, ref } = args
+  if (!slug && !ref) return errorResult('Provide "slug" or "ref" to identify the instance.')
+  if (!address) return errorResult('Provide "address" — the web address of the page or document, starting https://.')
+  const { fetched, result: refused } = await fetchAddress(address, context)
+  if (refused) return refused
+  const { res, result } = await callInstanceRoute(args, context, {
+    path: '/api/instance/sources',
+    method: 'POST',
+    body: {
+      filename: fetched.filename,
+      dataBase64: fetched.dataBase64,
+      // As for an upload: gantry serve reads the text with the browser's own extractors (an HTML page with Pandoc).
+      extractText: true,
+      title: title ?? fetched.title,
+      origin: originOf(fetched),
+      ...(uploadedBy !== undefined ? { uploadedBy } : {}),
+      ...(replaces !== undefined ? { replaces } : {}),
+    },
+  })
+  if (result) return result
+  return okResult(res.body)
+}
+
+async function fetchSourceDocumentAgain(args, context) {
+  const { id, uploadedBy, slug, ref } = args
+  if (!slug && !ref) return errorResult('Provide "slug" or "ref" to identify the instance.')
+  if (!id) return errorResult('Provide "id" — a Source document id from list_source_documents.')
+  const { res: listed, result: listRefused } = await callInstanceRoute(args, context, { path: '/api/instance/sources' })
+  if (listRefused) return listRefused
+  const entry = (listed.body?.entries ?? []).find((candidate) => candidate.id === id)
+  if (!entry) return errorResult(`No Source document "${id}" in this instance.`)
+  if (entry.removedAt) return errorResult(`"${entry.title}" has been removed.`)
+  if (!entry.origin?.address) return errorResult(`"${entry.title}" was uploaded, not fetched from a web address, so there is nothing to fetch again.`)
+  const { fetched, result: refused } = await fetchAddress(entry.origin.address, context)
+  if (refused) return refused
+  const { res, result } = await callInstanceRoute(args, context, {
+    path: `/api/instance/sources/${encodeURIComponent(id)}/fetch-again`,
+    method: 'POST',
+    body: { filename: fetched.filename, dataBase64: fetched.dataBase64, extractText: true, origin: originOf(fetched), ...(uploadedBy !== undefined ? { uploadedBy } : {}) },
+  })
+  if (result) return result
+  if (res.body?.unchanged) return okResult({ ...res.body, note: `Unchanged since ${entry.origin.fetchedAt}: nothing was added and no Field is flagged.` })
+  return okResult({ ...res.body, note: `The page changed since ${entry.origin.fetchedAt}. The new copy was added as "${res.body?.entry?.id}", which replaces "${id}"; the Fields that drew on "${id}" are now flagged Out of date (see get_instance).` })
+}
+
+// ---------------------------------------------------------------------------
 // Decisions logs
 // ---------------------------------------------------------------------------
 
@@ -192,7 +273,7 @@ export const tools = [
     description:
       '1. Lists an instance\'s Source documents — the evidence (client briefs, standards, spreadsheets, PDFs, pictures) the architect uploaded for the AI interview to draw on. Read them before you draft, so a figure or a name comes from a document and not from you. ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". ' +
-      '3. Each document carries its "id" (cite it in content as [Title, p. 4](source:<id>)), "title", "filename", "size", "uploadedBy", "uploadedAt" and "hasText" (false for a picture and for a scanned PDF). A document a newer one replaces carries "replacedBy"; the newer one carries "replaces". The older one stays citable. A "removed" document is kept in the list so a citation of it still shows its title, but it can no longer be read. ' +
+      '3. Each document carries its "id" (cite it in content as [Title, p. 4](source:<id>)), "title", "filename", "size", "uploadedBy", "uploadedAt" and "hasText" (false for a picture and for a scanned PDF). One added from a web address also carries its "origin": { address, finalAddress, fetchedAt }. A document a newer one replaces carries "replacedBy"; the newer one carries "replaces". The older one stays citable. A "removed" document is kept in the list so a citation of it still shows its title, but it can no longer be read. ' +
       '4. Also returns "totalBytes", a "warning" once the live documents are past about 100 MB, and the "limits" (25 MB per document). ' +
       '5. Works on server, Azure DevOps and GitHub workspaces; a local workspace\'s files are on the architect\'s computer and are not reachable here. GitLab and Atlassian workspaces take Source documents later.',
     inputSchema: { ...slugRefShape },
@@ -231,6 +312,41 @@ export const tools = [
       replaces: z.string().optional().describe('The id of an older Source document this one replaces.'),
     },
     handler: uploadSourceDocument,
+  },
+  {
+    name: 'add_source_document_from_address',
+    description:
+      '1. Adds a Source document to an instance from a web address, under the same rules as the web app\'s "Add from address": gantry serve fetches the page or document (a public web page, PDF, Word, PowerPoint, spreadsheet, Markdown or text file, or picture, at most 25 MB) and keeps a snapshot of it, never a live link. ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "address" is required. ' +
+      '3. Private, loopback and cloud-metadata addresses are refused, at every redirect, unless the operator allows private addresses for Source documents. A page behind a sign-in, a paywall or a VPN can\'t be fetched: Gantry never takes cookies or passwords for other sites. Each failure (unreachable, a 4xx or 5xx, a time-out, over 25 MB, an unsupported type, a sign-in page) comes back with what to do; pass it on to the architect. ' +
+      '4. The text is read as for upload_source_document (an HTML page to Markdown; its images and scripts are not captured). The entry records its "origin": { address, finalAddress, fetchedAt }. "title" defaults to the page\'s own title; "replaces" and "uploadedBy" work as for upload_source_document. ' +
+      '5. One commit on the current stage\'s branch on an Azure DevOps or GitHub workspace, as for an upload. This is a real write — treat it as final once called. ' +
+      '6. Only listed when the operator has not switched adding by address off.',
+    inputSchema: {
+      ...slugRefShape,
+      address: z.string().min(1).describe('The web address, starting http:// or https://.'),
+      title: z.string().optional().describe("Display title; defaults to the page's own title, or the file name."),
+      uploadedBy: z.string().optional().describe('Who is adding it, recorded in the manifest.'),
+      replaces: z.string().optional().describe('The id of an older Source document this one replaces.'),
+    },
+    available: sourceFetchOffered,
+    handler: addSourceDocumentFromAddress,
+  },
+  {
+    name: 'fetch_source_document_again',
+    description:
+      '1. Fetches a Source document that was added from a web address (it has an "origin") again, from the address it was added from. Nothing ever refetches on its own: this is the only way. ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" is required (from list_source_documents). ' +
+      '3. If the fetched bytes are identical, nothing is added or flagged and the response says "unchanged": true. If they differ, the new copy is added as a new document that replaces the old one (the old one stays, citable and marked "replaced by"), and the Fields that drew on the old one are flagged Out of date — bring them up to date with the architect. ' +
+      '4. The same address check, limits and failures as add_source_document_from_address. A real write when the page changed — treat it as final once called. ' +
+      '5. Only listed when the operator has not switched adding by address off.',
+    inputSchema: {
+      ...slugRefShape,
+      id: z.string().describe('The Source document id, from list_source_documents. It must have an "origin".'),
+      uploadedBy: z.string().optional().describe('Who is fetching it again, recorded on the new document if the page changed.'),
+    },
+    available: sourceFetchOffered,
+    handler: fetchSourceDocumentAgain,
   },
   {
     name: 'read_decisions_log',

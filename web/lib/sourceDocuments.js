@@ -50,6 +50,13 @@ export const SOURCE_FILE_KINDS = Object.freeze({
 
 export const SOURCE_FILE_EXTENSIONS = Object.freeze(Object.values(SOURCE_FILE_KINDS).flat())
 
+/**
+ * #318 (docs/adr/0071): the kinds a document fetched from a web address may also be, beyond what an upload takes. An HTML page is kept as
+ * its HTML and read to Markdown with Pandoc (web/lib/sourceExtract.js); its images and scripts are not captured. An HTML file is never
+ * taken as an upload, so uploads behave exactly as before.
+ */
+export const FETCHED_FILE_KINDS = Object.freeze({ html: ['.html', '.htm'] })
+
 /** The `accept` value for the upload's file picker. */
 export const SOURCE_FILE_ACCEPT = SOURCE_FILE_EXTENSIONS.join(',')
 
@@ -60,18 +67,19 @@ export function sourceFileExtension(filename) {
   return dot > 0 ? name.slice(dot).toLowerCase() : ''
 }
 
-/** The kind a filename's extension names (a key of SOURCE_FILE_KINDS), or null when Gantry does not take that type. */
+/** The kind a stored document's filename names (a key of SOURCE_FILE_KINDS, or `html` for a page fetched from a web address), or null when Gantry does not take that type. */
 export function sourceFileKind(filename) {
   const ext = sourceFileExtension(filename)
-  for (const [kind, extensions] of Object.entries(SOURCE_FILE_KINDS)) {
+  for (const [kind, extensions] of [...Object.entries(SOURCE_FILE_KINDS), ...Object.entries(FETCHED_FILE_KINDS)]) {
     if (extensions.includes(ext)) return kind
   }
   return null
 }
 
-/** The sentence shown when a file of a type Gantry cannot read is picked, or null when it can. */
-export function sourceFileTypeProblem(filename) {
-  if (sourceFileKind(filename)) return null
+/** The sentence shown when a file of a type Gantry cannot read is picked, or null when it can. `fetched` (#318) also takes an HTML page, which only ever comes from a web address. */
+export function sourceFileTypeProblem(filename, { fetched = false } = {}) {
+  const kind = sourceFileKind(filename)
+  if (kind && (fetched || SOURCE_FILE_KINDS[kind])) return null
   const ext = sourceFileExtension(filename)
   const legacy = { '.doc': '.docx', '.ppt': '.pptx', '.xls': '.xlsx' }[ext]
   const hint = legacy ? ` Save it as ${legacy} and upload that.` : ''
@@ -246,7 +254,32 @@ export function paginateSourceText(text, filename) {
 // --- the manifest ---------------------------------------------------------------------------------------------------
 
 // #297: `replaces` (on the NEW document) is the id of the older one it supersedes, and `textChangedAt` the time the text read from the document last became different from what it was. Both are kept only when set, so a manifest that never used them is unchanged byte for byte.
-const ENTRY_KEYS = ['id', 'filename', 'title', 'uploadedBy', 'uploadedAt', 'size', 'text', 'readVisually', 'replaces', 'textChangedAt', 'removedBy', 'removedAt']
+// #318: `origin` is where a document fetched from a web address came from; an upload has none, and its entry is unchanged byte for byte.
+const ENTRY_KEYS = ['id', 'filename', 'title', 'uploadedBy', 'uploadedAt', 'size', 'text', 'readVisually', 'origin', 'replaces', 'textChangedAt', 'removedBy', 'removedAt']
+
+const isWebAddress = (value) => typeof value === 'string' && /^https?:\/\/\S+$/i.test(value.trim())
+
+/**
+ * #318 (docs/adr/0071): a fetched document's **origin**, `{ address, finalAddress, fetchedAt }` in that order: the address the architect gave, the final address after redirects (the given one when there were none) and when it was fetched. `null` for anything that is not one, so an entry without a usable origin is an upload.
+ */
+export function normalizeSourceOrigin(origin) {
+  if (!origin || typeof origin !== 'object' || !isWebAddress(origin.address)) return null
+  const fetchedAt = typeof origin.fetchedAt === 'string' && !Number.isNaN(new Date(origin.fetchedAt).getTime()) ? origin.fetchedAt : null
+  if (!fetchedAt) return null
+  return { address: origin.address.trim(), finalAddress: isWebAddress(origin.finalAddress) ? origin.finalAddress.trim() : origin.address.trim(), fetchedAt }
+}
+
+/** Whether a document was fetched from a web address (it has an origin), and so can be fetched again. */
+export function isFetchedSource(entry) {
+  return normalizeSourceOrigin(entry?.origin) !== null
+}
+
+/** Whether two documents' bytes are the same, byte for byte: what **Fetch again** asks before it adds anything. */
+export function sameSourceBytes(a, b) {
+  if (!a || !b || a.byteLength !== b.byteLength) return false
+  for (let i = 0; i < a.byteLength; i++) if (a[i] !== b[i]) return false
+  return true
+}
 
 /** One manifest entry with its keys in a fixed order and only the ones that have a value, so two writers produce the same bytes. */
 export function normalizeSourceEntry(entry) {
@@ -257,6 +290,11 @@ export function normalizeSourceEntry(entry) {
     if (value === '' && key !== 'uploadedBy') continue
     // #292: `readVisually` is kept only while it is on, so a manifest that never used it is unchanged byte for byte.
     if (key === 'readVisually' && value !== true) continue
+    if (key === 'origin') {
+      const origin = normalizeSourceOrigin(value)
+      if (origin) out.origin = origin
+      continue
+    }
     out[key] = value
   }
   return out
@@ -395,20 +433,22 @@ export function createSourceStore(io, options = {}) {
     return true
   }
 
-  return {
+  const store = {
     /** `{ entries, totalBytes, warning }`: every entry, removed ones included (they show their title where a citation still names them). */
     async list() {
       return summary((await readManifest()).entries)
     },
 
     /**
-     * Adds a document: always a new one with its own id and stored name, even when it is named like an existing one. `data` is `{ filename, bytes, text?, title?, uploadedBy?, replaces? }`; `replaces` (#297) is the id of an older document this one supersedes, recorded on the new entry (the older one stays as it is and shows "replaced by"). Refused when it is empty or over MAX_SOURCE_BYTES (the server's half of the browser's own check), or when `text` is past MAX_SOURCE_TEXT_CHARS. Returns `{ entry, totalBytes, warning }`.
+     * Adds a document: always a new one with its own id and stored name, even when it is named like an existing one. `data` is `{ filename, bytes, text?, title?, uploadedBy?, replaces?, origin? }`; `replaces` (#297) is the id of an older document this one supersedes, recorded on the new entry (the older one stays as it is and shows "replaced by"); `origin` (#318) is `{ address, finalAddress, fetchedAt }` for a document fetched from a web address. Refused when it is empty or over MAX_SOURCE_BYTES (the server's half of the browser's own check), when `text` is past MAX_SOURCE_TEXT_CHARS, or when an `origin` is given that is not one. Returns `{ entry, totalBytes, warning }`.
      */
     async upload(data) {
       const bytes = data.bytes
       const size = bytes?.byteLength ?? 0
       const sizeProblem = sourceSizeProblem(size, data.filename ? cleanSourceFilename(data.filename) : undefined)
       if (sizeProblem) throw new SourceDocumentError(sizeProblem, { code: size > MAX_SOURCE_BYTES ? 'too-large' : 'empty', status: size > MAX_SOURCE_BYTES ? 413 : 400 })
+      const origin = data.origin === undefined || data.origin === null ? undefined : normalizeSourceOrigin(data.origin)
+      if (origin === null) throw new SourceDocumentError('A fetched document\'s origin needs the web address it came from and when it was fetched.', { code: 'bad-origin', status: 400 })
       const text = typeof data.text === 'string' && data.text !== '' ? data.text : null
       if (text !== null && text.length > MAX_SOURCE_TEXT_CHARS) {
         throw new SourceDocumentError(`The text read from this document is ${text.length.toLocaleString('en-US')} characters, over the ${MAX_SOURCE_TEXT_CHARS.toLocaleString('en-US')} limit.`, { code: 'text-too-large', status: 413 })
@@ -431,6 +471,7 @@ export function createSourceStore(io, options = {}) {
           uploadedAt: now(),
           size,
           text: text === null ? undefined : sourceTextRef(filename),
+          origin,
           replaces,
         })
         return { entries: [...entries, created] }
@@ -447,6 +488,21 @@ export function createSourceStore(io, options = {}) {
         throw err
       }
       return { entry: created, ...summary(result.entries) }
+    },
+
+    /**
+     * #318 (docs/adr/0071): **Fetch again** for document `id`, which must have been fetched from a web address. `data` is what the new fetch gave, as for `upload` with its `origin`. When its bytes are the same as the kept document's, nothing is added or flagged and `{ unchanged: true, entry, totalBytes, warning }` comes back, `entry` being the kept one (the panel says "unchanged since" its fetch). Otherwise the new bytes are added as a new document that replaces the old one under the old one's title (the existing Replaced rule, so the Fields that drew on it are flagged Out of date), and `{ unchanged: false, entry, totalBytes, warning }` comes back. `extract()`, when given, is called for the text only once the bytes are known to differ.
+     */
+    async fetchAgain(id, data, { extract } = {}) {
+      const { entries } = await readManifest()
+      const entry = liveEntry(entries, id)
+      if (!isFetchedSource(entry)) {
+        throw new SourceDocumentError(`"${entry.title}" was uploaded, not fetched from a web address, so there is nothing to fetch again.`, { code: 'not-fetched', status: 400 })
+      }
+      const kept = await io.readBytes(sourceFilePath(entry.filename))
+      if (sameSourceBytes(kept, data.bytes)) return { unchanged: true, entry, ...summary(entries) }
+      const text = extract ? await extract() : data.text
+      return { unchanged: false, ...(await store.upload({ ...data, text, title: entry.title, replaces: id })) }
     },
 
     /** Changes only a document's title. Its id and stored filename never change, and citations already written keep the title they were written with. */
@@ -532,4 +588,5 @@ export function createSourceStore(io, options = {}) {
       return stored ? stored.text : null
     },
   }
+  return store
 }

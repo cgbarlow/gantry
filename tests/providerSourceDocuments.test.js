@@ -337,6 +337,39 @@ for (const spec of PROVIDERS) {
         assert.ok(parseSourceManifest(await client.getFileContent(`${ROOT}/sources/manifest.yaml`, { branch })).find((e) => e.id === 'client-brief-v3').textChangedAt)
       }))
 
+    // #318 (docs/adr/0071): a page added by address is one commit like an upload; Fetch again commits only when the page changed.
+    test('a document added from a web address is one commit with its origin, and Fetch again commits only a changed page', () =>
+      withProviderInstance(spec, async ({ sources, client }) => {
+        const branch = stageBranchName(SLUG, 'shape')
+        const origin = (fetchedAt) => ({ address: 'https://vendor.example.com/api', finalAddress: 'https://docs.vendor.example.com/api', fetchedAt })
+        let added
+        const addCommits = await countingCommits(spec.commitRequest, async () => {
+          added = await sources('', json('POST', { filename: 'Vendor API.html', dataBase64: b64('<p>v1</p>'), text: 'v1', origin: origin('2026-11-03T09:00:00.000Z') }))
+        })
+        assert.equal(added.status, 201, await added.clone().text())
+        assert.equal(addCommits, 1)
+        const { entry } = await added.json()
+        assert.deepEqual(parseSourceManifest(await client.getFileContent(`${ROOT}/sources/manifest.yaml`, { branch })).find((e) => e.id === entry.id).origin, origin('2026-11-03T09:00:00.000Z'))
+
+        let same
+        const sameCommits = await countingCommits(spec.commitRequest, async () => {
+          same = await sources(`/${entry.id}/fetch-again`, json('POST', { filename: 'Vendor API.html', dataBase64: b64('<p>v1</p>'), text: 'v1', origin: origin('2026-11-10T09:00:00.000Z') }))
+        })
+        assert.equal(same.status, 200, await same.clone().text())
+        assert.equal((await same.json()).unchanged, true)
+        assert.equal(sameCommits, 0, 'an unchanged page commits nothing')
+
+        let changed
+        const changedCommits = await countingCommits(spec.commitRequest, async () => {
+          changed = await sources(`/${entry.id}/fetch-again`, json('POST', { filename: 'Vendor API.html', dataBase64: b64('<p>v2</p>'), text: 'v2', origin: origin('2026-11-10T09:00:00.000Z') }))
+        })
+        assert.equal(changed.status, 201, await changed.clone().text())
+        assert.equal(changedCommits, 1)
+        const replacement = (await changed.json()).entry
+        assert.equal(replacement.replaces, entry.id)
+        assert.equal(await client.getFileContent(`${ROOT}/sources/.text/${replacement.filename}.md`, { branch }), 'v2')
+      }))
+
     test('a Provider workspace answers a read with the Instance as it stands on main when no Stage has begun', () =>
       withProviderInstance(spec, async ({ ctx }) => {
         const definition = loadDefinition('design', { version: 3 })

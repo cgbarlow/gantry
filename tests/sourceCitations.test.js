@@ -94,6 +94,14 @@ describe('the Sources appendix', () => {
     assert.doesNotMatch(appendix, /Never cited/)
   })
 
+  test('a document fetched from a web address shows its title, the address and "retrieved <date>" in place of the filename and upload date (#318)', () => {
+    const fetched = { id: 'vendor-api', title: 'Vendor API guide', filename: 'Vendor API guide.html', uploadedAt: '2026-11-03T09:00:05.000Z', origin: { address: 'https://vendor.example.com/api', finalAddress: 'https://docs.vendor.example.com/api', fetchedAt: '2026-11-03T09:00:00.000Z' } }
+    const appendix = buildSourceAppendix('[a](source:vendor-api) [b](source:client-brief)', [...entries, fetched])
+    assert.match(appendix, /\| Vendor API guide \| https:\/\/vendor\.example\.com\/api \| retrieved 3 Nov 2026 \|/)
+    assert.match(appendix, /\| Client brief \| Client brief v3\.docx \| 4 Mar 2026 \|/, 'an upload is listed as before')
+    assert.doesNotMatch(appendix, /Vendor API guide\.html/)
+  })
+
   test('a removed document is still listed, marked removed', () => {
     const appendix = buildSourceAppendix('[a](source:old-notes) [b](source:client-brief)', entries)
     assert.match(appendix, /\| Old notes \(removed\) \| notes\.txt \| 15 Jan 2026 \|/)
