@@ -17,6 +17,54 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.15.0 — 2026-11-04
+
+Cheaper, longer AI interviews, and more say over where a run is heading. Each call now costs a fraction of what it did,
+a long interview can compact its conversation instead of running out of room, the architect can brief the AI before it
+starts, and a run that spans several Stages aims each Stage at an Artefact chosen for it.
+
+### Added
+
+- **An opening message for the AI** (#331). The interview's start screen has an optional box, "Anything the AI should
+  know before it starts?". What the architect types goes to the AI as their own words, right after Gantry's opening, and
+  is shown in the thread as theirs. It never becomes part of Gantry's rules or the Definition's Interview instructions.
+  - It is offered on a normal interview, Bring up to date and Work through review comments (after their cards are answered).
+  - Every Stage a run reaches starts with the same words, including after a pause or in another browser.
+  - The box starts blank every time; nothing is remembered between interviews. Left empty, nothing changes.
+  - The words are kept in the decisions log as typed, so don't paste keys or passwords into it.
+- **An Artefact for each Stage of a run** (#332). The single "Artefact to aim for" drop-down is replaced by an
+  **Artefact for each Stage** block: one row per Stage from the current one to **Run until**, each listing the Artefacts
+  that can pass that Stage's Gate.
+  - The lightest is pre-selected and marked "(lightest)". A Stage with only one possible Artefact shows it greyed out.
+  - Changing **Run until** adds or removes rows and keeps the choices already made.
+  - Each Stage aims for its own choice when the run carries on, drafts ahead, or is resumed, including in a fresh browser.
+    A Stage's Artefact is fixed while its interview runs, and can be chosen again on the start screen when resuming.
+- **Compacting a long conversation** (#329). When an interview's conversation passes about 60% of the model's context
+  window, a card offers **Compact now** or **Not now**. The rail's Tokens block also has a **Compact now** button at any time.
+  - Compacting asks the AI for a short "where we are" summary and carries on from that, keeping every message the
+    architect typed word for word, the unsaved drafts and the decisions log. The AI's earlier replies and the text of what
+    it read are dropped; it can read them again.
+  - It never happens mid-turn or while a round of cards is open; it waits until the round is answered.
+  - If the AI Provider refuses a request as too long, Gantry compacts without asking and tries once more. If it is
+    refused again, the message suggests a model with a larger context window, or **Start this stage over**.
+  - The thread shows one line, for example "Conversation compacted (612k → 38k tokens)". Nothing else on screen changes.
+
+### Changed
+
+- **AI interviews cost far less per call** (#328).
+  - On Anthropic, and on Anthropic models through OpenRouter, the conversation so far is now read from the AI Provider's
+    cache on each call, instead of being paid for in full every time. Other AI Providers are unchanged.
+  - A document, file or search the AI read more than three of its turns ago is shortened to a one-line note in the
+    conversation; the AI is told it can read it again. Citations, Out of date and the decisions log are unaffected.
+  - On a long test interview this sends about 95% fewer uncached input tokens. Real savings depend on the interview.
+- **Outside agents (MCP)**: `start_interview_session` takes `artefacts: { stageId: artefactId }` for the run's Stages,
+  and `resume_interview_session` keeps (or takes new) choices. `get_interview_brief` lists each Stage's candidates and now
+  refuses an `artefactId` that can't pass the Stage's Gate, instead of briefing towards it anyway.
+
+### For operators
+
+- No configuration changes. Expect lower bills from Anthropic and OpenRouter for long interviews.
+
 ## 0.14.1 — 2026-11-04
 
 A fix for code repositories as Source documents. Operators should allow outbound HTTPS to one more GitHub address.
