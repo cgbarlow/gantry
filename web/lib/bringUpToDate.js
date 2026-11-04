@@ -17,6 +17,7 @@ import { fieldsInScope } from './interviewScope.js'
 import { normalizeSavedContent } from './interviewBrief.js'
 import { citedSourceIds, recitedMarkdown } from './sourceCitations.js'
 import { isRemovedSource, replacedByMap } from './sourceDocuments.js'
+import { codeChangeReason } from './outOfDate.js'
 
 /** The labels of the choices on a Bring up to date card. A re-cite choice is `Re-cite to <title>` and a re-open choice `Re-open <Stage>`. */
 export const UPDATE_CHOICES = Object.freeze({
@@ -192,6 +193,7 @@ export function flagReason(flag, fieldTitle = (key) => key) {
   if (flag.cause !== 'source') return `${fieldTitle(flag.inputField)} has changed since this was drafted`
   if (flag.change === 'removed') return `${flag.sourceTitle} was removed`
   if (flag.change === 'replaced') return `${flag.sourceTitle} was replaced${flag.replacedBy ? ` by ${flag.replacedBy.title}` : ''}`
+  if (flag.change === 'code-changed') return codeChangeReason(flag)
   return `${flag.sourceTitle} was read again with different text`
 }
 
@@ -305,7 +307,7 @@ export function updateCards({ items = [], sources = [], logs = {}, fieldTitle = 
         recite: recite.map(({ id, title: t, label }) => ({ id, title: t, label })),
         flags: item.flags.map((f) =>
           f.cause === 'source'
-            ? { cause: 'source', source: f.source, sourceTitle: f.sourceTitle, change: f.change, since: f.since, replacedBy: f.replacedBy?.title ?? null }
+            ? { cause: 'source', source: f.source, sourceTitle: f.sourceTitle, change: f.change, since: f.since, replacedBy: f.replacedBy?.title ?? null, ...(f.paths ? { paths: f.paths, head: f.head } : {}) }
             : { cause: 'field', inputField: f.inputField, change: f.change }
         ),
       },

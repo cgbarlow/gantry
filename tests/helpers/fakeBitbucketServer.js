@@ -216,7 +216,7 @@ export function createFakeBitbucketServer({
       if (!repoExists) {
         return json(404, { type: 'error', error: { message: '404 (fake: no repository at this workspace/repo_slug)' } })
       }
-      return json(200, { type: 'repository', name: repository, full_name: `${owner}/${repository}`, slug: repository })
+      return json(200, { type: 'repository', name: repository, full_name: `${owner}/${repository}`, slug: repository, mainbranch: { type: 'branch', name: 'main' } })
     }
 
     // Every other route 404s the same way real Bitbucket would if the repository itself doesn't exist.

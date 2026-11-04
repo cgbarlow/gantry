@@ -75,8 +75,10 @@ import {
   getFileLastModified,
 } from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
-import { SourceDocumentsPanel, openSourceDocument } from './lib/sourceDocumentsPanel.js'
-import { citedSourceIds } from './lib/sourceCitations.js'
+import { SourceDocumentsPanel, openRepository, openSourceDocument } from './lib/sourceDocumentsPanel.js'
+import { citedCommits, citedSourceIds } from './lib/sourceCitations.js'
+import { parseSourceAddress, shortCommit } from './lib/sourceRepository.js'
+import { repositoryReaderFor } from './lib/sourceRepositoryClient.js'
 import { InterviewPage, clearInterviewSessions, unsavedDraftModules } from './lib/interviewView.js'
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
 import { createLocalDecisionsStore, createServerDecisionsStore, planLocalDecisions } from './lib/decisionsStore.js'
@@ -384,13 +386,13 @@ async function buildLocalComputePayload(instance) {
     moduleFiles[moduleId] = await readLocalTextFile(handle, `gantry-workspace/${slug}/modules/${entry.name}`)
   }
   const payload = { definitionId: instance.definition, definitionVersion: instance.localDefinitionVersion, instanceYaml, moduleFiles }
-  // #281: a render prints the title of each Source document the content cites, and the Sources appendix lists them. Only the manifest entries of the ones cited go (their title, filename and dates, and #318 a fetched one's origin), and only when something cites one: a Source document and its text never leave the folder.
+  // #281: a render prints the title of each Source document the content cites, and the Sources appendix lists them. Only the manifest entries of the ones cited go (their title, filename and dates, #318 a fetched one's origin, #319 a code repository's pointer), and only when something cites one: a Source document and its text never leave the folder.
   const citedSources = citedSourceIds(Object.values(moduleFiles).join('\n'))
   if (citedSources.length) {
     const { entries: sourceEntries } = await createLocalSourceStore(handle, slug).list()
     payload.sources = sourceEntries
       .filter((e) => citedSources.includes(e.id))
-      .map(({ id, filename, title, uploadedAt, removedAt, origin }) => ({ id, filename, title, uploadedAt, removedAt, origin }))
+      .map(({ id, filename, title, uploadedAt, removedAt, origin, repository }) => ({ id, filename, title, uploadedAt, removedAt, origin, repository }))
   }
   // #224: the instance's own Logo, which the render puts in its documents' page header, rides along
   // as an asset at the path its instance.yaml names (`assets/instance-logo.png`).
@@ -940,10 +942,14 @@ function renderPreview(node, text) {
 const sourceIndex = signal(null) // null: this kind of workspace keeps no Source documents (yet), so a citation is left as the words it holds
 const sourceOpener = { open: null }
 
+// #319: what follows `source:` in a citation, taken apart: `{ id, path?, commit? }` (a repository citation names a file and a commit).
+const citedRef = (ref) => parseSourceAddress(`source:${ref}`) ?? { id: ref }
+
 function activateSourceCitations(node) {
   const index = sourceIndex.value
   for (const link of node.querySelectorAll('a[href^="source:"]')) {
-    const id = link.getAttribute('href').slice('source:'.length)
+    const ref = link.getAttribute('href').slice('source:'.length)
+    const { id, path, commit } = citedRef(ref)
     if (index === null) {
       const plain = document.createElement('span')
       plain.className = 'source-citation unavailable'
@@ -955,8 +961,8 @@ function activateSourceCitations(node) {
     const entry = index[id]
     if (entry && !entry.removed) {
       link.classList.add('source-citation')
-      link.dataset.sourceId = id
-      link.title = `Open the Source document "${entry.title}"`
+      link.dataset.sourceId = ref
+      link.title = entry.repository ? `Open ${path ?? 'the repository'} in "${entry.title}"${commit ? ` as it was at ${shortCommit(commit)}` : ''}` : `Open the Source document "${entry.title}"`
       link.removeAttribute('target')
       continue
     }
@@ -1919,7 +1925,7 @@ function MarkdownField({ field, moduleId, onRegister, onRequestImage, onRequestS
     const splitEditableCompartment = new Compartment()
     const wrapCompartment = new Compartment()
     const visualCompartment = new Compartment()
-    const visualLayer = () => visualMode({ renderMarkdown: renderPreview, historyView: () => view, sourceDocument: (id) => (sourceIndex.value === null ? { unavailable: true } : sourceIndex.value[id]), openSourceDocument: (id) => openCitedSource(id) })
+    const visualLayer = () => visualMode({ renderMarkdown: renderPreview, historyView: () => view, sourceDocument: (ref) => (sourceIndex.value === null ? { unavailable: true } : sourceIndex.value[citedRef(ref).id]), openSourceDocument: (ref) => openCitedSource(ref) })
     let hideToolbarTimer = null
     const state = EditorState.create({
       doc: field.value ?? '',
@@ -5273,6 +5279,10 @@ async function loadStageModulesOf(instance, stage) {
   return (await loadInstance(instance.slug, stage.id)).modules
 }
 
+// #319 (docs/adr/0072): how Out of date asks whether the files a Field drew on in a code repository have changed since the commit it recorded:
+// the Gantry server compares them, with the architect's own token for that repository.
+const compareRepository = (entry, reads) => repositoryReaderFor(entry.repository).compare(reads)
+
 // #297: the Fields of this Instance that drew on a Source document that has since changed (removed, replaced, or read again with different text), and the documents added since the last interview. The watcher works them out on opening and again after every Source document change and Save (nothing polls); the editor's banner and Field marks, the Source documents panel and the Interview page read what it found.
 function OutOfDateWatcher({ instance }) {
   const sourceStore = useSourceStore(instance)
@@ -5292,6 +5302,7 @@ function OutOfDateWatcher({ instance }) {
       currentStageId: instance.stage.id,
       currentModules: instance.modules,
       loadStageModules: (stage) => loadStageModulesOf(instance, stage),
+      compareRepository,
     })
       .then((result) => live && (outOfDateState.value = { key, ...result }))
       .catch(() => live && (outOfDateState.value = { key, flags: [], newSince: [], sources: [] }))
@@ -5487,18 +5498,21 @@ function SourceDocumentsSection({ instance }) {
   // #281: what the editor's preview needs to show a citation (the panel tells us each time it lists) and how to open one.
   const onList = useCallback((list) => {
     const index = {}
-    for (const e of list.entries) index[e.id] = { title: e.title, filename: e.filename, removed: Boolean(e.removedAt) }
+    for (const e of list.entries) index[e.id] = { title: e.title, filename: e.filename, removed: Boolean(e.removedAt), ...(e.repository ? { repository: e.repository } : {}) }
     known.current = index
     sourceIndex.value = index
   }, [])
   useEffect(() => {
     if (!store) return undefined
-    sourceOpener.open = async (id) => {
+    sourceOpener.open = async (ref) => {
+      const { id, path, commit } = citedRef(ref)
       const entry = known.current[id]
       if (!entry || entry.removed) return
       try {
         setNotice('')
-        await openSourceDocument(store, { id, ...entry })
+        // #319: a repository citation opens the file it names on the Provider, as it was at the commit it names.
+        if (entry.repository) openRepository(entry, { path, commit })
+        else await openSourceDocument(store, { id, ...entry })
       } catch (err) {
         setNotice(err.message)
       }
@@ -5517,6 +5531,7 @@ function SourceDocumentsSection({ instance }) {
       commitNote=${instance.workspaceBacked ? "Each upload, rename, new text read and removal is saved straight away as its own commit on this Stage's branch. It does not wait for Save." : ''}
       onList=${onList}
       newSince=${newSinceIds}
+      citedCommits=${(id) => instance.modules.flatMap((m) => (m.fields ?? []).flatMap((f) => citedCommits(Array.isArray(f.value) ? f.value.join('\n') : String(f.value ?? ''), id)))}
       archiveName=${`${String(instance.name || instance.slug || 'Instance').replace(/[\\/:*?"<>|]/g, ' ').trim()} - Source documents.zip`}
     />
     ${notice ? html`<p class="inline-error" role="alert" data-testid="source-document-open-error">${notice}</p>` : null}

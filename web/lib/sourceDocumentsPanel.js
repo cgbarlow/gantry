@@ -2,6 +2,11 @@
 //
 // The panel is given a `store` with the methods web/lib/sourceDocuments.js's createSourceStore has (`list`, `upload`, `rename`, `remove`, `setText`, `readOriginal`, `fetchAgain`): a Local Workspace's own folder (web/lib/localSourceDocuments.js) or the server's routes (web/lib/serverSourceDocuments.js).
 //
+// #319 (docs/adr/0072): a **code repository** can be added too, as a pointer: a Provider repository and branch, optionally narrowed to
+// folders, read live by the AI. The Gantry server checks that the architect can read it with their own token (web/lib/sourceRepositoryClient.js)
+// and the store keeps only the manifest entry. Its row opens the repository on its Provider instead of downloading anything, and
+// **Download all** adds a short links file naming each repository, its branch and the commits cited, never its code.
+//
 // #318 (docs/adr/0071): a document can also be added from a web address. The Gantry server fetches it (web/lib/sourceAddress.js), the text is read here exactly as for an upload, and it is stored through the same `store` with its **origin**. **Fetch again** asks the store to add the page again only when its bytes changed.
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useState } from 'preact/hooks'
@@ -24,9 +29,32 @@ import { sourceCitationFor } from './sourceCitations.js'
 import { sourceListTick } from './outOfDateState.js'
 import { storedZip } from './storedZip.js'
 import { SOURCE_FETCH_NEEDS_SERVER, fetchSourceAddress, originOf, sourceFetchStatus } from './sourceAddress.js'
+import {
+  REPOSITORY_LINKS_FILENAME,
+  REPOSITORY_PROVIDERS,
+  isRepositorySource,
+  repositoryLinksText,
+  repositoryLocationFields,
+  repositoryName,
+  repositoryProviderLabel,
+  repositoryWebAddress,
+  shortCommit,
+} from './sourceRepository.js'
+import { callRepository, rememberRepositoryToken } from './sourceRepositoryClient.js'
 
 // #318: how the panel asks the Gantry server whether it fetches web addresses, and has it fetch one. Tests pass their own.
 const SERVER_SOURCE_FETCH = { status: () => sourceFetchStatus(), fetch: (address) => fetchSourceAddress(address) }
+
+// #319: how the panel asks the Gantry server whether the architect can read a repository (with their own token, or none), and keeps that token.
+const SERVER_REPOSITORY_ACCESS = { check: (repository, token) => callRepository('check', repository, {}, { token }), remember: rememberRepositoryToken }
+
+const EMPTY_REPOSITORY_FORM = { provider: 'github', location: {}, branch: '', folders: '', token: '' }
+
+/** #319: opens a code repository on its Provider, at its branch, or a file of it at a commit (`at` is `{ path, commit }`). */
+export function openRepository(entry, at = {}) {
+  const address = repositoryWebAddress(entry.repository, at)
+  if (address) window.open(address, '_blank', 'noopener')
+}
 
 function formatWhen(iso) {
   if (!iso) return ''
@@ -64,6 +92,10 @@ const VIEWABLE_TYPES = {
  * #281: opens a Source document from a citation. A PDF, picture or text file opens in a new tab; a Word, PowerPoint or spreadsheet file, which a browser can't show, is saved to the person's machine. `store` is the panel's; `entry` is `{ id, filename, title }`. Rejects with the reason when the file can't be read.
  */
 export async function openSourceDocument(store, entry) {
+  if (isRepositorySource(entry)) {
+    openRepository(entry)
+    return
+  }
   const { bytes } = await store.readOriginal(entry.id)
   if (!bytes) throw new Error(`The file for "${entry.title}" is missing from this Instance's sources folder.`)
   const type = VIEWABLE_TYPES[sourceFileExtension(entry.filename)]
@@ -85,9 +117,9 @@ export async function openSourceDocument(store, entry) {
 /**
  * #297: `newSince` is the set of document ids marked **New since last interview** (worked out from the decisions logs by the caller). Each document that a newer one replaces shows "replaced by <new>", and the upload has a "This replaces…" picker that records the link in the manifest.
  *
- * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default. `archiveName` is the file **Download all** saves (#310). `compact` draws the list as the Interview page's narrow rail does (#286): titles, a "+ Add Source document" button and a drop zone, with no table; `onList(list)` is told whenever the list has been read (after a load or a change). `sourceFetch` (#318) is `{ status(), fetch(address) }`, the Gantry server's by default: adding by address is offered only when `status()` says the server has it on.
+ * `store` is described above. `actor` is the name stamped on uploads and removals ('' when unknown). `readOnly` hides every control that changes the list (an archived Instance). `commitNote` is shown under the introduction when each change is committed to a repository as it is made (an Azure DevOps or GitHub workspace, #280). `extract(filename, bytes)` is the text reader; tests and the app use the default. `archiveName` is the file **Download all** saves (#310). `compact` draws the list as the Interview page's narrow rail does (#286): titles, a "+ Add Source document" button and a drop zone, with no table; `onList(list)` is told whenever the list has been read (after a load or a change). `sourceFetch` (#318) is `{ status(), fetch(address) }`, the Gantry server's by default: adding by address is offered only when `status()` says the server has it on. `repositoryAccess` (#319) is `{ check(repository, token), remember(repository, token) }`, the Gantry server's and the browser's credential store by default; `citedCommits(id)` lists the commits the Instance's content cites a repository at, for the links file **Download all** adds.
  */
-export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null, compact = false, newSince = null, archiveName = 'Source documents.zip', sourceFetch = SERVER_SOURCE_FETCH }) {
+export function SourceDocumentsPanel({ store, actor = '', readOnly = false, commitNote = '', extract = extractSourceText, onList = null, compact = false, newSince = null, archiveName = 'Source documents.zip', sourceFetch = SERVER_SOURCE_FETCH, repositoryAccess = SERVER_REPOSITORY_ACCESS, citedCommits = () => [] }) {
   const [list, setList] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState(null)
@@ -99,6 +131,8 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
   // #318: whether the Gantry server fetches web addresses (null while asking), and the address being typed.
   const [fetchStatus, setFetchStatus] = useState(null)
   const [address, setAddress] = useState('')
+  // #319: the "Add a code repository" form, null while it is closed.
+  const [repoForm, setRepoForm] = useState(null)
 
   useEffect(() => {
     let current = true
@@ -203,6 +237,29 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       )
     })
 
+  // #319: the Gantry server checks the architect can read the repository with the token they gave (none for a public one) and finds its
+  // branch; only then is the pointer kept, and the token with it. Nothing from the repository is stored.
+  const addRepository = (form) =>
+    run(async () => {
+      const location = Object.fromEntries(Object.entries(form.location).map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v))
+      const wanted = { provider: form.provider, location, ...(form.branch.trim() ? { branch: form.branch.trim() } : {}) }
+      const missing = repositoryLocationFields(form.provider).filter((f) => !f.optional && !location[f.key])
+      if (missing.length) throw new Error(`Give the repository's ${missing.map((f) => f.label.toLowerCase()).join(' and ')}.`)
+      setMessage({ kind: 'info', text: `Checking you can read ${repositoryName(wanted)}…` })
+      const token = form.token.trim() || null
+      const checked = await repositoryAccess.check(wanted, token)
+      const folders = form.folders.split(',').map((f) => f.trim()).filter(Boolean)
+      const repository = { ...wanted, branch: checked.branch, ...(folders.length ? { folders } : {}) }
+      const { entry } = await store.addRepository({ repository, uploadedBy: actor })
+      repositoryAccess.remember?.(repository, token ?? '')
+      setRepoForm(null)
+      await reload()
+      setMessage({
+        kind: 'ok',
+        text: `Added "${entry.title}", the ${checked.branch} branch of ${repositoryName(repository)}${folders.length ? ` (${folders.join(', ')})` : ''}. Nothing from it is kept here: the AI reads it live, and each read records the commit it saw (now ${shortCommit(checked.commit)}).`,
+      })
+    })
+
   // #318: **Fetch again**, only ever when the architect asks. Identical bytes add nothing; changed ones are added as a new document that replaces this one, which flags the Fields that drew on it Out of date.
   const fetchAgain = (entry) =>
     run(async () => {
@@ -275,6 +332,11 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
 
   const downloadOriginal = (entry) =>
     run(async () => {
+      // #319: a repository is opened on its Provider at its branch: there is nothing of it here to download.
+      if (isRepositorySource(entry)) {
+        openRepository(entry)
+        return
+      }
       const { bytes } = await store.readOriginal(entry.id)
       if (!bytes) throw new Error(`The file for "${entry.title}" is missing from this Instance's sources folder.`)
       download(bytes, entry.filename)
@@ -285,12 +347,19 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
     run(async () => {
       const files = []
       for (const entry of live) {
+        if (isRepositorySource(entry)) continue
         const { bytes } = await store.readOriginal(entry.id)
         if (!bytes) throw new Error(`The file for "${entry.title}" is missing from this Instance's sources folder.`)
         files.push({ name: entry.filename, bytes })
       }
+      // #319: the repositories go in as one short text file of their addresses, branches and the commits cited, never their code.
+      const links = repositoryLinksText(live, citedCommits)
+      const repositories = live.filter(isRepositorySource).length
+      if (links) files.push({ name: REPOSITORY_LINKS_FILENAME, bytes: new TextEncoder().encode(links) })
       download(storedZip(files), archiveName)
-      setMessage({ kind: 'ok', text: `Saved ${files.length} ${files.length === 1 ? 'document' : 'documents'} in ${archiveName}. Upload them to another Instance to start it with the same evidence.` })
+      const documents = files.length - (links ? 1 : 0)
+      const linked = repositories ? ` and the links to ${repositories} code ${repositories === 1 ? 'repository' : 'repositories'} in ${REPOSITORY_LINKS_FILENAME}` : ''
+      setMessage({ kind: 'ok', text: `Saved ${documents} ${documents === 1 ? 'document' : 'documents'}${linked} in ${archiveName}. Upload them to another Instance to start it with the same evidence.` })
     })
 
   const copyCitation = (entry) =>
@@ -315,7 +384,10 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       await store.remove(entry.id, { removedBy: actor })
       setConfirmRemove(null)
       await reload()
-      setMessage({ kind: 'ok', text: `Removed "${entry.title}". Its file and text are deleted; its name stays in the list.` })
+      setMessage({
+        kind: 'ok',
+        text: isRepositorySource(entry) ? `Removed "${entry.title}". The repository itself is untouched; its name stays in the list.` : `Removed "${entry.title}". Its file and text are deleted; its name stays in the list.`,
+      })
     })
 
   const entries = list?.entries ?? []
@@ -360,13 +432,59 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       : !readOnly && fetchStatus?.unreachable
         ? html`<p class="muted source-documents-address-note" data-testid="source-address-unreachable">${SOURCE_FETCH_NEEDS_SERVER}</p>`
         : null
+  // #319: adding a code repository is offered wherever the store can keep a pointer and the list can be changed.
+  const offersRepository = !readOnly && Boolean(store.addRepository)
+  const setLocation = (key, value) => setRepoForm((form) => ({ ...form, location: { ...form.location, [key]: value } }))
+  const repositoryForm = () => {
+    if (!offersRepository) return null
+    if (repoForm === null) {
+      return html`<button type="button" class="btn small ghost source-documents-add-repository" data-testid="source-repository-open" disabled=${busy} onClick=${() => setRepoForm({ ...EMPTY_REPOSITORY_FORM })}>+ Add a code repository</button>`
+    }
+    return html`<form
+      class="source-documents-repository"
+      data-testid="source-repository-form"
+      onSubmit=${(e) => {
+        e.preventDefault()
+        addRepository(repoForm)
+      }}
+    >
+      <p class="guidance">A pointer to a repository and branch the AI reads live, not a copy: nothing from it is kept with the Instance. Give a token only for a private repository; it is kept in this browser, as a workspace's is.</p>
+      <label>Provider
+        <select data-testid="source-repository-provider" value=${repoForm.provider} disabled=${busy} onChange=${(e) => setRepoForm({ ...repoForm, provider: e.currentTarget.value, location: {} })}>
+          ${REPOSITORY_PROVIDERS.map((p) => html`<option key=${p.id} value=${p.id} selected=${repoForm.provider === p.id}>${p.label}</option>`)}
+        </select>
+      </label>
+      ${repositoryLocationFields(repoForm.provider).map(
+        (f) => html`<label key=${f.key}>${f.label}${f.optional ? ' (optional)' : ''}
+          <input type="text" data-testid=${`source-repository-${f.key}`} value=${repoForm.location[f.key] ?? ''} disabled=${busy} onInput=${(e) => setLocation(f.key, e.currentTarget.value)} />
+        </label>`
+      )}
+      <label>Branch
+        <input type="text" data-testid="source-repository-branch" placeholder="its default branch" value=${repoForm.branch} disabled=${busy} onInput=${(e) => setRepoForm({ ...repoForm, branch: e.currentTarget.value })} />
+      </label>
+      <label>Folders (optional)
+        <input type="text" data-testid="source-repository-folders" placeholder="e.g. services/orders, infra" value=${repoForm.folders} disabled=${busy} onInput=${(e) => setRepoForm({ ...repoForm, folders: e.currentTarget.value })} />
+      </label>
+      <label>Token (only for a private repository)
+        <input type="password" autocomplete="off" data-testid="source-repository-token" value=${repoForm.token} disabled=${busy} onInput=${(e) => setRepoForm({ ...repoForm, token: e.currentTarget.value })} />
+      </label>
+      <div class="source-documents-repository-actions">
+        <button type="submit" class="btn small primary" disabled=${busy} data-testid="source-repository-add">Add repository</button>
+        <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => setRepoForm(null)}>Cancel</button>
+      </div>
+    </form>`
+  }
+  const repositoryLink = (entry) =>
+    html`<a class="source-documents-origin" data-testid="source-repository-link" href=${repositoryWebAddress(entry.repository)} target="_blank" rel="noopener noreferrer" title=${`${repositoryProviderLabel(entry.repository.provider)}, read live`}>${repositoryName(entry.repository)}</a>`
+  const repositoryWhere = (entry) => `${entry.repository.branch} branch${entry.repository.folders ? ` · ${entry.repository.folders.join(', ')}` : ''}`
+
   const originLink = (entry) =>
     html`<a class="source-documents-origin" data-testid="source-origin" href=${entry.origin.address} target="_blank" rel="noopener noreferrer" title=${`Fetched ${formatWhen(entry.origin.fetchedAt)} from ${entry.origin.finalAddress}`}>${entry.origin.address}</a>`
   const replacesPicker = () =>
     live.length > 0 && !readOnly
       ? html`<select class="source-replaces" data-testid="source-replaces" aria-label="This replaces…" value=${replaces} disabled=${busy} onChange=${(e) => setReplaces(e.currentTarget.value)}>
           <option value="" selected=${replaces === ''}>This replaces… (nothing)</option>
-          ${live.map((e) => html`<option key=${e.id} value=${e.id} selected=${replaces === e.id}>This replaces… ${e.title}</option>`)}
+          ${live.filter((e) => !isRepositorySource(e)).map((e) => html`<option key=${e.id} value=${e.id} selected=${replaces === e.id}>This replaces… ${e.title}</option>`)}
         </select>`
       : null
 
@@ -380,8 +498,8 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
           ? html`<ul class="srcdocs" data-testid="source-documents-list">
               ${live.map(
                 (entry) => html`<li key=${entry.id} data-source-id=${entry.id}>
-                  <span class="srcdoc-title" title=${isFetchedSource(entry) ? `${entry.origin.address}, fetched ${formatWhen(entry.origin.fetchedAt)}` : entry.filename}>${entry.title}</span>
-                  <span class="meta">${formatBytes(entry.size)}${entry.text ? '' : ' · no text'}</span>
+                  <span class="srcdoc-title" title=${isRepositorySource(entry) ? repositoryWebAddress(entry.repository) : isFetchedSource(entry) ? `${entry.origin.address}, fetched ${formatWhen(entry.origin.fetchedAt)}` : entry.filename}>${entry.title}</span>
+                  <span class="meta">${isRepositorySource(entry) ? `code repository · ${repositoryWhere(entry)}` : `${formatBytes(entry.size)}${entry.text ? '' : ' · no text'}`}</span>
                   ${marks(entry)}
                   ${sourceFileKind(entry.filename) === 'pdf' && store.setReadVisually
                     ? html`<label class="srcdoc-visual" title="Send the PDF itself to an AI Provider that takes PDFs, instead of its text">
@@ -411,6 +529,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
               <input type="file" multiple accept=${SOURCE_FILE_ACCEPT} aria-label="Add Source documents" data-testid="source-documents-input" style="display:none" disabled=${busy} onChange=${onPick} />
             </label>`}
         ${addressForm()}
+        ${repositoryForm()}
         <p class=${`source-documents-message ${message ? message.kind : ''}`} role="status" aria-live="polite" data-testid="source-documents-message">${message ? message.text : ''}</p>
       </div>
     `
@@ -421,7 +540,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
       <summary data-testid="source-documents-summary">Source documents${list ? html` <span class="source-documents-count">(${live.length})</span>` : null}</summary>
       <div class="source-documents-body">
         <p class="guidance source-documents-intro">
-          Evidence this Instance's content is drawn from: briefs, requirements, meeting notes, spreadsheets, screenshots. They are kept with the Instance, separate from its images, and Gantry reads the text out of each one when you add it. Word, PowerPoint, spreadsheets, PDFs, Markdown, text and images, up to ${formatBytes(MAX_SOURCE_BYTES)} each${offersAddress ? ', or a web page or document from its address: the Gantry server fetches a copy and keeps where it came from' : ''}.
+          Evidence this Instance's content is drawn from: briefs, requirements, meeting notes, spreadsheets, screenshots. They are kept with the Instance, separate from its images, and Gantry reads the text out of each one when you add it. Word, PowerPoint, spreadsheets, PDFs, Markdown, text and images, up to ${formatBytes(MAX_SOURCE_BYTES)} each${offersAddress ? ', or a web page or document from its address: the Gantry server fetches a copy and keeps where it came from' : ''}${offersRepository ? '. A code repository is added as a pointer the AI reads live, never a copy' : ''}.
         </p>
         ${commitNote ? html`<p class="guidance source-documents-commit-note" data-testid="source-documents-commit-note">${commitNote}</p>` : null}
         ${loadError ? html`<p class="inline-error" role="alert" data-testid="source-documents-load-error">${loadError}</p>` : null}
@@ -436,6 +555,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
               ${replacesPicker()}
             </div>`}
         ${addressForm()}
+        ${repositoryForm()}
         ${live.length > 0
           ? html`<div class="source-documents-pack"><button type="button" class="btn small ghost" disabled=${busy} data-testid="source-documents-download-all" onClick=${downloadAll} title="Save every document, as uploaded, in one zip">Download all (.zip)</button></div>`
           : null}
@@ -474,11 +594,13 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                         : html`<span class="source-documents-title-text">${entry.title}</span>`}
                       ${marks(entry)}
                     </td>
-                    <td class="source-documents-file">${entry.filename}${isFetchedSource(entry) ? html`<br />${originLink(entry)}` : null}</td>
-                    <td>${formatBytes(entry.size)}</td>
+                    <td class="source-documents-file">${isRepositorySource(entry) ? html`${repositoryLink(entry)}<br /><span class="muted">${repositoryWhere(entry)}</span>` : entry.filename}${isFetchedSource(entry) ? html`<br />${originLink(entry)}` : null}</td>
+                    <td>${isRepositorySource(entry) ? '' : formatBytes(entry.size)}</td>
                     <td>${isFetchedSource(entry) ? `fetched ${formatWhen(entry.origin.fetchedAt)}` : formatWhen(entry.uploadedAt)}${entry.uploadedBy ? html`<br /><span class="muted">${entry.uploadedBy}</span>` : null}</td>
                     <td>
-                      ${entry.text
+                      ${isRepositorySource(entry)
+                        ? html`<span class="stamp agreed" data-testid="source-repository-stamp" title="Nothing from the repository is kept: the AI reads it live, and each read records the commit it saw">READ LIVE</span>`
+                        : entry.text
                         ? html`<span class="stamp agreed" title="The text read from this document is kept with it">TEXT READ</span>`
                         : html`<span class="stamp review" title="No text was kept: the AI looks at the original">NO TEXT</span>`}
                       ${entry.readVisually ? html` <span class="stamp review" data-testid="source-visual-stamp" title="An AI Provider that takes PDFs is sent the PDF itself">READ VISUALLY</span>` : null}
@@ -486,12 +608,12 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                     <td>
                       ${confirmRemove === entry.id
                         ? html`<div class="source-documents-actions source-documents-confirm" role="group" aria-label=${`Remove ${entry.title}`}>
-                            <span>Remove "${entry.title}"? Its file and text are deleted.</span>
+                            <span>Remove "${entry.title}"? ${isRepositorySource(entry) ? 'Only the pointer goes: the repository itself is untouched.' : 'Its file and text are deleted.'}</span>
                             <button type="button" class="btn small primary" disabled=${busy} onClick=${() => removeConfirmed(entry)} data-testid="source-documents-confirm-remove">Remove</button>
                             <button type="button" class="btn small ghost" onClick=${() => setConfirmRemove(null)}>Cancel</button>
                           </div>`
                         : html`<div class="source-documents-actions">
-                            <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => downloadOriginal(entry)}>Download</button>
+                            <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => downloadOriginal(entry)} title=${isRepositorySource(entry) ? `Open ${repositoryName(entry.repository)} at its ${entry.repository.branch} branch on ${repositoryProviderLabel(entry.repository.provider)}` : undefined}>Download</button>
                             <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => copyCitation(entry)} title="Copy a citation of this document to paste into a field">Copy citation</button>
                             ${readOnly || !canUseSourceAsImage(entry.filename) || !store.useAsImage
                               ? null
@@ -499,7 +621,7 @@ export function SourceDocumentsPanel({ store, actor = '', readOnly = false, comm
                             ${readOnly
                               ? null
                               : html`<button type="button" class="btn small ghost" disabled=${busy} onClick=${() => setRenaming({ id: entry.id, title: entry.title })}>Rename</button>
-                                  <button type="button" class="btn small ghost" disabled=${busy} onClick=${() => extractAgain(entry)}>Extract text again</button>
+                                  ${isRepositorySource(entry) ? null : html`<button type="button" class="btn small ghost" disabled=${busy} onClick=${() => extractAgain(entry)}>Extract text again</button>`}
                                   ${canFetchAgain(entry)
                                     ? html`<button type="button" class="btn small ghost" disabled=${busy} data-testid="source-fetch-again" onClick=${() => fetchAgain(entry)} title=${`Fetch ${entry.origin.address} again. A changed page is added as a new document that replaces this one; an unchanged one adds nothing.`}>Fetch again</button>`
                                     : null}

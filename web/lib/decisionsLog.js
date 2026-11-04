@@ -268,6 +268,9 @@ function cleanInput(input) {
   if (input.field !== undefined) out.field = String(input.field)
   if (input.title !== undefined) out.title = String(input.title)
   if (input.range !== undefined) out.range = input.range === null ? null : String(input.range)
+  // #319: a file of a code repository, and the commit it was read at.
+  if (typeof input.path === 'string' && input.path) out.path = input.path
+  if (typeof input.commit === 'string' && input.commit) out.commit = input.commit
   out.fingerprint = input.fingerprint === undefined || input.fingerprint === null ? null : String(input.fingerprint)
   return out
 }

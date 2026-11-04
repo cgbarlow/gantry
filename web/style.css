@@ -2364,6 +2364,14 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-rail .source-documents-address input { flex-basis: 100%; }
 .source-documents-address-note { margin: 6px 0; font-size: 12px; }
 .source-documents-origin { font-size: 12px; word-break: break-all; }
+/* #319: + Add a code repository. One field per row, labelled above, in the editor's panel and the Interview page's rail alike. */
+.source-documents-add-repository { margin: 6px 0; }
+.source-documents-repository { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; padding: 8px 10px; max-width: 520px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.source-documents-repository .guidance { margin: 0; font-size: 12px; }
+.source-documents-repository label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-muted); }
+.source-documents-repository input,
+.source-documents-repository select { font: inherit; font-size: 13px; padding: 4px 8px; background: var(--bg); color: var(--text); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); }
+.source-documents-repository-actions { display: flex; gap: 8px; }
 .interview-rail .srcdocs .stamp { flex-basis: auto; font-size: 9px; }
 .out-of-date-banner { margin: 0 0 16px; padding: 10px 12px; border: var(--hairline) solid var(--warning, #b06a00); border-radius: var(--radius); font-size: 13px; }
 .out-of-date-banner h2 { margin: 0 0 6px; font-size: 14px; }

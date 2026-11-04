@@ -20,6 +20,9 @@
 // content is *drawn from*. They have separate folders, separate manifests and separate routes, and nothing here touches
 // `assets/`.
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
+import { defaultRepositoryTitle, isRepositorySource, normalizeSourceRepository } from './sourceRepository.js'
+
+export { isRepositorySource }
 
 export const SOURCES_FOLDER = 'sources'
 export const SOURCE_MANIFEST_PATH = 'sources/manifest.yaml'
@@ -288,7 +291,8 @@ export function paginateSourceText(text, filename) {
 
 // #297: `replaces` (on the NEW document) is the id of the older one it supersedes, and `textChangedAt` the time the text read from the document last became different from what it was. Both are kept only when set, so a manifest that never used them is unchanged byte for byte.
 // #318: `origin` is where a document fetched from a web address came from; an upload has none, and its entry is unchanged byte for byte.
-const ENTRY_KEYS = ['id', 'filename', 'title', 'uploadedBy', 'uploadedAt', 'size', 'text', 'readVisually', 'origin', 'replaces', 'textChangedAt', 'removedBy', 'removedAt']
+// #319: `repository` makes the entry a pointer to a code repository (web/lib/sourceRepository.js): it has no `filename`, `size` or `text`, because nothing from the repository is kept. Entries without it are kept files, unchanged byte for byte.
+const ENTRY_KEYS = ['id', 'filename', 'title', 'uploadedBy', 'uploadedAt', 'size', 'text', 'readVisually', 'origin', 'repository', 'replaces', 'textChangedAt', 'removedBy', 'removedAt']
 
 const isWebAddress = (value) => typeof value === 'string' && /^https?:\/\/\S+$/i.test(value.trim())
 
@@ -350,6 +354,11 @@ export function normalizeSourceEntry(entry) {
       if (origin) out.origin = origin
       continue
     }
+    if (key === 'repository') {
+      const repository = normalizeSourceRepository(value)
+      if (repository) out.repository = repository
+      continue
+    }
     out[key] = value
   }
   return out
@@ -364,7 +373,7 @@ export function parseSourceManifest(text) {
     return []
   }
   if (!Array.isArray(parsed)) return []
-  return parsed.filter((e) => e && typeof e.id === 'string' && typeof e.filename === 'string').map(normalizeSourceEntry)
+  return parsed.filter((e) => e && typeof e.id === 'string' && (typeof e.filename === 'string' || isRepositorySource(e))).map(normalizeSourceEntry)
 }
 
 export function stringifySourceManifest(entries) {
@@ -478,6 +487,14 @@ export function createSourceStore(io, options = {}) {
     return entry
   }
 
+  // #319: a repository pointer keeps no file and no text, so nothing that reads, re-reads or re-fetches one applies to it.
+  function keptFile(entry, doing) {
+    if (isRepositorySource(entry)) {
+      throw new SourceDocumentError(`"${entry.title}" is a code repository, read live from its Provider: nothing of it is kept here to ${doing}.`, { code: 'repository', status: 400 })
+    }
+    return entry
+  }
+
   async function writeTextFor(entry, text) {
     const path = sourceTextPath(entry.filename)
     if (text === null || text === undefined || text === '') {
@@ -516,7 +533,7 @@ export function createSourceStore(io, options = {}) {
       const replaces = typeof data.replaces === 'string' && data.replaces.trim() ? data.replaces.trim() : undefined
       const result = await mutateManifest((entries) => {
         if (replaces !== undefined) liveEntry(entries, replaces)
-        const filename = uniqueSourceFilename(cleaned, entries.map((e) => e.filename))
+        const filename = uniqueSourceFilename(cleaned, entries.map((e) => e.filename).filter(Boolean))
         const id = sourceIdFor(cleaned, entries.map((e) => e.id))
         created = normalizeSourceEntry({
           id,
@@ -546,11 +563,34 @@ export function createSourceStore(io, options = {}) {
     },
 
     /**
+     * #319 (docs/adr/0072): adds a pointer to a code repository. `data` is `{ repository, title?, uploadedBy? }`, `repository` being `{ provider, location, branch, folders? }` (web/lib/sourceRepository.js). Only the manifest entry is written: nothing from the repository is stored. Its id comes from the repository's name, `-2` added when taken. Whether the architect can read the repository is checked before this (lib/repositorySource.js); the store keeps the pointer. Returns `{ entry, totalBytes, warning }`.
+     */
+    async addRepository(data) {
+      const repository = normalizeSourceRepository(data?.repository)
+      if (!repository) {
+        throw new SourceDocumentError('A code repository needs its Provider, its location (as for a workspace) and a branch.', { code: 'bad-repository', status: 400 })
+      }
+      const title = (typeof data.title === 'string' && data.title.trim()) || defaultRepositoryTitle(repository)
+      let created
+      const result = await mutateManifest((entries) => {
+        created = normalizeSourceEntry({
+          id: sourceIdFor(defaultRepositoryTitle(repository).replace(/\./g, '-'), entries.map((e) => e.id)),
+          title,
+          uploadedBy: (data.uploadedBy ?? '').trim(),
+          uploadedAt: now(),
+          repository,
+        })
+        return { entries: [...entries, created] }
+      })
+      return { entry: created, ...summary(result.entries) }
+    },
+
+    /**
      * #318 (docs/adr/0071): **Fetch again** for document `id`, which must have been fetched from a web address and not already replaced by a newer copy (`fetchAgainRefusal`, the rule the panel offers the button by). `data` is what the new fetch gave, as for `upload` with its `origin`. When its bytes are the same as the kept document's, nothing is added or flagged and `{ unchanged: true, entry, totalBytes, warning }` comes back, `entry` being the kept one (the panel says "unchanged since" its fetch). Otherwise the new bytes are added as a new document that replaces the old one under the old one's title (the existing Replaced rule, so the Fields that drew on it are flagged Out of date), and `{ unchanged: false, entry, totalBytes, warning }` comes back. `extract()`, when given, is called for the text only once the bytes are known to differ.
      */
     async fetchAgain(id, data, { extract } = {}) {
       const { entries } = await readManifest()
-      const entry = liveEntry(entries, id)
+      const entry = keptFile(liveEntry(entries, id), 'fetch again')
       const refusal = fetchAgainRefusal(entry, replacedByMap(entries))
       if (refusal) throw new SourceDocumentError(refusal.message, { code: refusal.code, status: refusal.status })
       const kept = await io.readBytes(sourceFilePath(entry.filename))
@@ -583,8 +623,11 @@ export function createSourceStore(io, options = {}) {
         removed = normalizeSourceEntry({ ...rest, removedBy: String(removedBy ?? '').trim(), removedAt: now() })
         return { entries: entries.map((e) => (e.id === id ? removed : e)) }
       })
-      await io.remove(sourceFilePath(filename))
-      await io.remove(sourceTextPath(filename))
+      // #319: a repository pointer has no file or text to delete; its entry is all there was.
+      if (filename) {
+        await io.remove(sourceFilePath(filename))
+        await io.remove(sourceTextPath(filename))
+      }
       return removed
     },
 
@@ -594,7 +637,7 @@ export function createSourceStore(io, options = {}) {
         throw new SourceDocumentError(`The text read from this document is ${text.length.toLocaleString('en-US')} characters, over the ${MAX_SOURCE_TEXT_CHARS.toLocaleString('en-US')} limit.`, { code: 'text-too-large', status: 413 })
       }
       const { entries } = await readManifest()
-      const entry = liveEntry(entries, id)
+      const entry = keptFile(liveEntry(entries, id), 'read again')
       // #297: what the text was before, so a re-read that gives the very same text changes nothing downstream.
       const before = entry.text ? ((await io.readText(sourceTextPath(entry.filename)))?.text ?? '') : ''
       const has = await writeTextFor(entry, text)
@@ -629,7 +672,7 @@ export function createSourceStore(io, options = {}) {
     /** `{ entry, bytes }`, with `bytes` null when the folder no longer holds the file. */
     async readOriginal(id) {
       const { entries } = await readManifest()
-      const entry = liveEntry(entries, id)
+      const entry = keptFile(liveEntry(entries, id), 'download')
       return { entry, bytes: await io.readBytes(sourceFilePath(entry.filename)) }
     },
 
@@ -637,7 +680,7 @@ export function createSourceStore(io, options = {}) {
     async readText(id) {
       const { entries } = await readManifest()
       const entry = liveEntry(entries, id)
-      if (!entry.text) return null
+      if (!entry.text || isRepositorySource(entry)) return null
       const stored = await io.readText(sourceTextPath(entry.filename))
       return stored ? stored.text : null
     },

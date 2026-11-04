@@ -280,6 +280,9 @@ export function createSessionLog(config = {}) {
           sourceTitle: trigger.sourceTitle,
           change: trigger.change,
           replacedBy: trigger.replacedBy,
+          // #319: a code repository's changed files, and the branch head the architect answered at; the Field is flagged again only when one of them changes after it.
+          paths: trigger.paths,
+          commit: trigger.commit,
           inputField: trigger.inputField,
           inputFingerprint: trigger.inputFingerprint,
           outcome,

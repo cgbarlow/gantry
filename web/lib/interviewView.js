@@ -14,6 +14,7 @@ import { isMultiValuedField } from './fieldShape.js'
 import { aiProviders, defaultAiProvider, updateAiProvider } from './aiProviders.js'
 import { AiProviderDialog, AiRecoveryPrompt } from './aiProvidersView.js'
 import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
+import { repositoryReaderFor } from './sourceRepositoryClient.js'
 import { artefactChoices, createInterviewSession } from './interviewSession.js'
 import { stageReadiness } from './interviewReadiness.js'
 import { PAGE_SIZE, isAnswered, pageCards, pageCount } from './interviewRounds.js'
@@ -524,6 +525,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           instructionsVersion: `${setup.definition.id ?? instance.definition}@${instance.definitionVersion ?? setup.structure.version ?? 1}`,
           // #292: a picture, or a scanned or "Read visually" PDF, is sent as the original; the session reads it when it builds a request.
           readOriginal: async (id) => (await store.readOriginal(id)).bytes ?? null,
+          // #319: a code repository is read live by the Gantry server, with the architect's own token for it.
+          readRepository: (entry) => repositoryReaderFor(entry.repository),
         }
       : null
 

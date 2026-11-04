@@ -59,6 +59,10 @@ export function createFakeGitLabServer({
 } = {}) {
   const branches = new Map() // branch name -> Map<path, Buffer>
   const branchTips = new Map() // branch name -> { commitId, committedDate, authoredDate }
+  // #319: each commit's file set as it was made, so `ref` may name a commit as well as a branch, as on the real API (a code repository
+  // Source document reads a file as it was at the commit a citation recorded).
+  const commitSnapshots = new Map() // commit id -> Map<path, Buffer>
+  const storeAt = (ref) => branches.get(ref) ?? commitSnapshots.get(ref)
   let commitCounter = 0
 
   // #30: issues, keyed by their project-scoped `iid` — the id `lib/gitlabWorkItemsClient.js` addresses
@@ -115,6 +119,7 @@ export function createFakeGitLabServer({
     commitCounter += 1
     const date = new Date().toISOString()
     branchTips.set(name, { commitId: `fake-commit-${commitCounter}`, committedDate: date, authoredDate: date })
+    commitSnapshots.set(`fake-commit-${commitCounter}`, new Map(store))
   }
   seedBranch('main', files)
   for (const [branchName, seedFiles] of Object.entries(branchFiles)) {
@@ -175,7 +180,7 @@ export function createFakeGitLabServer({
       const encodedFilePath = rest.slice('/repository/files/'.length)
       const filePath = decodeURIComponent(encodedFilePath)
       const branchName = url.searchParams.get('ref') ?? 'main'
-      const store = branches.get(branchName)
+      const store = storeAt(branchName)
       const key = filePath.startsWith('/') ? filePath : `/${filePath}`
       const content = store?.get(key)
       if (content === undefined) {
@@ -195,7 +200,7 @@ export function createFakeGitLabServer({
     // infer from flat paths" approach `fakeGitHubServer.js` uses for GitHub's own Contents API.
     if (req.method === 'GET' && rest === '/repository/tree') {
       const branchName = url.searchParams.get('ref') ?? 'main'
-      const store = branches.get(branchName) ?? new Map()
+      const store = storeAt(branchName) ?? new Map()
       const scopePath = (url.searchParams.get('path') ?? '').replace(/^\/+|\/+$/g, '')
       const prefix = scopePath === '' ? '/' : `/${scopePath}/`
       const children = new Map() // name -> isFolder
@@ -313,6 +318,7 @@ export function createFakeGitLabServer({
       const date = new Date().toISOString()
       const commit = { commitId: `fake-commit-${commitCounter}`, committedDate: date, authoredDate: date }
       branchTips.set(branch, commit)
+      commitSnapshots.set(commit.commitId, new Map(store))
       return json(201, { id: commit.commitId, short_id: commit.commitId, committed_date: commit.committedDate, authored_date: commit.authoredDate })
     }
 

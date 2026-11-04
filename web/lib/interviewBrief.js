@@ -44,7 +44,8 @@ import { stackedInterviewInstructions } from './interviewInstructions.js'
 import { INTERVIEW_RULES_VERSION, INTERVIEW_RULES, interviewRulesText } from './interviewRules.js'
 import { adapterText } from './interviewAdapter.js'
 import { INTERVIEW_SKILLS, interviewSkillVersions, interviewSkillsCredit } from './interviewSkills.js'
-import { pagesSummary } from './interviewSources.js'
+import { REPOSITORY_TOOLS_TEXT, pagesSummary } from './interviewSources.js'
+import { isRepositorySource, normalizeSourceRepository, repositoryName, repositoryProviderLabel } from './sourceRepository.js'
 import { OUTSIDE_AGENT, currentLogEntries } from './decisionsLog.js'
 import { glossarySeed, openQuestionsToCarry, standardRoles, standardRolesLines, termChoices } from './interviewStandard.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
@@ -245,8 +246,25 @@ export function sourceOutline(text, limit = 12) {
 
 const sourceTitle = (s) => attr(s.title || s.filename || s.id)
 
+// #319 (docs/adr/0072): the code repositories among the Source documents. Nothing of one is in the brief: the AI reads it with tools.
+function repositoriesPart(repositories) {
+  if (repositories.length === 0) return []
+  const lines = [
+    `${repositories.length === 1 ? 'One Source document is a code repository' : `${repositories.length} Source documents are code repositories`}, read live from its Provider at its branch. Nothing of ${repositories.length === 1 ? 'it' : 'them'} is shown here. ${REPOSITORY_TOOLS_TEXT}`,
+    '',
+  ]
+  for (const s of repositories) {
+    const r = normalizeSourceRepository(s.repository)
+    lines.push(`- **${sourceTitle(s)}** (id \`${attr(s.id)}\`, ${repositoryProviderLabel(r.provider)} repository ${attr(repositoryName(r))}, branch ${attr(r.branch)}${r.folders ? `, only ${r.folders.map(attr).join(', ')}` : ''})`)
+  }
+  lines.push('')
+  return lines
+}
+
 function sourcesPart({ sources, contextWindow, readerTool, readerText, access }) {
-  const live = liveSources(sources)
+  // #319: a code repository has no text to put in the brief or count against the window; it gets a section of its own.
+  const repositories = liveSources(sources).filter(isRepositorySource)
+  const live = liveSources(sources).filter((s) => !isRepositorySource(s))
   // #292: a document `access` says is unreadable has no text to count even if it holds some (it cannot be read at all).
   const readable = (s) => typeof s.text === 'string' && s.text.trim() !== '' && access?.[s.id]?.how !== 'unreadable'
   const withText = live.filter(readable)
@@ -254,9 +272,10 @@ function sourcesPart({ sources, contextWindow, readerTool, readerText, access })
   const packTokens = withText.reduce((sum, s) => sum + estimateTokens(s.text), 0)
   const windowTokens = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : FALLBACK_CONTEXT_WINDOW
   const budgetTokens = Math.floor(windowTokens * SOURCES_WHOLE_PACK_SHARE)
-  const mode = live.length === 0 ? 'none' : packTokens <= budgetTokens ? 'whole' : 'catalogue'
+  const mode = live.length === 0 && repositories.length === 0 ? 'none' : packTokens <= budgetTokens ? 'whole' : 'catalogue'
   const summary = {
     mode,
+    repositories: repositories.map((s) => s.id),
     packTokens,
     windowTokens,
     budgetTokens,
@@ -274,8 +293,9 @@ function sourcesPart({ sources, contextWindow, readerTool, readerText, access })
     'Cite a fact from one as `[title, p. 4](source:<id>)` using its id.',
     '',
   ]
+  lines.push(...repositoriesPart(repositories))
   if (mode === 'whole' && withText.length === 0) {
-    lines.push('None of the documents has text to show here.', '')
+    if (live.length) lines.push('None of the documents has text to show here.', '')
   } else if (mode === 'whole') {
     lines.push(`All ${withText.length} document${withText.length === 1 ? '' : 's'} with readable text follow in whole (about ${packTokens.toLocaleString('en-US')} tokens, within the ${budgetTokens.toLocaleString('en-US')} that is half this model's window).`, '')
     for (const s of withText) {

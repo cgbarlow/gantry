@@ -23,6 +23,9 @@
 //     all. When the pack is over about half the model's window the brief carries a catalogue and the AI is handed one more
 //     tool, `read_source_document(id, range)`. Every read is recorded, and a draft carries the reads made since the last
 //     drafts, and the documents it cites, as its inputs (the `fields` part of the decisions log, ADR-0064).
+//   * (#319, docs/adr/0072) hands the AI three read-only tools for a **code repository** Source document, `list_repository_folder`,
+//     `search_repository` and `read_repository_file`, answered by the Gantry server with the architect's own token (`context.readRepository`).
+//     Nothing of a repository is in the brief. A file read is recorded with the commit it saw, as an input of the Fields drafted next.
 //
 //   * (#289) lets the architect **hand-edit** a drafted Field in the preview (`beginHandEdit` / `handEdit`). The edit is theirs from then
 //     on: Gantry's per-Field check does not run on it, it is logged as a `hand-edit` entry with the text they typed, and the Field's
@@ -63,6 +66,13 @@ import {
   READ_TOOL_NAME,
   READ_FENCE,
   READ_TEXT_FALLBACK_INSTRUCTIONS,
+  REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS,
+  REPOSITORY_TOOLS,
+  REPOSITORY_TOOL_NAMES,
+  LIST_REPOSITORY_TOOL_NAME,
+  READ_REPOSITORY_TOOL_NAME,
+  SEARCH_REPOSITORY_TOOL_NAME,
+  runRepositoryCall,
   accessForBrief,
   attachmentNote,
   describeInput,
@@ -118,7 +128,7 @@ const opened = (modules, stageTitle) =>
 
 const LAST_ROUND_NOTE = 'That was the last round. Redraft the Fields these answers feed. Ask nothing more: the architect has chosen to finish.'
 
-function sessionNote({ cardMode, textDrafts, reader, handEdits = [] }) {
+function sessionNote({ cardMode, textDrafts, reader, repositories = false, handEdits = [] }) {
   const lines = ['## Note for this session', '']
   if (cardMode === 'chat') {
     lines.push('Question cards are not available in this session (this model could not produce them). Where the rules say to ask a card, ask in short plain chat instead, and only what matters most.')
@@ -150,6 +160,13 @@ function sessionNote({ cardMode, textDrafts, reader, handEdits = [] }) {
       textDrafts
         ? `The Source documents are a catalogue. ${READ_TEXT_FALLBACK_INSTRUCTIONS}`
         : `The Source documents are a catalogue. Read the parts you need with the \`${READ_TOOL_NAME}\` tool before you draft from them; you may call it several times in one reply.`
+    )
+  }
+  if (repositories) {
+    lines.push(
+      textDrafts
+        ? REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS
+        : `Read a code repository with the \`${LIST_REPOSITORY_TOOL_NAME}\`, \`${SEARCH_REPOSITORY_TOOL_NAME}\` and \`${READ_REPOSITORY_TOOL_NAME}\` tools before you draft from it; you may call them several times in one reply.`
     )
   }
   if (handEdits.length) {
@@ -503,11 +520,37 @@ export function createInterviewSession(config = {}) {
 
   // ---------- reading (#292) ----------
 
+  /**
+   * #319: one call of a repository tool, answered by the Gantry server: what comes back goes to the AI, and a file read is recorded, with the
+   * commit it saw, as an input of whatever it drafts next. Resolves, never rejects.
+   */
+  async function runRepository(name, input) {
+    const context = getContext()
+    const live = (context.sources ?? []).filter((s) => s && !s.removedAt)
+    const reader = (entry) => {
+      if (!context.readRepository) throw new Error('Code repositories cannot be read here.')
+      return context.readRepository(entry)
+    }
+    const result = await runRepositoryCall(name, input, { lookup: (wanted) => live.find((s) => s.id === wanted), reader })
+    if (result.ok && result.read) {
+      readsSinceDraft.push(result.read)
+      say('sys', `Read ${describeInput(result.read)}`, { read: result.read.source })
+      emit()
+    }
+    return result
+  }
+
   /** One `read_source_document` call: the text back to the AI, and the read recorded as an input of whatever it drafts next. */
   function runRead(input) {
     const context = getContext()
     const live = (context.sources ?? []).filter((s) => s && !s.removedAt)
     const id = String(input?.id ?? '')
+    // #319: a model without tools reads a code repository in the same read blocks: a `path` to read, a folder to `list`, or text to `search`.
+    if (live.some((s) => s.id === id && s.repository)) {
+      if (typeof input?.search === 'string') return runRepository(SEARCH_REPOSITORY_TOOL_NAME, { id, query: input.search })
+      if (typeof input?.path === 'string') return runRepository(READ_REPOSITORY_TOOL_NAME, { id, path: input.path, range: input.range })
+      return runRepository(LIST_REPOSITORY_TOOL_NAME, { id, path: input?.list ?? '' })
+    }
     const result = runReadCall({ id, range: input?.range }, { lookup: (wanted) => live.find((s) => s.id === wanted), access: plan.get(id) })
     if (result.ok) {
       readsSinceDraft.push(result.read)
@@ -534,10 +577,12 @@ export function createInterviewSession(config = {}) {
   function resultFor(call) {
     if (handled.has(call.id)) return handled.get(call.id)
     let result
-    if (call.name !== DRAFT_TOOL_NAME && call.name !== READ_TOOL_NAME && call.name !== LOG_TOOL_NAME) result = { ok: false, content: `There is no tool called ${call.name}.` }
+    const repositoryTool = REPOSITORY_TOOL_NAMES.includes(call.name)
+    if (call.name !== DRAFT_TOOL_NAME && call.name !== READ_TOOL_NAME && call.name !== LOG_TOOL_NAME && !repositoryTool) result = { ok: false, content: `There is no tool called ${call.name}.` }
     else if (call.invalid || call.input === null || call.input === undefined) {
-      result = { ok: false, content: `The arguments were not valid JSON: ${call.invalid ?? (call.name === READ_TOOL_NAME ? 'send {"id": "document-id", "range": "pages 3-5"}' : 'send {"field": "module.field", "value": ...}')}.` }
-    } else if (call.name === READ_TOOL_NAME) result = runRead(call.input)
+      result = { ok: false, content: `The arguments were not valid JSON: ${call.invalid ?? (call.name === READ_TOOL_NAME ? 'send {"id": "document-id", "range": "pages 3-5"}' : repositoryTool ? 'send {"id": "repository-id", "path": "src/file.ts"}' : 'send {"field": "module.field", "value": ...}')}.` }
+    } else if (repositoryTool) result = runRepository(call.name, call.input) // #319: a promise, settled before the result goes back to the AI
+    else if (call.name === READ_TOOL_NAME) result = runRead(call.input)
     else if (call.name === LOG_TOOL_NAME) result = runLog(call.input)
     else result = acceptDraft(call.input.field, call.input.value, { uncovered: Array.isArray(call.input.uncovered) ? call.input.uncovered.map(String) : [], inputs: call.input.inputs })
     handled.set(call.id, result)
@@ -753,7 +798,7 @@ export function createInterviewSession(config = {}) {
       const stage = update.landing?.kind === 'carry-forward' ? update.landing.stageId : undefined
       const trigger = (f) =>
         f.cause === 'source'
-          ? { source: f.source, sourceTitle: f.sourceTitle, change: f.change, replacedBy: f.replacedBy ?? undefined }
+          ? { source: f.source, sourceTitle: f.sourceTitle, change: f.change, replacedBy: f.replacedBy ?? undefined, paths: f.paths, commit: f.head }
           : { inputField: f.inputField, change: f.change, inputFingerprint: fingerprintText(asText(valueOf(f.inputField))) }
       const write = (outcome, extra = {}) => {
         for (const f of update.flags ?? []) log.addSourceUpdate({ field: key, outcome, trigger: trigger(f), stage, ...extra })
@@ -1105,11 +1150,13 @@ export function createInterviewSession(config = {}) {
       ]
     }
     const handEdits = [...handOwned].map(([key, edit]) => ({ key, text: edit.text }))
+    // #319: the repository tools are offered whenever a code repository is among the Source documents.
+    const repositories = (brief.sources.repositories ?? []).length > 0 && Boolean(context.readRepository)
     return {
-      system: `${brief.text}\n\n${sessionNote({ cardMode: state.cardMode, textDrafts, reader, handEdits })}`,
+      system: `${brief.text}\n\n${sessionNote({ cardMode: state.cardMode, textDrafts, reader, repositories, handEdits })}`,
       // #294: the part that is the same on every turn, up to and including the Source documents. The cache point goes after it.
       cachePrefix: brief.stableText,
-      tools: textDrafts ? [] : [DRAFT_TOOL, LOG_TOOL, ...(reader ? [READ_TOOL] : [])],
+      tools: textDrafts ? [] : [DRAFT_TOOL, LOG_TOOL, ...(reader ? [READ_TOOL] : []), ...(repositories ? REPOSITORY_TOOLS : [])],
       withAttachments,
       knownSources: (context.sources ?? []).filter((s) => !s.removedAt).map((s) => ({ id: s.id, title: s.title })),
     }
@@ -1181,7 +1228,7 @@ export function createInterviewSession(config = {}) {
           messages = [...base, result.assistantMessage]
           if (!textDrafts) {
             for (const call of result.otherToolCalls) {
-              const outcome = resultFor(call)
+              const outcome = await resultFor(call)
               messages.push({ role: 'tool', toolCallId: call.id, name: call.name, isError: !outcome.ok, content: outcome.content })
             }
             if (result.otherToolCalls.some((c) => c.name === DRAFT_TOOL_NAME)) readsSinceDraft = []
@@ -1210,7 +1257,7 @@ export function createInterviewSession(config = {}) {
           if (live) live.streaming = false
           messages = [...base, result.assistantMessage]
           for (const call of result.otherToolCalls) {
-            const outcome = resultFor(call)
+            const outcome = await resultFor(call)
             messages.push({ role: 'tool', toolCallId: call.id, name: call.name, isError: !outcome.ok, content: outcome.content })
           }
           // Once a round of drafts has landed, the reads before it are spent: they are inputs of those drafts, not of later ones.
@@ -1231,7 +1278,7 @@ export function createInterviewSession(config = {}) {
           const { drafts, errors } = extractDraftBlocks(result.text)
           const requested = extractReadBlocks(result.text)
           // Reads are answered first, so a draft in the same reply is checked with them already recorded as its inputs.
-          const answers = requested.reads.map((r) => runRead(r))
+          const answers = await Promise.all(requested.reads.map((r) => runRead(r)))
           const outcomes = drafts.map((d) => ({ d, ...acceptDraft(d.field, d.value, { uncovered: d.uncovered, inputs: d.inputs }) }))
           const logged = extractLogBlocks(result.text)
           const logOutcomes = logged.requests.map((request) => runLog(request))

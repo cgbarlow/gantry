@@ -71,6 +71,9 @@ export function createFakeAzureDevOpsServer({
   // `includeContent=true`, or an octet-stream download) appends `{ path, via }` to it — how a test
   // proves a "does it exist" check never downloaded the file.
   contentLog,
+  // #319: a public project's repository, which anyone can read with no token at all. A request with no Authorization header may then
+  // GET; a request with a wrong PAT is still refused, and every write still needs a valid one.
+  anonymousRead = false,
 } = {}) {
   // #263: contents pushed with `contentType: 'base64encoded'` — what real Azure DevOps stores as the
   // decoded bytes. The octet-stream download below decodes exactly these (matched by content, so the
@@ -190,7 +193,8 @@ export function createFakeAzureDevOpsServer({
     const decoded = encoded ? Buffer.from(encoded, 'base64').toString('utf8') : ''
     const providedPat = decoded.startsWith(':') ? decoded.slice(1) : undefined
     const validPats = Array.isArray(validPat) ? validPat : [validPat]
-    if (!validPats.includes(providedPat)) {
+    const anonymousGet = anonymousRead && req.method === 'GET' && !req.headers['authorization']
+    if (!anonymousGet && !validPats.includes(providedPat)) {
       return json(401, { message: 'TF400813: The user is not authorized (fake: invalid or missing PAT).' })
     }
 
@@ -978,7 +982,7 @@ export function createFakeAzureDevOpsServer({
  * Starts a `createFakeAzureDevOpsServer` on an ephemeral port for the duration of `fn(baseUrl)`, then closes it — mirrors `tests/server.test.js`'s `withRunningServer` helper's shape (per #82's testing decisions). Shared by `tests/azureDevOpsClient.test.js` and `tests/instance.test.js` so this lifecycle isn't duplicated across both.
  */
 export function withFakeAzureDevOpsServer(
-  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser, simulateMissingReviewStatusField, canWrite, contentLog },
+  { organization, project, repository, validPat, files, branchFiles, failAfterPushes, workItemTypeStates, workItemTypes, denyReviewerVoteReset, rejectIdentityRequests, repoExists, connectionDataUser, simulateMissingReviewStatusField, canWrite, contentLog, anonymousRead },
   fn
 ) {
   return new Promise((resolve, reject) => {
@@ -999,6 +1003,7 @@ export function withFakeAzureDevOpsServer(
       simulateMissingReviewStatusField,
       canWrite,
       contentLog,
+      anonymousRead,
     })
     // #72: never close an idle keep-alive connection from this side. The gantry server under test
     // calls this fake from the same process through fetch(), which pools sockets; on a starved CPU

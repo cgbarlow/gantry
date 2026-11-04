@@ -32,7 +32,7 @@ const withClient = async (handler, fn, workspacePats = {}) => {
 }
 
 test('every tool in the cluster is registered with the instance addressing arguments', () => {
-  const names = ['list_source_documents', 'read_source_document', 'upload_source_document', 'add_source_document_from_address', 'fetch_source_document_again', 'read_decisions_log', 'list_reviewed_copies', 'read_reviewed_copy', 'upload_reviewed_copy']
+  const names = ['list_source_documents', 'read_source_document', 'upload_source_document', 'add_source_document_from_address', 'fetch_source_document_again', 'add_repository_source_document', 'list_repository_folder', 'search_repository', 'read_repository_file', 'read_decisions_log', 'list_reviewed_copies', 'read_reviewed_copy', 'upload_reviewed_copy']
   assert.deepEqual(tools.map((t) => t.name), names)
   for (const t of tools) {
     for (const key of ['slug', 'scope', 'ref']) assert.ok(t.inputSchema[key], `${t.name} takes ${key}`)
@@ -51,6 +51,92 @@ test('every tool refuses a call with neither slug nor ref, without touching the 
         assert.match(payload(result).error, /slug.*ref/, t.name)
       }
       assert.equal(fetch.calls.length, 0)
+    }
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Code repositories (#319, docs/adr/0072)
+// ---------------------------------------------------------------------------
+
+const HEAD = 'c0ffee1234567890abcdef1234567890abcdef12'
+const POINTER = { provider: 'github', location: { owner: 'acme', repository: 'billing-api' }, branch: 'main' }
+const repositoryEntries = [
+  { id: 'billing-api', title: 'Billing API', uploadedAt: '2026-11-04T00:00:00Z', repository: POINTER },
+  { id: 'brief', filename: 'brief.docx', title: 'Brief', size: 10 },
+]
+const requestBody = (call) => JSON.parse(call.body)
+
+test('add_repository_source_document has gantry serve check the workspace credential can read it, then keeps only the pointer', async () => {
+  const handler = ({ url, method, body }) => {
+    if (url.pathname === '/api/sources/repository') return { status: 200, body: { branch: 'main', defaultBranch: 'main', commit: HEAD } }
+    if (url.pathname === '/api/instance/sources' && method === 'POST') return { status: 201, body: { entry: { id: 'billing-api', title: 'Billing API', repository: JSON.parse(body).repository }, totalBytes: 0, warning: null } }
+    return undefined
+  }
+  await withClient(
+    handler,
+    async (gantryClient, fetch) => {
+      const result = await tool('add_repository_source_document').handler({ slug: 'ado-instance', provider: 'github', location: { owner: 'acme', repository: 'billing-api' }, folders: ['src'] }, { gantryClient })
+      assert.equal(result.isError, undefined, result.content[0].text)
+      const check = fetch.calls.find((c) => c.url.pathname === '/api/sources/repository')
+      assert.deepEqual(requestBody(check), { action: 'check', repository: { provider: 'github', location: { owner: 'acme', repository: 'billing-api' } } })
+      assert.equal(check.headers.authorization, 'Basic ' + Buffer.from(':the-pat').toString('base64'), 'read with the credential this server holds for the workspace')
+      const added = fetch.calls.find((c) => c.url.pathname === '/api/instance/sources' && c.method === 'POST')
+      assert.deepEqual(requestBody(added), { repository: { ...POINTER, folders: ['src'] } })
+      assert.equal(payload(result).commit, HEAD)
+    },
+    { 'ws-1': 'the-pat' }
+  )
+})
+
+test('add_repository_source_document passes on gantry serve\'s plain sentence when the repository can\'t be read, and keeps nothing', async () => {
+  await withClient(
+    ({ url }) => {
+      if (url.pathname === '/api/sources/repository') return { status: 403, body: { error: "You can't read the GitHub repository acme/billing-api with the token you gave. Check that it exists and that your token can read it.", code: 'no-access' } }
+      return undefined
+    },
+    async (gantryClient, fetch) => {
+      const result = await tool('add_repository_source_document').handler({ slug: 'my-instance', provider: 'github', location: { owner: 'acme', repository: 'billing-api' } }, { gantryClient })
+      assert.equal(result.isError, true)
+      assert.match(payload(result).error, /^You can't read the GitHub repository acme\/billing-api/)
+      assert.equal(fetch.calls.some((c) => c.url.pathname === '/api/instance/sources'), false)
+    }
+  )
+})
+
+test('list_repository_folder, search_repository and read_repository_file read through gantry serve, and a read gives the citation with its commit', async () => {
+  await withClient(
+    ({ url, body }) => {
+      if (url.pathname === '/api/instance/sources') return { status: 200, body: { entries: repositoryEntries, totalBytes: 10, warning: null, limits: {} } }
+      if (url.pathname === '/api/sources/repository') {
+        const { action, path, query } = JSON.parse(body)
+        if (action === 'list') return { status: 200, body: { commit: HEAD, path, entries: [{ path: 'src', isFolder: true }] } }
+        if (action === 'search') return { status: 200, body: { commit: HEAD, query, matches: [{ path: 'src/limits.ts', line: 1, text: 'MAX' }], filesSearched: 2, truncated: false } }
+        if (action === 'read') return { status: 200, body: { commit: HEAD, path, text: 'x'.repeat(30010), size: 30010, citationQuery: `?path=${path}&commit=${HEAD}` } }
+      }
+      return undefined
+    },
+    async (gantryClient, fetch) => {
+      const listed = payload(await tool('list_repository_folder').handler({ slug: 'my-instance', id: 'billing-api' }, { gantryClient }))
+      assert.deepEqual(listed.entries, [{ path: 'src', isFolder: true }])
+      assert.equal(listed.commit, HEAD)
+      const asked = fetch.calls.filter((c) => c.url.pathname === '/api/sources/repository').map(requestBody)
+      assert.deepEqual(asked[0], { action: 'list', repository: POINTER, path: '' }, 'the pointer comes from the manifest, not the agent')
+
+      const found = payload(await tool('search_repository').handler({ slug: 'my-instance', id: 'billing-api', query: 'MAX' }, { gantryClient }))
+      assert.equal(found.matches.length, 1)
+
+      const read = payload(await tool('read_repository_file').handler({ slug: 'my-instance', id: 'billing-api', path: 'src/limits.ts' }, { gantryClient }))
+      assert.equal(read.cite, `[Billing API, src/limits.ts](source:billing-api?path=src/limits.ts&commit=${HEAD})`)
+      assert.equal(read.text.length, 30000)
+      assert.equal(read.next, 30000)
+      const rest = payload(await tool('read_repository_file').handler({ slug: 'my-instance', id: 'billing-api', path: 'src/limits.ts', start: 30000 }, { gantryClient }))
+      assert.equal(rest.text.length, 10)
+      assert.equal(rest.next, undefined)
+
+      const notRepository = await tool('read_repository_file').handler({ slug: 'my-instance', id: 'brief', path: 'x' }, { gantryClient })
+      assert.equal(notRepository.isError, true)
+      assert.match(payload(notRepository).error, /is not a code repository/)
     }
   )
 })

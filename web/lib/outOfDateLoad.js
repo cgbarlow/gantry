@@ -1,8 +1,8 @@
 // #297 (map #238, decided in #249): gathers what web/lib/outOfDate.js needs from the stores every workspace kind already has and returns
 // the flags. Plain (no signals), so the browser's watcher (web/lib/outOfDateState.js) and the server's `/api/instance/out-of-date` route
 // (#305, which the MCP server's get_instance reads) share one implementation.
-import { findOutOfDateFields, newSinceLastInterview } from './outOfDate.js'
-import { isRemovedSource, replacedByMap } from './sourceDocuments.js'
+import { findOutOfDateFields, newSinceLastInterview, repositoryReadsOf } from './outOfDate.js'
+import { isRemovedSource, isRepositorySource, replacedByMap } from './sourceDocuments.js'
 
 const EMPTY = Object.freeze({ flags: [], newSince: [], sources: [] })
 
@@ -20,8 +20,9 @@ const hasFieldInput = (logs) => Object.values(logs).some((log) => Object.values(
  * @param {string} input.currentStageId  the Stage on screen
  * @param {object[]|(() => Promise<object[]>)} input.currentModules  its Modules as the editor holds them (or a function that reads them, called only when the saved content is needed)
  * @param {(stage: {id: string}) => Promise<object[]>} input.loadStageModules  another Stage's saved Modules
+ * @param {(entry: object, reads: {path: string, commit: string}[]) => Promise<{head: string, results: object[]}>} [input.compareRepository]  #319: has the Gantry server compare a code repository's files at their recorded commits with its branch head; without it repositories are not checked
  */
-export async function loadOutOfDate({ sourceStore, decisionsStore, stages = [], currentStageId, currentModules = [], loadStageModules }) {
+export async function loadOutOfDate({ sourceStore, decisionsStore, stages = [], currentStageId, currentModules = [], loadStageModules, compareRepository }) {
   const { entries } = await sourceStore.list()
   const sources = entries ?? []
   if (sources.length === 0) return { ...EMPTY }
@@ -40,7 +41,8 @@ export async function loadOutOfDate({ sourceStore, decisionsStore, stages = [], 
 
   // The saved content is needed only when something could be flagged: a changed document (for citations and drafted Fields), or a draft that drew on an earlier Field.
   let flags = []
-  if (hasChange(sources) || hasFieldInput(logs)) {
+  const repositories = compareRepository ? sources.filter((e) => isRepositorySource(e) && !isRemovedSource(e)) : []
+  if (hasChange(sources) || hasFieldInput(logs) || repositories.length) {
     const byStage = { [currentStageId]: typeof currentModules === 'function' ? await currentModules() : currentModules }
     for (const stage of stages) {
       if (stage.id === currentStageId) continue
@@ -60,7 +62,18 @@ export async function loadOutOfDate({ sourceStore, decisionsStore, stages = [], 
         modules[m.id] = there
       }
     }
-    flags = findOutOfDateFields({ sources, logs, modules: Object.values(modules), stageModules })
+    // #319: each repository a Field drew on is compared once, for just the files drawn on. One that can't be read now is no evidence either way.
+    const repositoryChanges = {}
+    const reads = repositories.length ? repositoryReadsOf({ sources, logs, modules: Object.values(modules) }) : {}
+    for (const entry of repositories) {
+      if (!reads[entry.id]?.length) continue
+      try {
+        repositoryChanges[entry.id] = await compareRepository(entry, reads[entry.id])
+      } catch {
+        // left unchecked
+      }
+    }
+    flags = findOutOfDateFields({ sources, logs, modules: Object.values(modules), stageModules, repositoryChanges })
   }
   return { flags, newSince, sources }
 }
