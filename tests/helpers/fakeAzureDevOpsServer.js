@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { sendArchive, zipOfFiles } from './fakeArchive.js'
 import { createHash } from 'node:crypto'
 
 // n's hex digits, zero-padded to a *fixed* width (7) and placed at the *front* of the 40-character id, followed by a fixed run of zeroes — not simply end-padded ("n.toString(16).padEnd(40, '0')"), which is not actually collision-free: end-padding drops any distinction between how many significant hex digits n has, so e.g. objectIdFor(1) ("1" + 39 zeroes) and objectIdFor(16) ("10" + 38 zeroes) produce the exact same 40-character string. Fixing the width of the leading hex digits before the zero-fill avoids that collision for any n below 16^7 — far more pushes than any test here performs — while still keeping distinct commit numbers distinguishable in their first few characters (e.g. objectIdFor(1) -> "0000001...", objectIdFor(16) -> "0000010..."), which tests asserting on a render footer's short (first-N-character) commit hash (#98) need.
@@ -74,6 +75,11 @@ export function createFakeAzureDevOpsServer({
   // #319: a public project's repository, which anyone can read with no token at all. A request with no Authorization header may then
   // GET; a request with a wrong PAT is still refused, and every write still needs a valid one.
   anonymousRead = false,
+  // #338: when true, `GET .../items?path=/&$format=zip` answers the repository (or, with another `path`, only that folder, its files
+  // relative to it) at a commit as one zip archive with no top-level folder, as Azure DevOps does. `archiveLog`, when an array, gets each
+  // archive's `{ version, path }` as it is made.
+  archives = false,
+  archiveLog,
 } = {}) {
   // #263: contents pushed with `contentType: 'base64encoded'` — what real Azure DevOps stores as the
   // decoded bytes. The octet-stream download below decodes exactly these (matched by content, so the
@@ -365,6 +371,13 @@ export function createFakeAzureDevOpsServer({
       }
 
       const path = url.searchParams.get('path')
+      if (archives && url.searchParams.get('$format')?.toLowerCase() === 'zip') {
+        const folder = path && path !== '/' ? path.replace(/^\/+|\/+$/g, '') : null
+        if (!store.size) return json(404, { message: `TF401174: Item ${path} not found (fake server).` })
+        archiveLog?.push({ version: branchName, path: folder })
+        const bytes = new Map([...store].map(([key, value]) => [key, Buffer.isBuffer(value) ? value : base64Contents.has(value) ? Buffer.from(value, 'base64') : Buffer.from(value, 'utf8')]))
+        return sendArchive(res, zipOfFiles(bytes, { folder, relative: true }))
+      }
       if (!store.has(path)) {
         return json(404, { message: `TF401174: Item ${path} not found (fake server).` })
       }

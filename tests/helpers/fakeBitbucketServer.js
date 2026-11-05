@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { sendArchive, zipOfFiles } from './fakeArchive.js'
 
 /**
  * A minimal in-process fake of the Bitbucket Cloud REST API (2.0), standing in for a real
@@ -80,6 +81,12 @@ export function createFakeBitbucketServer({
   repoExists = true,
   permissions = [],
   mergeRefusal = null,
+  // #338: when true, `GET /{workspace}/{repo}/get/{commit}.zip` (bitbucket.org's shape, on this same stand-in) answers the repository at a
+  // commit as one zip archive under one top-level folder, as Bitbucket does. `archiveLog`, when an array, gets each archive's commit as it
+  // is made. `archiveAuth: false` refuses every archive with a 401, as Bitbucket's web host might refuse a Bearer token.
+  archives = false,
+  archiveLog,
+  archiveAuth = true,
 } = {}) {
   const stores = new Map() // hash -> Map<normalized path, Buffer>
   const commitDates = new Map() // hash -> ISO date string, so re-pointing a branch at an existing hash (createBranch) doesn't mint a fresh date
@@ -184,6 +191,17 @@ export function createFakeBitbucketServer({
     const providedToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : null
     if (!providedToken || !validPats.includes(providedToken)) {
       return json(401, { type: 'error', error: { message: '401 Unauthorized (fake server: invalid or missing Bearer token)' } })
+    }
+
+    // #338: GET /{workspace}/{repo_slug}/get/{commit}.zip — the repository at a commit as one zip archive.
+    const archiveMatch = archives && req.method === 'GET' && url.pathname.match(new RegExp(`^/${owner}/${repository}/get/([^/]+)\\.zip$`))
+    if (archiveMatch) {
+      const hash = decodeURIComponent(archiveMatch[1])
+      if (!archiveAuth) return json(401, { type: 'error', error: { message: '401 (fake: the web host takes no Bearer token)' } })
+      const store = stores.get(hash)
+      if (!store) return json(404, { type: 'error', error: { message: `404 (fake: no commit "${hash}")` } })
+      archiveLog?.push(hash)
+      return sendArchive(res, zipOfFiles(store, { top: `${owner}-${repository}-${hash.slice(0, 12)}` }))
     }
 
     // GET /workspaces/{workspace}/permissions/repositories/{repo_slug} — #44's
