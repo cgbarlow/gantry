@@ -242,7 +242,7 @@ test('the stage-end card needs every Field in scope to be done, not only the Gat
             await openInterview(page, base)
             await page.click('[data-testid="interview-start"]')
             await field(page, 'team-and-estimates.estimates').locator('[data-testid="interview-field-done"]').waitFor()
-            await page.waitForFunction(() => !document.querySelector('[data-testid="interview-working"]'))
+            await page.waitForFunction(() => !document.querySelector('[data-testid="interview-status"]'))
             assert.match(await page.textContent('[data-testid="interview-gate-line"]'), /Gate check \(.*\): passes/)
             const status = field(page, 'background.problem').locator('[data-testid="interview-field-done"]')
             assert.equal(await status.getAttribute('data-done'), 'false')

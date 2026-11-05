@@ -246,7 +246,7 @@ test('server workspace: review questions join a running interview’s next round
     assert.match(await page.textContent('[data-testid="interview-kickoff-review-note"]'), /9 review questions/)
     await page.click('[data-testid="interview-start"]')
     // The stand-in asks nothing, so the interview is waiting for the architect.
-    await page.waitForFunction(() => document.querySelector('[data-testid="interview-working"]') === null && document.querySelector('[data-testid="interview-chat"]') && !document.querySelector('[data-testid="interview-chat"]').disabled)
+    await page.waitForFunction(() => document.querySelector('[data-testid="interview-status"]') === null && document.querySelector('[data-testid="interview-chat"]') && !document.querySelector('[data-testid="interview-chat"]').disabled)
     assert.equal(await page.locator('[data-testid="interview-round"]').count(), 0)
     // The box was left off, so the rail's button adds the questions to the running session: a round of their own.
     await page.click('[data-testid="interview-review-join"]')

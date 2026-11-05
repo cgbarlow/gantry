@@ -546,6 +546,57 @@ test('a model that refuses sampling settings is called again without them, once,
   assert.equal(providers.getAiProvider(p.id).temperature, 0.3)
 })
 
+// #341: the refusal is remembered in this browser's storage, per AI Provider type, address and model, so a reload does not make the first
+// call (on a resume, the one that carries the whole brief) twice. The caller hears that the call is going again without the setting.
+test('a refused sampling setting is remembered in this browser, so after a reload the first call leaves it out and is not refused', async () => {
+  map.delete(client.SAMPLING_REFUSALS_KEY)
+  // A page that has not met this model yet (the test above taught the shared copy of the module).
+  const page = await import(`../web/lib/aiClient.js?page=${Date.now()}`)
+  const p = anthropic({ model: 'claude-no-sampling', temperature: 0.3 })
+  const ai = noSamplingAi()
+  const heard = []
+  for await (const e of page.streamChat(providers.getAiProvider(p.id), { messages: [{ role: 'user', text: 'go' }], tools: [] }, { fetchImpl: ai.fetchImpl, onEvent: (e) => heard.push(e) })) void e
+  assert.deepEqual(heard, [{ type: 'sampling-retry', without: 'temperature' }], 'the caller is told the call is going again, and without what')
+  const stored = map.get(client.SAMPLING_REFUSALS_KEY)
+  assert.ok(stored, 'kept in storage')
+  assert.ok(!stored.includes('sk-ant-1'), 'never the key')
+  assert.deepEqual(JSON.parse(stored), [{ type: 'anthropic', address: 'https://api.anthropic.com', model: 'claude-no-sampling' }])
+
+  // A reload: a fresh copy of the module, with nothing in memory.
+  const reloaded = await import(`../web/lib/aiClient.js?reload=${Date.now()}`)
+  const after = noSamplingAi()
+  const again = []
+  for await (const e of reloaded.streamChat(providers.getAiProvider(p.id), { messages: [{ role: 'user', text: 'again' }], tools: [] }, { fetchImpl: after.fetchImpl, onEvent: (e) => again.push(e) })) void e
+  assert.equal(after.calls.length, 1, 'one call, not refused')
+  assert.equal(after.calls[0].body.temperature, undefined)
+  assert.deepEqual(again, [])
+  assert.equal(providers.getAiProvider(p.id).temperature, 0.3, "the architect's setting is not changed")
+
+  // Another model at the same AI Provider is not affected.
+  const other = anthropic({ name: 'Other', model: 'claude-x', temperature: 0.3 })
+  const ok = fakeAi(() => sse(fixture('anthropic-tool-call.sse')))
+  for await (const e of reloaded.streamChat(providers.getAiProvider(other.id), { messages: [{ role: 'user', text: 'go' }], tools: [] }, { fetchImpl: ok.fetchImpl })) void e
+  assert.equal(ok.calls[0].body.temperature, 0.3)
+  map.delete(client.SAMPLING_REFUSALS_KEY)
+})
+
+test('a refused sampling setting is still remembered for the page when the browser blocks storage', async () => {
+  const saved = globalThis.localStorage
+  globalThis.localStorage = { getItem: () => { throw new Error('blocked') }, setItem: () => { throw new Error('blocked') }, removeItem: () => {} }
+  try {
+    const fresh = await import(`../web/lib/aiClient.js?blocked=${Date.now()}`)
+    const p = { id: 'x', name: 'Blocked', type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'claude-no-sampling', temperature: 0.3, advanced: { topP: 0.9 }, test: null }
+    const ai = noSamplingAi()
+    const heard = []
+    for await (const e of fresh.streamChat(p, { messages: [{ role: 'user', text: 'go' }], tools: [] }, { fetchImpl: ai.fetchImpl, onEvent: (e) => heard.push(e) })) void e
+    assert.deepEqual(heard, [{ type: 'sampling-retry', without: 'temperature and top_p' }])
+    for await (const e of fresh.streamChat(p, { messages: [{ role: 'user', text: 'again' }], tools: [] }, { fetchImpl: ai.fetchImpl })) void e
+    assert.equal(ai.calls.length, 3, 'refused once, answered, then left out from the start')
+  } finally {
+    globalThis.localStorage = saved
+  }
+})
+
 test('Test connection on a model that refuses sampling settings still finds native question cards', async () => {
   const p = anthropic({ model: 'claude-no-sampling', name: 'No sampling', temperature: 0.3 })
   const result = await client.testConnection(providers.getAiProvider(p.id), { fetchImpl: noSamplingAi().fetchImpl })

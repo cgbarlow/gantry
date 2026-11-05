@@ -155,7 +155,7 @@ async function runFirstRound(page) {
   await page.waitForSelector('[data-testid="interview-round"]')
   await page.click('[data-testid="round-submit"]')
   await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="interview-msg"][data-who="ai"]')].some((m) => /Thanks, noted/.test(m.textContent)))
-  await page.waitForSelector('[data-testid="interview-working"]', { state: 'detached' })
+  await page.waitForSelector('[data-testid="interview-status"]', { state: 'detached' })
 }
 
 // A colleague's save of a Field, through the same API the editor uses.
@@ -403,7 +403,7 @@ test('a second session on the same stage gets the warning card, and both logs me
         await page.waitForSelector('[data-testid="interview-round"]')
         await page.click('[data-testid="round-submit"]')
         await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="interview-msg"][data-who="ai"]')].some((m) => /Thanks, noted/.test(m.textContent)))
-        await page.waitForSelector('[data-testid="interview-working"]', { state: 'detached' })
+        await page.waitForSelector('[data-testid="interview-status"]', { state: 'detached' })
         await page.click('[data-testid="interview-pause"]')
         await page.waitForSelector('[data-testid="interview-paused"]')
 

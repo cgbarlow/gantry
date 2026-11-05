@@ -29,21 +29,60 @@ import { ASK_TOOL, ASK_TOOL_NAME, TEXT_FALLBACK_INSTRUCTIONS, interpretTurn, sta
 // Newer models refuse sampling settings (temperature, top_p, top_k) other than their own default with a 400 that says
 // so. Rather than read that as "this model can't do the job", the call is made again without them, once, and the
 // model is remembered so later calls leave them out from the start. Settings the architect typed stay saved.
+//
+// #341: it is remembered in this browser's storage, per AI Provider type, address and model (never a key), so a reload does not
+// make the first call twice: on a resume that call carries the whole brief and the Source documents. Storage the browser blocks
+// leaves the memory of this page only. The caller hears `{ type: 'sampling-retry', without }` through `options.onEvent` as the
+// call goes again, so the Interview page can say so.
+export const SAMPLING_REFUSALS_KEY = 'gantry:ai-refuses-sampling'
 const REFUSES_SAMPLING = new Set()
 const SAMPLING_REFUSAL = /temperature|top_p|top_k|sampling/i
 const samplingKey = (provider) => [provider.type, provider.address, provider.model].join('\u0000')
-const hasSampling = (provider) => [provider.temperature, provider.advanced?.topP, provider.advanced?.topK].some((v) => v !== null && v !== undefined)
+const setValue = (v) => v !== null && v !== undefined
+const hasSampling = (provider) => [provider.temperature, provider.advanced?.topP, provider.advanced?.topK].some(setValue)
 const withoutSampling = (provider) => ({ ...provider, temperature: null, advanced: { ...provider.advanced, topP: null, topK: null } })
+/** The settings left out, as the architect's settings name them: "temperature", "temperature and top_p". */
+function samplingNames(provider) {
+  const names = [setValue(provider.temperature) && 'temperature', setValue(provider.advanced?.topP) && 'top_p', setValue(provider.advanced?.topK) && 'top_k'].filter(Boolean)
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] ?? 'sampling'
+}
+
+function storedRefusals() {
+  try {
+    const list = JSON.parse((typeof localStorage === 'undefined' ? null : localStorage.getItem(SAMPLING_REFUSALS_KEY)) ?? '[]')
+    return Array.isArray(list) ? list.filter((r) => r && typeof r === 'object') : []
+  } catch {
+    return [] // blocked or unreadable storage: this page's memory still applies
+  }
+}
+
+function refusesSampling(provider) {
+  if (REFUSES_SAMPLING.has(samplingKey(provider))) return true
+  return storedRefusals().some((r) => samplingKey(r) === samplingKey(provider))
+}
+
+function rememberRefusal(provider) {
+  REFUSES_SAMPLING.add(samplingKey(provider))
+  const list = storedRefusals()
+  if (list.some((r) => samplingKey(r) === samplingKey(provider))) return
+  try {
+    // Only what names the model: the type, the address and the model. Nothing else of the AI Provider, and never its key.
+    if (typeof localStorage !== 'undefined') localStorage.setItem(SAMPLING_REFUSALS_KEY, JSON.stringify([...list, { type: provider.type, address: provider.address, model: provider.model }]))
+  } catch {
+    // Ignore: storage blocked by the browser must never take the app down (see web/lib/credential.js).
+  }
+}
 
 async function callWithoutRefusedSampling(provider, params, options) {
-  const skip = REFUSES_SAMPLING.has(samplingKey(provider))
+  const skip = refusesSampling(provider)
   const first = skip ? withoutSampling(provider) : provider
   const res = await callAiProvider(first, buildChatRequest(first, params), options)
   if (res.ok) return res
   const failure = await failureFromResponse(res, provider)
   // #329: a request too long for the model is a 400 too, and no sampling setting will fix it: the interview compacts and sends it again.
   if (skip || isTooLong(failure) || failure.status !== 400 || !SAMPLING_REFUSAL.test(failure.message) || !hasSampling(provider)) throw failure
-  REFUSES_SAMPLING.add(samplingKey(provider))
+  rememberRefusal(provider)
+  options.onEvent?.({ type: 'sampling-retry', without: samplingNames(provider) })
   const bare = withoutSampling(provider)
   const again = await callAiProvider(bare, buildChatRequest(bare, params), options)
   if (!again.ok) throw await failureFromResponse(again, provider)
