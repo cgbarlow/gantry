@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { sendArchive, zipOfFiles } from './fakeArchive.js'
 
 /**
  * A minimal in-process fake of the GitLab REST API (v4), standing in for a real `gitlab.com` (or
@@ -56,6 +57,11 @@ export function createFakeGitLabServer({
   // Defaults to Developer (30), GitLab's own lowest level that can push to a non-protected branch; pass
   // 20 (Reporter) or lower to simulate a read-only PAT.
   viewerAccessLevel = 30,
+  // #338: when true, `GET .../repository/archive.zip?sha=&path=` answers the repository (or, with `path`, only that folder, its files at
+  // their full paths) at a commit as one zip archive under one top-level folder, as GitLab does. `archiveLog`, when an array, gets each
+  // archive's `{ sha, path }` as it is made.
+  archives = false,
+  archiveLog,
 } = {}) {
   const branches = new Map() // branch name -> Map<path, Buffer>
   const branchTips = new Map() // branch name -> { commitId, committedDate, authoredDate }
@@ -170,6 +176,16 @@ export function createFakeGitLabServer({
         default_branch: 'main',
         permissions: { project_access: { access_level: viewerAccessLevel }, group_access: null },
       })
+    }
+
+    // #338: GET /projects/:id/repository/archive.zip?sha=&path= — a zip archive of the project (or of one folder) at a ref.
+    if (archives && req.method === 'GET' && rest === '/repository/archive.zip') {
+      const sha = url.searchParams.get('sha') ?? 'main'
+      const folder = url.searchParams.get('path') || null
+      const store = storeAt(sha)
+      if (!store) return json(404, { message: '404 Commit Not Found (fake server)' })
+      archiveLog?.push({ sha, path: folder })
+      return sendArchive(res, zipOfFiles(store, { top: `${repository}-${sha}${folder ? `-${folder.replace(/\//g, '-')}` : ''}`, folder }))
     }
 
     // GET /projects/:id/repository/files/:file_path?ref=<branch> — a single file's metadata + base64

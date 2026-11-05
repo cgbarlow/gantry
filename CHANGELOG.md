@@ -17,6 +17,74 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.16.0 — 2026-11-05
+
+The AI searches a code repository Source document the way a developer searches a checkout: every file, complete
+results, nothing cut short by a time limit. And the AI interview always shows what it is doing, so a long pause no
+longer looks like a hang.
+
+### Added
+
+- **A code repository is searched from a copy** (#338, ADR-0074).
+  - **What changes.** The first read at a commit downloads the repository as one archive and keeps it in the server's
+    memory for a while. Every later search, find, folder listing and file read at that commit uses the copy, so a
+    search covers every file and finishes in well under a second, without spending the Provider's rate limit. A new
+    commit on the branch means a new copy, and results never mix two commits.
+  - **New tools for the AI** (and for an outside agent over MCP): *find files by name*; *search contents* as plain
+    text or, when asked, a regular expression, within a folder or file type, with up to 5 lines of context or just the
+    matching files; *list a folder*; and *read a file*, whole or by line range. Results come a page at a time (50
+    lines or 200 paths) and say the total, so the AI decides how far to read. Citations are unchanged.
+  - **"Preparing…".** A big repository can take a while to download. The thread shows *Preparing Billing API…
+    12.4 MB* meanwhile, and the AI's search simply finishes once the copy is ready. No request is held open long
+    enough for a proxy to drop it. Starting an interview, or Bring up to date, starts the download straight away.
+  - **Whose code, unchanged.** One copy per repository and commit is shared, but a colleague uses it only after showing,
+    with their own token, that they can read the repository's code. Seeing that the repository exists is not enough.
+    A public repository read without a token is shared outright. Out of date still asks the Provider fresh.
+  - **When a copy can't be made.** A repository over the size limit, a download that fails, or a blocked archive
+    host: on GitLab and Azure DevOps a repository narrowed to folders is copied for just those folders. Otherwise
+    it is read file by file as in 0.15.1, and the AI is told why and to search within a folder.
+
+### Fixed
+
+- **The AI interview always shows what it is doing** (#341).
+  - **What went wrong.** After the AI finished a sentence and began a long draft, nothing on screen moved, sometimes
+    for a minute. It looked like the interview had stopped.
+  - **What it does now.** One status line sits at the foot of the thread the whole time the AI is busy, and says
+    what it is doing: *Waiting for the AI… 12 s*, *Writing…*, *Drafting Scope notes…*, *Reading Client brief…*,
+    *Searching Billing API for "retry"…*, *Preparing Billing API…*, *Compacting the conversation…*. Screen readers
+    hear each new activity once.
+  - **A refused temperature setting is remembered.** When a model refuses the temperature (or top_p / top_k)
+    setting, Gantry tries again without it, and the status line says so. Your browser now remembers that refusal for
+    that AI Provider and model, so the next call, even after a reload, goes straight through. Your saved AI Provider
+    settings are not changed.
+  - **Start this stage over** now asks for confirmation beside its button and moves the focus there. Once confirmed,
+    the kickoff reads *Start interview* and the stage starts fresh instead of resuming from the decisions log.
+
+### For operators
+
+- **Two more outbound hosts.** The whole-repository download comes from `codeload.github.com` for GitHub (on GitHub
+  Enterprise Server, `codeload.<host>` or the server's `/codeload/` path) and from `bitbucket.org` for Bitbucket.
+  If they aren't allowed, nothing breaks: those repositories are read file by file, as before.
+- **Memory.** Copies are held in memory only, never written to disk, and gone on restart. By default they take up to
+  512 MB together, and a download in progress counts toward that. While a copy is unpacked its archive is in memory
+  too, so allow up to about twice the setting for the container. Unpacking a very large repository can pause the
+  server for a few seconds.
+- **New settings**, all optional, all described in the README's code-repository section. Each takes a whole number,
+  and a value out of range stops `gantry serve` at startup with a line naming it.
+  - `GANTRY_REPOSITORY_COPY_MEMORY_MB` (default `512`): how much memory all copies together may take. `0` keeps no
+    copies, and every repository is read file by file.
+  - `GANTRY_REPOSITORY_COPY_LIMIT_MB` (default `150`): the most one repository's copy, or its archive, may take.
+  - `GANTRY_REPOSITORY_COPY_IDLE_MINUTES` (default `120`): how long a copy nobody uses is kept. When room is needed,
+    the least recently used copy goes first.
+  - `GANTRY_REPOSITORY_HEAD_RECHECK_SECONDS` (default `60`): how long a branch's head is trusted before it is asked
+    for again. `0` asks every time.
+  - `GANTRY_REPOSITORY_ARCHIVE_TIME_LIMIT_SECONDS` (default `300`): how long one archive download may take. It runs
+    on the server, not in anyone's request, so it can be longer than your proxy's limit.
+
+### Notes
+
+- #337 (remembering files already read) is superseded by the copy and will not be built.
+
 ## 0.15.1 — 2026-11-05
 
 Reading a code repository holds up on a large repository and over a slow or unreliable link. Before this, a search

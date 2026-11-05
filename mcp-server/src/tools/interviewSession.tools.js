@@ -11,6 +11,7 @@ import { z } from 'zod'
 import { resolveInstanceWorkspace } from '../gantryClient.js'
 import { credentialErrorResult, errorResult, okResult, upstreamErrorResult } from '../toolResult.js'
 import { sessionShape, updateInstanceModules } from './instanceContent.tools.js'
+import { prepareRepositories } from './sourceDocuments.tools.js'
 
 async function resolveWorkspaceOrError({ slug, scope, ref }, { gantryClient }) {
   if (!slug && !ref) {
@@ -142,6 +143,17 @@ function runArtefactsFor({ stageArtefacts, stages, from, goal, artefacts = {}, a
 }
 
 // What a paused session chose for each Stage of its run, with what its own Stage aimed for (a log from before #332 has only that).
+/**
+ * #338 (docs/adr/0074): starting or resuming a session starts gantry serve downloading its copy of each code repository the brief lists,
+ * as starting an interview in the browser does, so the agent's first search rarely waits. Nothing waits on it and a failure is ignored.
+ */
+function prepareBriefRepositories(args, context, brief) {
+  if (!brief?.sources?.repositories?.length) return Promise.resolve()
+  return callInstanceRoute(args, context, { path: '/api/instance/sources' })
+    .then(({ res }) => (res ? prepareRepositories(args, context, res.body?.entries) : null))
+    .catch(() => null)
+}
+
 const sessionArtefacts = (line, stageId) => (line ? { ...(line.artefacts ?? {}), ...(line.artefact && stageId ? { [stageId]: line.artefact } : {}) } : {})
 
 const LATER_STAGES = ' When the run moves on to a later stage, brief it with get_interview_brief, passing that stage and the artefact "session.artefacts" names for it as "artefactId".'
@@ -160,6 +172,7 @@ async function startInterviewSession(args, context) {
   // A first stage left out aims for its lightest, so its brief does too, as the session's saves record.
   const aiming = await briefAimingFor(args, context, { brief: got.brief, stageId: target, artefact: aimed.artefacts[target] })
   if (aiming.result) return aiming.result
+  void prepareBriefRepositories(args, context, aiming.brief)
   return okResult({
     session: sessionHandle({ id: newSessionId(), runUntil: goal, who, model, artefacts: aimed.artefacts }),
     stageVersion: got.instance.stageVersion,
@@ -205,6 +218,7 @@ async function resumeInterviewSession(args, context) {
   if (aimed.error) return errorResult(aimed.error)
   const aiming = await briefAimingFor(args, context, { brief: got.brief, stageId: here, stageState: checkStatus.merged ? undefined : stageState, artefact: aimed.artefacts[here] })
   if (aiming.result) return aiming.result
+  void prepareBriefRepositories(args, context, aiming.brief)
   return okResult({
     session: sessionHandle({ id: adopted?.session ?? newSessionId(), runUntil: goal, who: who ?? adopted?.who, model, artefacts: aimed.artefacts }),
     adopted: Boolean(adopted),

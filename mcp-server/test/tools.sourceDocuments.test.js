@@ -32,7 +32,7 @@ const withClient = async (handler, fn, workspacePats = {}) => {
 }
 
 test('every tool in the cluster is registered with the instance addressing arguments', () => {
-  const names = ['list_source_documents', 'read_source_document', 'upload_source_document', 'add_source_document_from_address', 'fetch_source_document_again', 'add_repository_source_document', 'list_repository_folder', 'search_repository', 'read_repository_file', 'read_decisions_log', 'list_reviewed_copies', 'read_reviewed_copy', 'upload_reviewed_copy']
+  const names = ['list_source_documents', 'read_source_document', 'upload_source_document', 'add_source_document_from_address', 'fetch_source_document_again', 'add_repository_source_document', 'find_repository_files', 'search_repository', 'list_repository_folder', 'read_repository_file', 'read_decisions_log', 'list_reviewed_copies', 'read_reviewed_copy', 'upload_reviewed_copy']
   assert.deepEqual(tools.map((t) => t.name), names)
   for (const t of tools) {
     for (const key of ['slug', 'scope', 'ref']) assert.ok(t.inputSchema[key], `${t.name} takes ${key}`)
@@ -137,6 +137,93 @@ test('list_repository_folder, search_repository and read_repository_file read th
       const notRepository = await tool('read_repository_file').handler({ slug: 'my-instance', id: 'brief', path: 'x' }, { gantryClient })
       assert.equal(notRepository.isError, true)
       assert.match(payload(notRepository).error, /is not a code repository/)
+    }
+  )
+})
+
+// #338 (docs/adr/0074): the four tools of the in-app AI, with the same options, and a copy still downloading waited through.
+test('find_repository_files, and search and read with their new options, pass what the agent asked on to gantry serve', async () => {
+  await withClient(
+    ({ url, body }) => {
+      if (url.pathname === '/api/instance/sources') return { status: 200, body: { entries: repositoryEntries, totalBytes: 10, warning: null, limits: {} } }
+      if (url.pathname === '/api/sources/repository') {
+        const asked = JSON.parse(body)
+        if (asked.action === 'find') return { status: 200, body: { commit: HEAD, pattern: asked.pattern, path: '', paths: ['infra/main.tf'], page: 2, pageSize: 200, total: 201, pages: 2 } }
+        if (asked.action === 'search') return { status: 200, body: { commit: HEAD, query: asked.query, regex: true, matches: [{ path: 'src/a.ts', count: 2 }], filesSearched: 9, truncated: false, totalMatches: 2, totalFiles: 1, page: 1, pageSize: 200, total: 1, pages: 1 } }
+        if (asked.action === 'read') return { status: 200, body: { commit: HEAD, path: asked.path, text: 'ten\neleven', size: 10, citationQuery: `?path=${asked.path}&commit=${HEAD}`, lines: { from: 10, to: 11, total: 90 } } }
+        if (asked.action === 'list') return { status: 200, body: { commit: HEAD, path: asked.path, entries: [], page: 2, pageSize: 200, total: 201, pages: 2 } }
+      }
+      return undefined
+    },
+    async (gantryClient, fetch) => {
+      const found = payload(await tool('find_repository_files').handler({ slug: 'my-instance', id: 'billing-api', pattern: '**/*.tf', page: 2, commit: HEAD }, { gantryClient }))
+      assert.deepEqual([found.paths, found.total, found.pages], [['infra/main.tf'], 201, 2])
+      const searched = payload(await tool('search_repository').handler({ slug: 'my-instance', id: 'billing-api', query: 'retry\\w*', regex: true, fileTypes: ['ts'], context: 2, filesOnly: true, path: 'src' }, { gantryClient }))
+      assert.equal(searched.totalMatches, 2)
+      const read = payload(await tool('read_repository_file').handler({ slug: 'my-instance', id: 'billing-api', path: 'src/a.ts', lines: '10-11' }, { gantryClient }))
+      assert.deepEqual(read.lines, { from: 10, to: 11, total: 90 })
+      assert.equal(read.text, 'ten\neleven')
+      await tool('list_repository_folder').handler({ slug: 'my-instance', id: 'billing-api', path: 'src', page: 2 }, { gantryClient })
+      await tool('search_repository').handler({ slug: 'my-instance', id: 'billing-api', query: 'retry', page: 2, commit: HEAD }, { gantryClient })
+
+      const asked = fetch.calls.filter((c) => c.url.pathname === '/api/sources/repository').map(requestBody)
+      assert.deepEqual(asked, [
+        { action: 'find', repository: POINTER, pattern: '**/*.tf', path: '', page: 2, commit: HEAD },
+        { action: 'search', repository: POINTER, query: 'retry\\w*', path: 'src', regex: true, fileTypes: ['ts'], context: 2, filesOnly: true },
+        { action: 'read', repository: POINTER, path: 'src/a.ts', lines: '10-11' },
+        { action: 'list', repository: POINTER, path: 'src', page: 2 },
+        { action: 'search', repository: POINTER, query: 'retry', path: '', page: 2, commit: HEAD },
+      ])
+      for (const name of ['find_repository_files', 'search_repository', 'list_repository_folder']) assert.ok(tool(name).inputSchema.commit, `${name} takes the commit of the page before`)
+      const names = tools.map((t) => t.name)
+      assert.ok(names.indexOf('find_repository_files') < names.indexOf('search_repository'))
+      assert.match(tool('search_repository').description, /contents only: to find files by name, use find_repository_files/)
+      assert.match(tool('find_repository_files').description, /names only: to search what files contain, use search_repository/)
+    }
+  )
+})
+
+test('a copy gantry serve is still preparing (202) is asked again until it is ready, so the agent\'s call resolves with the result', async () => {
+  let preparing = 2
+  await withClient(
+    ({ url, body }) => {
+      if (url.pathname === '/api/instance/sources') return { status: 200, body: { entries: repositoryEntries, totalBytes: 10, warning: null, limits: {} } }
+      if (url.pathname === '/api/sources/repository') {
+        if (preparing-- > 0) return { status: 202, body: { preparing: true, commit: HEAD, receivedBytes: 1024, repository: 'acme/billing-api' } }
+        return { status: 200, body: { commit: HEAD, query: JSON.parse(body).query, matches: [], filesSearched: 4, truncated: false, totalMatches: 0, totalFiles: 0, page: 1, pageSize: 50, total: 0, pages: 0 } }
+      }
+      return undefined
+    },
+    async (gantryClient, fetch) => {
+      const result = await tool('search_repository').handler({ slug: 'my-instance', id: 'billing-api', query: 'MAX' }, { gantryClient, repositoryPollMs: 0 })
+      assert.equal(result.isError, undefined)
+      assert.equal(payload(result).totalMatches, 0)
+      const asked = fetch.calls.filter((c) => c.url.pathname === '/api/sources/repository').map(requestBody)
+      assert.equal(asked.length, 3, 'asked until the copy was ready')
+      assert.equal(asked[0].commit, undefined)
+      assert.deepEqual(asked.slice(1).map((body) => body.commit), [HEAD, HEAD], 'asked again at the commit being prepared, so a branch that moves meanwhile starts no second download')
+    }
+  )
+})
+
+test('a call the agent cancels while a copy is preparing stops asking gantry serve', async () => {
+  await withClient(
+    ({ url }) => {
+      if (url.pathname === '/api/instance/sources') return { status: 200, body: { entries: repositoryEntries, totalBytes: 10, warning: null, limits: {} } }
+      if (url.pathname === '/api/sources/repository') return { status: 202, body: { preparing: true, commit: HEAD, receivedBytes: 0, repository: 'acme/billing-api' } }
+      return undefined
+    },
+    async (gantryClient, fetch) => {
+      const stop = new AbortController()
+      const asking = tool('search_repository').handler({ slug: 'my-instance', id: 'billing-api', query: 'MAX' }, { gantryClient, repositoryPollMs: 20, signal: stop.signal })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      stop.abort()
+      const result = await asking
+      assert.equal(result.isError, true)
+      assert.equal(payload(result).detail.code, 'abandoned')
+      const after = fetch.calls.length
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      assert.equal(fetch.calls.length, after, 'nothing more is asked once cancelled')
     }
   )
 })

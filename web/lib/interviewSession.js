@@ -76,6 +76,7 @@ import {
   REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS,
   REPOSITORY_TOOLS,
   REPOSITORY_TOOL_NAMES,
+  FIND_REPOSITORY_TOOL_NAME,
   LIST_REPOSITORY_TOOL_NAME,
   READ_REPOSITORY_TOOL_NAME,
   SEARCH_REPOSITORY_TOOL_NAME,
@@ -153,6 +154,56 @@ export function repositoryFailedLine({ title, message }) {
   return `Couldn't read the code repository ${title} just now: ${message} The AI is told, and may try again.`
 }
 
+/**
+ * #338: the thread's line while a repository tool call waits for the Gantry server to download its copy of the repository:
+ * "Preparing Billing API… 12.4 MB". The #341 status line may fold it in; `state.preparingRepository` is what it is made from.
+ */
+export function preparingRepositoryLine({ title, receivedBytes }) {
+  const mb = Number(receivedBytes) > 0 ? ` ${(receivedBytes / (1024 * 1024)).toFixed(1)} MB` : ''
+  return `Preparing ${title}…${mb}`
+}
+
+/**
+ * #341: the one status line at the bottom of the thread while the AI is busy: what is under way, the most specific thing first, so it is
+ * never hidden while anything is still going on. Returns null when the AI is not busy (the architect has the turn), else
+ * `{ kind, text, detail, ticking }`: `detail` is the part that keeps changing (the seconds waited, the megabytes downloaded), which the page
+ * shows beside the text but does not announce; `ticking` says the seconds go up, so the page redraws it every second. `now` is in ms.
+ */
+export function statusLine(snap, now = Date.now()) {
+  if (!snap || snap.phase !== 'working') return null
+  const line = (kind, text, detail = null, ticking = false) => ({ kind, text, detail, ticking })
+  const seconds = (since) => `${Math.max(0, Math.floor((now - Number(since ?? now)) / 1000))} s`
+  const listOf = (items) => (items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items[0])
+  if (snap.compacting) return line('compacting', 'Compacting the conversation…')
+  if (snap.preparingRepository) {
+    const { title, receivedBytes } = snap.preparingRepository
+    return line('preparing-repository', `Preparing ${title}…`, Number(receivedBytes) > 0 ? `${(receivedBytes / (1024 * 1024)).toFixed(1)} MB` : null)
+  }
+  if (snap.tool) return line(snap.tool.kind, toolText(snap.tool))
+  if (snap.drafting || snap.draftingFields?.length) {
+    const titles = snap.draftingTitles ?? []
+    return line('drafting', titles.length ? `Drafting ${listOf(titles)}…` : 'Drafting…')
+  }
+  if (snap.preparing) return line('preparing', 'Preparing questions…')
+  if (snap.waiting?.without) {
+    const plural = / and /.test(snap.waiting.without) ? 'settings' : 'setting'
+    return line('retrying', `Trying again without the ${snap.waiting.without} ${plural}…`, seconds(snap.waiting.since), true)
+  }
+  if (snap.waiting) return line('waiting', 'Waiting for the AI…', seconds(snap.waiting.since), true)
+  if (snap.writing) return line('writing', 'Writing…')
+  return line('working', 'Working…')
+}
+
+// #341: what a read the AI is making says on the status line. `title` is null until the call's arguments name the document or repository.
+function toolText({ kind, title, path, range, query, pattern }) {
+  const where = (p) => (p ? ` ${p}` : '')
+  if (kind === 'searching') return title ? `Searching ${title}${query ? ` for "${query}"` : ''}…` : 'Searching a code repository…'
+  if (kind === 'finding') return title ? `Finding files${pattern ? ` named "${pattern}"` : ''} in ${title}…` : 'Finding files in a code repository…'
+  if (kind === 'listing') return title ? `Listing ${title}${where(path)}…` : 'Listing a code repository…'
+  if (!title) return 'Reading a Source document…'
+  return `Reading ${title}${path ? where(path) : range ? `, ${range}` : ''}…`
+}
+
 const LAST_ROUND_NOTE = 'That was the last round. Redraft the Fields these answers feed. Ask nothing more: the architect has chosen to finish.'
 
 function sessionNote({ cardMode, textDrafts, reader, repositories = false, handEdits = [] }) {
@@ -193,7 +244,7 @@ function sessionNote({ cardMode, textDrafts, reader, repositories = false, handE
     lines.push(
       textDrafts
         ? REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS
-        : `Read a code repository with the \`${LIST_REPOSITORY_TOOL_NAME}\`, \`${SEARCH_REPOSITORY_TOOL_NAME}\` and \`${READ_REPOSITORY_TOOL_NAME}\` tools before you draft from it; you may call them several times in one reply.`
+        : `Read a code repository with the \`${FIND_REPOSITORY_TOOL_NAME}\`, \`${SEARCH_REPOSITORY_TOOL_NAME}\`, \`${LIST_REPOSITORY_TOOL_NAME}\` and \`${READ_REPOSITORY_TOOL_NAME}\` tools before you draft from it; you may call them several times in one reply. A search covers every file and its results are paged: ask for the next page when you need more.`
     )
   }
   if (handEdits.length) {
@@ -419,6 +470,7 @@ export function compactConversation(messages, { summary = '', drafts = [] } = {}
  */
 export function createInterviewSession(config = {}) {
   let { providerId, getContext, handlers = {}, fetchImpl, origin, onChange } = config
+  const clock = config.clock ?? (() => Date.now()) // #341: when a request went, for the status line's seconds count
   // #288: what the decisions log is to hold, collected as the interview goes and handed to the stage Save (`decisionsDelta`).
   const log = createSessionLog({ now: config.now, newSessionId: config.newSessionId, who: () => getContext?.()?.actor ?? '' })
   const state = {
@@ -452,6 +504,17 @@ export function createInterviewSession(config = {}) {
     compactOffer: null, // #329: { before, after, window }: the card offering to compact, shown at the end of a turn past about 60% of the window
     compactPending: false, // #329: Compact now was asked for while a round was open or the AI was busy: it is done before the next request
     compacting: false, // #329: the AI is writing its summary and the conversation is being started afresh
+    // #338: { source, title, receivedBytes } while a repository tool call waits for the Gantry server to download its copy of that
+    // repository ("Preparing <title>… N MB" in the thread); null otherwise.
+    preparingRepository: null,
+    // #341: what the status line is made from, besides the above. `waiting`: { since, without } from the moment a request goes to the AI
+    // until the first of its answer arrives (`without` names the sampling settings a refused call is going again without). `writing`: the
+    // answer is arriving. `tool`: the read the AI is making ({ kind: reading | searching | finding | listing, title, path, range, query,
+    // pattern }), from when it starts asking for it until the next request goes.
+    waiting: null,
+    writing: false,
+    tool: null,
+    startedOver: false, // #341: Start this stage over was chosen: the next start is a fresh interview, never a resume of the decisions log
   }
   let queuedReview = [] // review cards waiting to join the next round of a session that is going (#303)
   let updateOpening = '' // the opening a normal session gives the AI once its Bring up to date round is answered (#298)
@@ -485,7 +548,11 @@ export function createInterviewSession(config = {}) {
   let announced = '' // what the thread last said about unreadable documents, so a repeat is not said twice
   const attachmentCache = new Map()
 
-  const emit = () => onChange?.(snapshot())
+  let emitted = 0 // #341: how many changes have been told, so an event that told none can still move the status line on
+  const emit = () => {
+    emitted++
+    onChange?.(snapshot())
+  }
   const answeredIds = () => new Set(state.answered.map((a) => a.id))
   const openFields = () => [...new Set([...(state.round?.cards ?? []), ...state.held].map((c) => c.field).filter(Boolean))]
   const snapshot = () => ({
@@ -493,6 +560,9 @@ export function createInterviewSession(config = {}) {
     thread: state.thread.map((t) => ({ ...t })),
     drafts: { ...state.drafts },
     draftingFields: [...state.draftingFields],
+    draftingTitles: state.draftingFields.map((key) => fieldTitle(key)), // #341: for the status line
+    waiting: state.waiting ? { ...state.waiting } : null,
+    tool: state.tool ? { ...state.tool } : null,
     editingFields: [...editing],
     savedKeys: [...state.savedKeys],
     fieldInputs: { ...state.fieldInputs },
@@ -707,11 +777,27 @@ export function createInterviewSession(config = {}) {
   async function runRepository(name, input) {
     const context = getContext()
     const live = (context.sources ?? []).filter((s) => s && !s.removedAt)
+    // #341: the status line says what is searched or read while the call runs.
+    state.tool = toolActivity(name, input)
+    emit()
+    // #338: while the server is still downloading its copy of the repository, the call waits, and the thread says how far it has got.
+    const onPreparing = (entry) => ({ receivedBytes }) => {
+      state.preparingRepository = { source: entry.id, title: entry.title || entry.id, receivedBytes }
+      emit()
+    }
     const reader = (entry) => {
       if (!context.readRepository) throw new Error('Code repositories cannot be read here.')
-      return context.readRepository(entry)
+      return context.readRepository(entry, { onPreparing: onPreparing(entry), signal: controller?.signal })
     }
-    const result = await runRepositoryCall(name, input, { lookup: (wanted) => live.find((s) => s.id === wanted), reader })
+    let result
+    try {
+      result = await runRepositoryCall(name, input, { lookup: (wanted) => live.find((s) => s.id === wanted), reader })
+    } finally {
+      if (state.preparingRepository) {
+        state.preparingRepository = null
+        emit()
+      }
+    }
     if (result.ok) {
       const id = String(input?.id ?? '')
       for (const said of repositoryHiccups) if (said.startsWith(`${id}|`)) repositoryHiccups.delete(said)
@@ -740,17 +826,42 @@ export function createInterviewSession(config = {}) {
     return result
   }
 
+  /**
+   * #338 (docs/adr/0074): starting an interview (or Bring up to date, which starts the same way) asks the Gantry server to start downloading
+   * its copy of each code repository among the Source documents, so the AI's first search rarely waits. Nothing waits on it, and a failure
+   * is ignored: the first read meets it, or the download, as it would have anyway.
+   */
+  function prepareRepositories() {
+    const context = getContext?.()
+    if (!context?.prepareRepository) return
+    for (const source of context.sources ?? []) {
+      if (!source || source.removedAt || !source.repository) continue
+      try {
+        Promise.resolve(context.prepareRepository(source)).catch(() => {})
+      } catch {
+        // as above: nothing waits on it
+      }
+    }
+  }
+
   /** One `read_source_document` call: the text back to the AI, and the read recorded as an input of whatever it drafts next. */
   function runRead(input) {
     const context = getContext()
     const live = (context.sources ?? []).filter((s) => s && !s.removedAt)
     const id = String(input?.id ?? '')
     // #319: a model without tools reads a code repository in the same read blocks: a `path` to read, a folder to `list`, or text to `search`.
+    // #338: or files to `find` by name; with a find or a search, `path` is the folder to look under. The options are the tools' own.
     if (live.some((s) => s.id === id && s.repository)) {
-      if (typeof input?.search === 'string') return runRepository(SEARCH_REPOSITORY_TOOL_NAME, { id, query: input.search })
-      if (typeof input?.path === 'string') return runRepository(READ_REPOSITORY_TOOL_NAME, { id, path: input.path, range: input.range })
-      return runRepository(LIST_REPOSITORY_TOOL_NAME, { id, path: input?.list ?? '' })
+      const { page, commit } = input ?? {}
+      if (typeof input?.find === 'string') return runRepository(FIND_REPOSITORY_TOOL_NAME, { id, pattern: input.find, path: input.path, page, commit })
+      if (typeof input?.search === 'string') {
+        const { regex, fileTypes, context, filesOnly } = input
+        return runRepository(SEARCH_REPOSITORY_TOOL_NAME, { id, query: input.search, path: input.path, regex, fileTypes, context, filesOnly, page, commit })
+      }
+      if (typeof input?.path === 'string') return runRepository(READ_REPOSITORY_TOOL_NAME, { id, path: input.path, range: input.range, lines: input.lines })
+      return runRepository(LIST_REPOSITORY_TOOL_NAME, { id, path: input?.list ?? '', page, commit })
     }
+    state.tool = toolActivity(READ_TOOL_NAME, input) // #341: shown until the next request goes
     const result = runReadCall({ id, range: input?.range }, { lookup: (wanted) => live.find((s) => s.id === wanted), access: plan.get(id) })
     if (result.ok) {
       readsSinceDraft.push(result.read)
@@ -1269,7 +1380,61 @@ export function createInterviewSession(config = {}) {
     state.draftingFields = []
   }
 
+  // #341: the reads the status line names, and what each says; a call's arguments arrive in pieces, so what is known so far is read from them.
+  const READ_TOOLS = [READ_TOOL_NAME, ...REPOSITORY_TOOL_NAMES]
+  const TOOL_KINDS = { [SEARCH_REPOSITORY_TOOL_NAME]: 'searching', [FIND_REPOSITORY_TOOL_NAME]: 'finding', [LIST_REPOSITORY_TOOL_NAME]: 'listing' }
+  function toolActivity(name, input = {}) {
+    const id = typeof input?.id === 'string' ? input.id : ''
+    const source = id ? (getContext?.()?.sources ?? []).find((s) => s && s.id === id) : null
+    const text = (v) => (typeof v === 'string' && v ? v : undefined)
+    const activity = { kind: TOOL_KINDS[name] ?? 'reading', title: source ? source.title || source.id : null }
+    for (const [key, value] of Object.entries({ path: text(input?.path ?? input?.list), range: text(input?.range), query: text(input?.query ?? input?.search), pattern: text(input?.pattern ?? input?.find) })) {
+      if (value !== undefined) activity[key] = value
+    }
+    // A repository read through the reader tool (a model without tools) is a find, a search or a list by its arguments.
+    if (name === READ_TOOL_NAME && source?.repository) activity.kind = activity.pattern ? 'finding' : activity.query ? 'searching' : typeof input?.path === 'string' ? 'reading' : 'listing'
+    return activity
+  }
+  const partialArguments = (partial) => {
+    const found = {}
+    for (const m of String(partial ?? '').matchAll(/"(id|path|range|query|pattern)"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
+      try {
+        found[m[1]] = JSON.parse(`"${m[2]}"`)
+      } catch {
+        // not complete yet
+      }
+    }
+    return found
+  }
+  // #341: any event of the stream is the first of the answer having arrived: the line moves on from Waiting for the AI, with the change the
+  // event itself makes (a draft starting says Drafting, not Writing first), or on its own when the event changes nothing else.
   function onEvent(event) {
+    if (event.type === 'sampling-retry' || event.type === 'retry') return handleEvent(event)
+    const wasWaiting = Boolean(state.waiting)
+    state.waiting = null
+    state.writing = true
+    const before = emitted
+    try {
+      handleEvent(event)
+    } finally {
+      if (wasWaiting && emitted === before) emit()
+    }
+  }
+
+  function handleEvent(event) {
+    if (event.type === 'sampling-retry') {
+      // #341: the model refused a sampling setting; the call goes again without it, and the line says so while it waits.
+      state.waiting = { since: clock(), without: event.without }
+      emit()
+      return
+    }
+    if (event.type === 'retry') {
+      // An invalid card went back to the model: a new request, waiting again.
+      state.waiting = { since: clock(), without: null }
+      state.writing = false
+      emit()
+      return
+    }
     if (event.type === 'text') {
       textDraftFields = [...String(event.text ?? '').matchAll(DRAFT_BLOCK)].map((m) => m[1].match(FIELD_IN_PARTIAL)?.[1]).filter(Boolean)
       setDraftingFields()
@@ -1287,9 +1452,21 @@ export function createInterviewSession(config = {}) {
     } else if (event.type === 'tool-start') {
       if (event.name === DRAFT_TOOL_NAME) {
         state.drafting = true
+        state.tool = null // the AI has moved on from its reads to drafting
+        emit()
+      } else if (READ_TOOLS.includes(event.name)) {
+        state.tool = toolActivity(event.name)
         emit()
       }
     } else if (event.type === 'tool-progress') {
+      if (READ_TOOLS.includes(event.name)) {
+        const next = toolActivity(event.name, partialArguments(event.partial))
+        if (JSON.stringify(next) !== JSON.stringify(state.tool)) {
+          state.tool = next
+          emit()
+        }
+        return
+      }
       if (event.name !== DRAFT_TOOL_NAME) return
       const field = String(event.partial ?? '').match(FIELD_IN_PARTIAL)?.[1]
       if (field && draftingByCall.get(event.id) !== field) {
@@ -1479,6 +1656,10 @@ export function createInterviewSession(config = {}) {
     state.error = null
     state.preparing = false
     state.compactOffer = null
+    // #341: from the moment the architect's turn ends, the line says Waiting for the AI; the seconds count runs on into the first request.
+    let carried = { since: clock(), without: null }
+    state.waiting = carried
+    state.writing = false
     controller = new AbortController()
     emit()
     let incoming = []
@@ -1499,9 +1680,16 @@ export function createInterviewSession(config = {}) {
             const { system, cachePrefix, tools, withAttachments, knownSources } = await prepare(provider)
             lastSystem = system
             const history = withAttachments(textDrafts ? flattenToolHistory(messages) : messages)
+            // #341: the request goes: the line says Waiting for the AI, with the seconds, until the first of the answer arrives.
+            state.waiting = carried ?? { since: clock(), without: null }
+            carried = null
+            state.writing = false
+            state.tool = null
+            emit()
             return runTurn(provider, { system, cachePrefix, messages: history, tools, knownSources, askCards: state.cardMode !== 'chat' }, { fetchImpl, origin, signal: controller.signal, onEvent, toolProgress: true })
           }, handlers)
         )
+        state.waiting = null // a reply that sent nothing at all has still ended
         const provider = getAiProvider(state.providerId)
         countUsage(provider, result.usage)
         lastInput = result.usage.inputTokens
@@ -1610,6 +1798,9 @@ export function createInterviewSession(config = {}) {
       live = null
       stopDrafting()
       state.preparing = false
+      state.waiting = null
+      state.writing = false
+      state.tool = null
       for (const t of state.thread) if (t.streaming) t.streaming = false
       emit()
     }
@@ -1788,6 +1979,7 @@ ${reviewAnswers.text}` : '',
         emit()
         return
       }
+      prepareRepositories()
       state.phase = 'testing'
       emit()
       try {
@@ -1860,7 +2052,8 @@ ${reviewAnswers.text}` : '',
       const upd = getContext().update
       const updating = Boolean(upd?.items?.length)
       const updateOnly = updating && upd.mode === 'only'
-      if (resume?.resuming && !updateOnly) {
+      // #341: after Start this stage over the interview starts afresh, as the kickoff said (Start interview, not Resume interview).
+      if (resume?.resuming && !updateOnly && !state.startedOver) {
         // #290: carrying on from the decisions log. The AI is given the log and the saved content (both are in its brief), not the old
         // conversation, and opens with the recap Gantry worked out.
         if (resume.adopt) log.adopt(resume.adopt)
@@ -2265,6 +2458,10 @@ ${reviewAnswers.text}` : '',
         kickoffError: null,
         drafting: null,
         preparing: false,
+        preparingRepository: null,
+        waiting: null,
+        writing: false,
+        tool: null,
       })
       messages = saved.messages ?? []
       lastInput = saved.compaction?.lastInput ?? 0
@@ -2349,6 +2546,7 @@ ${reviewAnswers.text}` : '',
       controller?.abort()
       log.addRestart()
       state.resumed = null
+      state.startedOver = true
       messages = []
       lastInput = 0
       askAgainAt = 0

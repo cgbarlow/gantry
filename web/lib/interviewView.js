@@ -15,7 +15,7 @@ import { aiProviders, defaultAiProvider, updateAiProvider } from './aiProviders.
 import { AiProviderDialog, AiRecoveryPrompt } from './aiProvidersView.js'
 import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
 import { repositoryReaderFor } from './sourceRepositoryClient.js'
-import { createInterviewSession } from './interviewSession.js'
+import { createInterviewSession, statusLine } from './interviewSession.js'
 import { stageReadiness } from './interviewReadiness.js'
 import { PAGE_SIZE, isAnswered, pageCards, pageCount } from './interviewRounds.js'
 import { loadInterviewSkillsInBrowser } from './interviewSkills.js'
@@ -548,8 +548,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           instructionsVersion: `${setup.definition.id ?? instance.definition}@${instance.definitionVersion ?? setup.structure.version ?? 1}`,
           // #292: a picture, or a scanned or "Read visually" PDF, is sent as the original; the session reads it when it builds a request.
           readOriginal: async (id) => (await store.readOriginal(id)).bytes ?? null,
-          // #319: a code repository is read live by the Gantry server, with the architect's own token for it.
-          readRepository: (entry) => repositoryReaderFor(entry.repository),
+          // #319: a code repository is read live by the Gantry server, with the architect's own token for it. #338: a call waits while
+          // the server downloads its copy, telling the session how far it has got (`how`: { onPreparing, signal }).
+          readRepository: (entry, how) => repositoryReaderFor(entry.repository, how),
+          // #338: starting the interview (or Bring up to date) starts that download, so the AI's first search rarely waits.
+          prepareRepository: (entry) => repositoryReaderFor(entry.repository).prepare(),
         }
       : null
 
@@ -652,9 +655,24 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const phase = snap?.phase ?? 'kickoff'
   // #290: opening the page on a Stage whose decisions log has entries is a resume: Start becomes Resume and the recap shows before it.
   const resumeNow = setup.status === 'ready' && phase === 'kickoff' ? ctxRef.current?.resume : null
-  const resuming = resumeNow?.resuming ? resumeNow : null
+  // #341: after Start this stage over the next start is a fresh interview (the session doesn't resume it), so the kickoff says Start interview.
+  const resuming = resumeNow?.resuming && !snap?.startedOver ? resumeNow : null
   const started = phase !== 'kickoff' && phase !== 'testing'
   const busy = phase === 'working' || phase === 'testing'
+  // #341: the one status line at the bottom of the thread, the whole time the AI is busy. While it waits for the first of an answer its
+  // seconds count goes up, so the page is drawn again every second.
+  const status = started ? statusLine(snap, Date.now()) : null
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!status?.ticking) return
+    const timer = setInterval(() => setTick((n) => n + 1), 1000)
+    return () => clearInterval(timer)
+  }, [status?.ticking, status?.kind])
+  // #341: Start this stage over asks beside its button, and the question takes the focus, so the click shows where the architect is looking.
+  const restartYes = useRef(null)
+  useEffect(() => {
+    if (confirmRestart) restartYes.current?.focus()
+  }, [confirmRestart])
   // Once the interview has started the box has done its job, so the next kickoff (Start this stage over included) has it blank.
   useEffect(() => {
     if (started) setOpening('')
@@ -1674,10 +1692,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       </p>
       ${started && !blockedReason
         ? confirmRestart
-          ? html`<div class="dl-restart" data-testid="interview-restart-confirm" role="alert">
-              <p class="kick-note">Start over: the AI ignores every earlier answer from now on. Saved content is not touched, and the log keeps what was said before.</p>
-              <button type="button" class="btn small" data-testid="interview-restart-yes" onClick=${() => { sessionRef.current?.startOver(); clearRun(instance.slug); startedOver.current = true; setOpening(''); setConfirmRestart(false); setSaving(null) }}>Start this stage over</button>
-              <button type="button" class="btn small ghost" onClick=${() => setConfirmRestart(false)}>Keep going</button>
+          ? html`<div class="dl-restart" data-testid="interview-restart-confirm" role="group" aria-labelledby="interview-restart-question">
+              <p class="kick-note" id="interview-restart-question">Start over: the AI ignores every earlier answer from now on. Saved content is not touched, and the log keeps what was said before.</p>
+              <button type="button" class="btn small" data-testid="interview-restart-yes" ref=${restartYes} onClick=${() => { sessionRef.current?.startOver(); clearRun(instance.slug); startedOver.current = true; setOpening(''); setConfirmRestart(false); setSaving(null) }}>Start this stage over</button>
+              <button type="button" class="btn small ghost" data-testid="interview-restart-no" onClick=${() => setConfirmRestart(false)}>Keep going</button>
             </div>`
           : html`<button type="button" class="btn small ghost dl-restart" data-testid="interview-restart" disabled=${busy} onClick=${() => setConfirmRestart(true)}>Start this stage over</button>`
         : null}
@@ -2301,9 +2319,15 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                   <span class="muted"> or switch AI Provider above.</span>
                 </div>`
               : null}
-            ${busy && started && snap?.preparing ? html`<p class="msg sys" data-testid="interview-preparing">Preparing questions<span class="caret"></span></p>` : null}
-            ${busy && started && snap?.compacting ? html`<p class="msg sys" data-testid="interview-compacting">Compacting the conversation<span class="caret"></span></p>` : null}
-            ${busy && started && !snap?.drafting && !snap?.preparing && !snap?.compacting && !(snap.thread[snap.thread.length - 1]?.streaming) ? html`<p class="msg sys" data-testid="interview-working">Working<span class="caret"></span></p>` : null}
+            ${started
+              ? html`<div class="interview-status" role="status" aria-live="polite" aria-atomic="false">
+                  ${status
+                    ? html`<p class="msg sys" data-testid="interview-status" data-activity=${status.kind}>
+                        <span data-testid="interview-status-text">${status.text}</span>${status.detail ? html` <span class="status-detail" data-testid="interview-status-detail" aria-hidden="true">${status.detail}</span>` : null}<span class="caret"></span>
+                      </p>`
+                    : null}
+                </div>`
+              : null}
             ${reopening.message && !update ? html`<p class="inline-error" role="alert" data-testid="interview-reopen-error">${reopening.message}</p>` : null}
             ${reopening.stageId && !update ? html`<p class="msg sys" data-testid="interview-reopening" role="status">Re-opening ${stageTitleOf(reopening.stageId)}…</p>` : null}
             ${stageEnd()}

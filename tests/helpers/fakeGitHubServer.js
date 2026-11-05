@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { sendArchive, zipOfFiles } from './fakeArchive.js'
 
 /**
  * A minimal in-process fake of the GitHub REST API, standing in for a real `api.github.com` (or
@@ -98,6 +99,17 @@ export function createFakeGitHubServer({
   // `contentRequests`, when an array, gets each file read's path the moment it arrives, so a test can see how many were asked for, and when.
   contentDelayMs = 0,
   contentRequests,
+  // #338: when true, the repository at a commit comes as one zip archive, as on the real service: `GET .../zipball/{ref}` redirects to
+  // `/codeload/...` (codeload.github.com's shape, on this same stand-in). `archiveLog`, when an array, gets each archive's ref as it is
+  // made; `archiveDelayMs` spreads its answer over that long; `archiveExtra` adds entries as they are (a submodule's empty folder, say).
+  archives = false,
+  archiveLog,
+  archiveDelayMs = 0,
+  archiveExtra = {},
+  // #338: a token that can see the repository's metadata and nothing else: a fine-grained token or GitHub App with only "Metadata: read".
+  // It is answered GET /repos/{owner}/{repo} as any valid token is, and 403 "Resource not accessible" for its contents, refs, trees and
+  // archives, as on the real service.
+  metadataOnlyPat = null,
 } = {}) {
   const issues = new Map() // number -> issue object
   let apiRequestCount = 0
@@ -205,6 +217,16 @@ export function createFakeGitHubServer({
       res.end(content)
       return
     }
+    // #338: codeload's shape, `/codeload/{owner}/{repo}/legacy.zip/{ref}`, where a zipball request is sent. The address carries its own
+    // token on the real service, so it takes no credential.
+    const codeloadPrefix = `/codeload/${owner}/${repository}/legacy.zip/`
+    if (archives && req.method === 'GET' && pathname.startsWith(codeloadPrefix)) {
+      const ref = pathname.slice(codeloadPrefix.length)
+      const store = branches.get(ref) ?? (commits.get(ref) ? trees.get(commits.get(ref).treeSha) : undefined)
+      if (!store || url.searchParams.get('token') !== 'fake-codeload-token') return json(404, { message: 'Not Found (fake codeload)' })
+      archiveLog?.push(ref)
+      return sendArchive(res, zipOfFiles(store, { top: `${owner}-${repository}-${ref.slice(0, 7)}`, extra: archiveExtra }), { delayMs: archiveDelayMs })
+    }
     apiLog?.push(`${req.method} ${pathname}`)
     if (apiRequestLimit !== null && (apiRequestCount += 1) > apiRequestLimit) {
       res.writeHead(403, { 'Content-Type': 'application/json', 'x-ratelimit-limit': '60', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(rateLimitResetEpoch) })
@@ -216,6 +238,10 @@ export function createFakeGitHubServer({
     const [, providedPat] = auth.match(/^Bearer (.+)$/) ?? []
     const validPats = Array.isArray(validPat) ? validPat : [validPat]
     const anonymousGet = anonymousRead && req.method === 'GET' && !req.headers['authorization']
+    if (metadataOnlyPat && providedPat === metadataOnlyPat) {
+      if (req.method === 'GET' && pathname === repoBasePath) return json(200, { id: 1, name: repository, full_name: `${owner}/${repository}`, owner: { login: owner, type: ownerType }, default_branch: 'main' })
+      return json(403, { message: 'Resource not accessible by personal access token (fake: metadata only)' })
+    }
     if (!anonymousGet && !validPats.includes(providedPat)) {
       return json(401, { message: 'Bad credentials (fake server: invalid or missing PAT)' })
     }
@@ -263,6 +289,13 @@ export function createFakeGitHubServer({
         return json(404, { message: `Not Found (fake: "${owner}" is not an organization)` })
       }
       return json(200, orgMembers.map(({ login, id }) => ({ login, id })))
+    }
+
+    // #338: GET /repos/{owner}/{repo}/zipball/{ref} — the repository at a ref as one zip archive, by a redirect to codeload.
+    const zipballMatch = archives && req.method === 'GET' && pathname.match(new RegExp(`^${repoBasePath}/zipball/(.+)$`))
+    if (zipballMatch) {
+      res.writeHead(302, { Location: `/codeload/${owner}/${repository}/legacy.zip/${encodeURIComponent(zipballMatch[1])}?token=fake-codeload-token` })
+      return res.end()
     }
 
     // #325: GET /repos/{owner}/{repo}/git/trees/{ref}?recursive=1 — every file and folder at a branch or commit, in one answer.

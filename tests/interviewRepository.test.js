@@ -118,7 +118,7 @@ test('the AI lists, searches and reads a repository through tools, skipped paths
   await session.start()
 
   const first = ai.calls[0].body
-  assert.deepEqual(first.tools.map((t) => t.name), ['ask_architect', 'draft_field', 'log_decision', 'list_repository_folder', 'search_repository', 'read_repository_file'])
+  assert.deepEqual(first.tools.map((t) => t.name), ['ask_architect', 'draft_field', 'log_decision', 'find_repository_files', 'search_repository', 'list_repository_folder', 'read_repository_file'])
   assert.match(first.system, /One Source document is a code repository, read live from its Provider at its branch\. Nothing of it is shown here\./)
   assert.doesNotMatch(first.system, /MAX_ORDER_NZD/, 'nothing from the repository is pasted into the prompt up front')
 
@@ -305,8 +305,159 @@ describe('a repository read cut off on its way from the Gantry server', () => {
     assert.match(lines[0].text, /Reading a code repository needs the Gantry server, which can't be reached right now\./)
   })
 
+  // #338 (docs/adr/0074): a copy still downloading is answered "preparing" (202); the browser asks again every few seconds until it is
+  // ready, saying how far it has got, so the AI's tool call simply resolves with the result.
+  test('a copy still downloading: the browser asks again until it is ready, reporting what has been received, and stops when the call is abandoned', async () => {
+    const asked = []
+    let preparing = 2
+    const fetchImpl = async (_url, init) => {
+      const body = JSON.parse(init.body)
+      asked.push(body)
+      if (preparing-- > 0) return answer(202, { preparing: true, commit: HEAD, receivedBytes: (2 - preparing) * 1024 * 1024, repository: 'acme/billing-api' })
+      return answer(200, { commit: HEAD, query: body.query, matches: [], filesSearched: 3, truncated: false, totalMatches: 0, totalFiles: 0, page: 1, pageSize: 50, total: 0, pages: 0 })
+    }
+    const progress = []
+    const reader = repositoryReaderFor(repository, { fetchImpl, token: null, retryWaitMs: 0, pollMs: 0, onPreparing: (p) => progress.push(p) })
+    const found = await reader.search({ query: 'MAX_ORDER', regex: true, fileTypes: ['ts'], context: 2, filesOnly: false, page: 1 })
+    assert.equal(found.totalMatches, 0)
+    assert.equal(asked.length, 3, 'asked again until the copy was ready')
+    assert.deepEqual(progress.map((p) => p.receivedBytes), [1024 * 1024, 2 * 1024 * 1024])
+    assert.deepEqual(asked[0], { action: 'search', repository, query: 'MAX_ORDER', regex: true, fileTypes: ['ts'], context: 2, filesOnly: false, page: 1 })
+    // Asked again at the commit the server is preparing, so a branch that moves meanwhile can't start a second download.
+    assert.deepEqual(asked.slice(1).map((body) => body.commit), [HEAD, HEAD])
+    assert.deepEqual(asked[1], { ...asked[0], commit: HEAD })
+
+    // Abandoned (the architect stopped the turn): no further request is made.
+    const stop = new AbortController()
+    let calls = 0
+    const forever = async () => (calls++, answer(202, { preparing: true, commit: HEAD, receivedBytes: 0, repository: 'acme/billing-api' }))
+    const waiting = repositoryReaderFor(repository, { fetchImpl: forever, token: null, retryWaitMs: 0, pollMs: 20 }).find({ pattern: '**/*.tf' }, { signal: stop.signal })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    stop.abort()
+    await assert.rejects(waiting, (err) => err.code === 'abandoned')
+    const after = calls
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    assert.equal(calls, after, 'nothing more is asked once abandoned')
+  })
+
+  test('the reader asks for find, prepare, a paged list and a line-range read with what the server takes', async () => {
+    const asked = []
+    const fetchImpl = async (_url, init) => (asked.push(JSON.parse(init.body)), answer(200, { commit: HEAD }))
+    const reader = repositoryReaderFor(repository, { fetchImpl, token: null, retryWaitMs: 0 })
+    await reader.find({ pattern: '**/*.tf', path: 'infra', page: 2, commit: HEAD })
+    await reader.prepare()
+    await reader.list({ path: 'src', page: 3 })
+    await reader.read({ path: 'src/a.ts', lines: '10-20' })
+    await reader.search({ query: 'retry', page: 2, commit: HEAD })
+    assert.deepEqual(asked, [
+      { action: 'find', repository, pattern: '**/*.tf', path: 'infra', page: 2, commit: HEAD },
+      { action: 'prepare', repository },
+      { action: 'list', repository, path: 'src', page: 3 },
+      { action: 'read', repository, path: 'src/a.ts', lines: '10-20' },
+      { action: 'search', repository, query: 'retry', page: 2, commit: HEAD },
+    ])
+  })
+
   test('cut off and timed-out reads never block a repository; definite answers do', () => {
     for (const code of ['cut-off', 'timed-out', 'unreachable']) assert.ok(!REPOSITORY_BLOCKED_CODES.includes(code), code)
     for (const code of ['no-access', 'rate-limited', 'no-branch', 'base-url-not-allowed', 'server-unreachable']) assert.ok(REPOSITORY_BLOCKED_CODES.includes(code), code)
+  })
+})
+
+// #338 (docs/adr/0074): the AI's call waits while the Gantry server downloads its copy of the repository, and the thread says so; starting
+// the interview starts that download.
+describe('a repository copy that is preparing, in an interview', () => {
+  const repository = { provider: 'github', location: { owner: 'acme', repository: 'billing-api' }, branch: 'main' }
+  const contextWith = (extra) => ({
+    definition: definition(),
+    stageId: 'shape',
+    artefactId: 'light',
+    size: 'medium',
+    saved: [{ id: 'details', status: 'draft', fields: [{ id: 'summary', value: '' }] }],
+    sources: [
+      { id: 'billing-api', title: 'Billing API', uploadedAt: '2026-11-01T00:00:00.000Z', repository },
+      { id: 'old-api', title: 'Old API', uploadedAt: '2026-10-01T00:00:00.000Z', removedAt: '2026-10-02T00:00:00.000Z', repository },
+    ],
+    skills,
+    ...extra,
+  })
+  const anthropicProvider = () => {
+    const p = providers.addAiProvider({ name: 'Work Anthropic', type: 'anthropic', address: 'https://api.anthropic.com', key: 'sk-ant-1', model: 'claude-x' })
+    providers.setAiProviderTest(p.id, { status: 'passed', testedAt: 'now', questionCards: 'native', readsImages: false, steps: [], message: 'ok' }, null)
+    return p
+  }
+
+  test('while a search waits on the download, the session says "Preparing Billing API… N MB"; once answered, it says nothing', async () => {
+    const { preparingRepositoryLine } = await import('../web/lib/interviewSession.js')
+    const p = anthropicProvider()
+    const ai = fakeAi((_request, n) => (n === 0 ? anthropicReply({ tools: [{ id: 's1', name: 'search_repository', input: { id: 'billing-api', query: 'MAX_ORDER' } }] }) : anthropicReply({ text: 'Done.' })))
+    const seen = []
+    let session
+    const readRepository = (entry, how) => ({
+      search: async ({ query }) => {
+        assert.equal(typeof how?.onPreparing, 'function', 'the session hears how the download is going')
+        assert.ok(how.signal instanceof AbortSignal, 'and the call is stopped with the turn')
+        how.onPreparing({ receivedBytes: 3 * 1024 * 1024 })
+        seen.push(session.snapshot().preparingRepository)
+        how.onPreparing({ receivedBytes: 12.4 * 1024 * 1024 })
+        seen.push(session.snapshot().preparingRepository)
+        return { commit: HEAD, query, matches: [], filesSearched: 3, truncated: false, totalMatches: 0, totalFiles: 0, page: 1, pageSize: 50, total: 0, pages: 0 }
+      },
+    })
+    session = createInterviewSession({ providerId: p.id, getContext: () => contextWith({ readRepository }), fetchImpl: ai.fetchImpl })
+    await session.start()
+    assert.deepEqual(seen, [{ source: 'billing-api', title: 'Billing API', receivedBytes: 3 * 1024 * 1024 }, { source: 'billing-api', title: 'Billing API', receivedBytes: 12.4 * 1024 * 1024 }])
+    assert.equal(preparingRepositoryLine(seen[1]), 'Preparing Billing API… 12.4 MB')
+    assert.equal(preparingRepositoryLine({ title: 'Billing API', receivedBytes: 0 }), 'Preparing Billing API…')
+    assert.equal(session.snapshot().preparingRepository, null, 'the call resolved: nothing is preparing')
+    assert.deepEqual(toolResults(ai.calls[1]).map((r) => Boolean(r.is_error)), [false], "the AI's call simply resolved")
+  })
+
+  test('starting the interview asks the server to prepare each repository among the live Source documents, and waits on none', async () => {
+    const p = anthropicProvider()
+    const ai = fakeAi(() => anthropicReply({ text: 'Hello.' }))
+    const prepared = []
+    const prepareRepository = (entry) => {
+      prepared.push(entry.id)
+      return new Promise(() => {}) // never settles: nothing waits on it
+    }
+    const session = createInterviewSession({ providerId: p.id, getContext: () => contextWith({ prepareRepository, readRepository: () => ({}) }), fetchImpl: ai.fetchImpl })
+    await session.start()
+    assert.deepEqual(prepared, ['billing-api'], 'the removed one is left alone')
+
+    // A server that refuses changes nothing for the interview.
+    const refusing = createInterviewSession({ providerId: p.id, getContext: () => contextWith({ prepareRepository: () => Promise.reject(new Error('no server')), readRepository: () => ({}) }), fetchImpl: fakeAi(() => anthropicReply({ text: 'Hello.' })).fetchImpl })
+    await refusing.start()
+    assert.equal(refusing.snapshot().phase === 'error', false)
+  })
+
+  test('a model without tools finds, searches with options, lists a page and reads lines in read blocks', async () => {
+    const p = providers.addAiProvider({ name: 'Local', type: 'custom', address: 'https://models.example/v1', key: 'k', model: 'small' })
+    providers.setAiProviderTest(p.id, { status: 'passed', testedAt: 'now', questionCards: 'text', readsImages: false, steps: [], message: 'ok' }, null)
+    const openAiReply = (text) =>
+      new Response(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+    const blocks = [
+      { id: 'billing-api', find: '**/*.tf', page: 2, commit: HEAD },
+      { id: 'billing-api', search: 'retry\\w*', regex: true, path: 'src', fileTypes: ['ts'], context: 2, filesOnly: true, page: 3, commit: HEAD },
+      { id: 'billing-api', list: 'src', page: 2, commit: HEAD },
+      { id: 'billing-api', path: 'src/a.ts', lines: '10-20' },
+    ]
+    const ai = fakeAi((_request, n) => (n === 0 ? openAiReply('Reading.\n\n```gantry-read\n' + JSON.stringify(blocks) + '\n```') : openAiReply('Done.')))
+    const asked = []
+    const readRepository = () => ({
+      find: async (o) => (asked.push(['find', o]), { commit: HEAD, pattern: o.pattern, path: '', paths: ['infra/main.tf'], page: 2, pageSize: 200, total: 201, pages: 2 }),
+      search: async (o) => (asked.push(['search', o]), { commit: HEAD, query: o.query, matches: [], filesSearched: 1, truncated: false, totalMatches: 0, totalFiles: 0, page: 3, pageSize: 200, total: 0, pages: 0 }),
+      list: async (o) => (asked.push(['list', o]), { commit: HEAD, path: 'src', entries: [] }),
+      read: async (o) => (asked.push(['read', o]), { commit: HEAD, path: o.path, text: 'ten', lines: { from: 10, to: 10, total: 10 } }),
+    })
+    const session = createInterviewSession({ providerId: p.id, getContext: () => contextWith({ readRepository }), fetchImpl: ai.fetchImpl })
+    await session.start()
+    assert.match(ai.calls[0].body.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n'), /"find":"\*\*\/\*\.tf"/, 'the model is told how to find')
+    assert.deepEqual(asked, [
+      ['find', { pattern: '**/*.tf', path: undefined, page: 2, commit: HEAD }],
+      ['search', { query: 'retry\\w*', path: 'src', regex: true, fileTypes: ['ts'], context: 2, filesOnly: true, page: 3, commit: HEAD }],
+      ['list', { path: 'src', page: 2, commit: HEAD }],
+      ['read', { path: 'src/a.ts', lines: '10-20' }],
+    ])
   })
 })

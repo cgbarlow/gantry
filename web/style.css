@@ -2224,6 +2224,7 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-page .msg.you { background: var(--text); color: var(--bg); margin-left: 15%; }
 .interview-page .msg.sys { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); padding: 2px 0; }
 .interview-page .caret::after { content: '▍'; animation: interview-blink 1s steps(1) infinite; }
+.interview-page .status-detail { font-variant-numeric: tabular-nums; }
 @keyframes interview-blink { 50% { opacity: 0; } }
 .interview-page .kick { max-width: 460px; }
 .interview-page .kick label { display: block; font-size: 12px; font-weight: 600; margin: 12px 0 4px; }

@@ -117,6 +117,32 @@ test('start_interview_session hands back a session to pass on, the brief, and wr
   )
 })
 
+// #338 (docs/adr/0074): as in the browser, starting a session starts gantry serve downloading its copy of each code repository, and waits on none.
+test('start_interview_session asks gantry serve to prepare each code repository the brief lists, without waiting for it', async () => {
+  const pointer = { provider: 'github', location: { owner: 'acme', repository: 'billing-api' }, branch: 'main' }
+  let answerPrepare
+  const prepareAnswered = new Promise((resolve) => (answerPrepare = resolve))
+  await withClient(
+    ({ url, body }) => {
+      if (url.pathname === '/api/instance') return { status: 200, body: INSTANCE }
+      if (url.pathname === '/api/instance/interview-brief') return { status: 200, body: { ...BRIEF, sources: { mode: 'none', repositories: ['billing-api'] } } }
+      if (url.pathname === '/api/instance/sources') return { status: 200, body: { entries: [{ id: 'billing-api', title: 'Billing API', repository: pointer }, { id: 'gone', title: 'Gone', removedAt: 'x', repository: pointer }, { id: 'brief', title: 'Brief', filename: 'b.md' }] } }
+      if (url.pathname === '/api/sources/repository') {
+        answerPrepare(JSON.parse(body))
+        return { status: 200, body: { commit: 'c0ffee', state: 'preparing', receivedBytes: 0 } }
+      }
+      return undefined
+    },
+    async (gantryClient, fetch) => {
+      const body = payload(await tool('start_interview_session').handler({ slug: 'my-instance' }, { gantryClient }))
+      assert.ok(body.session.id)
+      assert.deepEqual(await prepareAnswered, { action: 'prepare', repository: pointer })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      assert.equal(fetch.calls.filter((c) => c.url.pathname === '/api/sources/repository').length, 1, 'only the live repository')
+    }
+  )
+})
+
 test('start_interview_session refuses a run target that is not a stage, or comes before the stage', async () => {
   await withClient(
     ({ url }) => {
