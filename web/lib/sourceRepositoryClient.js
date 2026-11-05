@@ -30,18 +30,51 @@ export const repositoryToken = (repository) => patForWorkspace(repositoryKey(rep
 export const rememberRepositoryToken = (repository, token) => setPatForWorkspace(repositoryKey(repository), token ?? '')
 
 /**
- * Asks the Gantry server to do `action` (`check`, `list`, `read`, `search` or `compare`) on `repository` with `token` (the architect's own,
- * or null). Resolves the server's answer, or rejects with a `SourceDocumentError` carrying its sentence ("You can't read …").
+ * #338: shown when a Repository copy has been preparing for longer than the browser waits for one (the server gives up on a download well
+ * before this, so it is a last resort). Only this read failed: the next one picks up where the download has got to.
+ */
+export const REPOSITORY_STILL_PREPARING = 'Gantry is still preparing its copy of this code repository. Try again in a moment, or something narrower.'
+
+/** #338: how often the browser asks again while the server says a Repository copy is preparing (202). */
+export const REPOSITORY_POLL_MS = 3000
+/** #338: the longest the browser keeps asking for one call while a copy is preparing. */
+const PREPARING_LIMIT_MS = 10 * 60 * 1000
+
+const abandoned = () => new SourceDocumentError('This read of the code repository was stopped.', { code: 'abandoned', status: 499 })
+
+// Waits `ms`, or rejects as abandoned as soon as `signal` aborts.
+const pause = (ms, signal) =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(abandoned())
+    const done = () => {
+      clearTimeout(timer)
+      reject(abandoned())
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', done)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', done, { once: true })
+  })
+
+/**
+ * Asks the Gantry server to do `action` (`check`, `prepare`, `list`, `read`, `find`, `search` or `compare`) on `repository` with `token`
+ * (the architect's own, or null). Resolves the server's answer, or rejects with a `SourceDocumentError` carrying its sentence ("You can't
+ * read …").
  * #336: a request that is cut off (no answer at all, or a proxy's answer that it gave up) is asked once more, after `retryWaitMs`. Cut off
  * again, it is refused as `cut-off` when the server has answered recently, and as `server-unreachable` (REPOSITORY_NEEDS_SERVER) when not.
+ * #338: while the server answers that its copy of the repository is preparing (202 `{ preparing: true, receivedBytes }`), it is asked
+ * again every `pollMs`, and `onPreparing({ receivedBytes, repository })` hears how far the download has got. `signal` abandons the call:
+ * nothing more is asked and it rejects as `abandoned`.
  */
-export async function callRepository(action, repository, extra = {}, { token = null, fetchImpl = fetch, retryWaitMs = 500 } = {}) {
+export async function callRepository(action, repository, extra = {}, { token = null, fetchImpl = fetch, retryWaitMs = 500, pollMs = REPOSITORY_POLL_MS, onPreparing, signal } = {}) {
   const auth = basicAuthHeaderForValue(token)
   const ask = () =>
     fetchImpl('/api/sources/repository', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) },
       body: JSON.stringify({ action, repository, ...extra }),
+      ...(signal ? { signal } : {}),
     }).then(
       async (res) => {
         const body = await res.json().catch(() => null)
@@ -52,32 +85,60 @@ export async function callRepository(action, repository, extra = {}, { token = n
       },
       () => ({ cutOff: true, answered: false })
     )
-  let answer = await ask()
-  if (answer.cutOff) {
-    await new Promise((resolve) => setTimeout(resolve, retryWaitMs))
-    const again = await ask()
-    answer = again.cutOff ? { ...again, answered: again.answered || answer.answered } : again
+  // One request, asked once more if it is cut off (#336).
+  const askOnce = async () => {
+    let answer = await ask()
+    if (signal?.aborted) throw abandoned()
+    if (answer.cutOff) {
+      await pause(retryWaitMs, signal)
+      const again = await ask()
+      if (signal?.aborted) throw abandoned()
+      answer = again.cutOff ? { ...again, answered: again.answered || answer.answered } : again
+    }
+    if (answer.cutOff) {
+      const recently = answer.answered || Date.now() - (lastAnswered.get(fetchImpl) ?? -Infinity) < RECENT_ANSWER_MS
+      if (recently) throw new SourceDocumentError(REPOSITORY_READ_CUT_OFF, { code: 'cut-off', status: 504 })
+      throw new SourceDocumentError(REPOSITORY_NEEDS_SERVER, { code: 'server-unreachable', status: 503 })
+    }
+    return answer
   }
-  if (answer.cutOff) {
-    const recently = answer.answered || Date.now() - (lastAnswered.get(fetchImpl) ?? -Infinity) < RECENT_ANSWER_MS
-    if (recently) throw new SourceDocumentError(REPOSITORY_READ_CUT_OFF, { code: 'cut-off', status: 504 })
-    throw new SourceDocumentError(REPOSITORY_NEEDS_SERVER, { code: 'server-unreachable', status: 503 })
+  const startedAt = Date.now()
+  for (;;) {
+    if (signal?.aborted) throw abandoned()
+    const { res, body } = await askOnce()
+    if (res.status === 202 && body.preparing) {
+      if (Date.now() - startedAt > PREPARING_LIMIT_MS) throw new SourceDocumentError(REPOSITORY_STILL_PREPARING, { code: 'timed-out', status: 504 })
+      onPreparing?.({ receivedBytes: Number(body.receivedBytes) || 0, repository: body.repository ?? null })
+      await pause(pollMs, signal)
+      continue
+    }
+    if (!res.ok) throw new SourceDocumentError(body.error ?? `Could not read the repository (${res.status}).`, { code: body.code, status: res.status })
+    return body
   }
-  const { res, body } = answer
-  if (!res.ok) throw new SourceDocumentError(body.error ?? `Could not read the repository (${res.status}).`, { code: body.code, status: res.status })
-  return body
 }
 
 /**
- * A reader for one pointer, with the architect's stored token: `{ list({ path, commit }), read({ path, commit }), search({ query, path }),
- * compare(reads) }`. What the AI's tools (web/lib/interviewSources.js) and Out of date (web/lib/outOfDateLoad.js) are given.
+ * A reader for one pointer, with the architect's stored token: `{ prepare(), list({ path, commit, page }), read({ path, commit, lines }),
+ * find({ pattern, path, page }), search({ query, regex, path, fileTypes, context, filesOnly, page }), compare(reads) }`. What the AI's tools
+ * (web/lib/interviewSources.js) and Out of date (web/lib/outOfDateLoad.js) are given. #338: each call waits through "preparing", telling
+ * `onPreparing` (the reader's, or one call's own as its second argument, with that call's `signal`).
  */
-export function repositoryReaderFor(repository, { fetchImpl = fetch, token, retryWaitMs } = {}) {
-  const call = (action, extra) => callRepository(action, repository, extra, { token: token === undefined ? repositoryToken(repository) : token, fetchImpl, retryWaitMs })
+export function repositoryReaderFor(repository, { fetchImpl = fetch, token, retryWaitMs, pollMs, onPreparing, signal } = {}) {
+  const call = (action, extra, own = {}) =>
+    callRepository(action, repository, extra, {
+      token: token === undefined ? repositoryToken(repository) : token,
+      fetchImpl,
+      retryWaitMs,
+      pollMs,
+      onPreparing: own.onPreparing ?? onPreparing,
+      signal: own.signal ?? signal,
+    })
   return {
-    list: ({ path, commit } = {}) => call('list', { path, commit }),
-    read: ({ path, commit } = {}) => call('read', { path, commit }),
-    search: ({ query, path } = {}) => call('search', { query, path }),
-    compare: (reads) => call('compare', { reads }),
+    prepare: ({ commit } = {}, own) => call('prepare', { commit }, own),
+    list: ({ path, commit, page } = {}, own) => call('list', { path, commit, page }, own),
+    read: ({ path, commit, lines } = {}, own) => call('read', { path, commit, lines }, own),
+    find: ({ pattern, path, page } = {}, own) => call('find', { pattern, path, page }, own),
+    search: ({ query, path, regex, fileTypes, context, filesOnly, page } = {}, own) => call('search', { query, regex, path, fileTypes, context, filesOnly, page }, own),
+    compare: (reads, own) => call('compare', { reads }, own),
   }
 }

@@ -76,6 +76,7 @@ import {
   REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS,
   REPOSITORY_TOOLS,
   REPOSITORY_TOOL_NAMES,
+  FIND_REPOSITORY_TOOL_NAME,
   LIST_REPOSITORY_TOOL_NAME,
   READ_REPOSITORY_TOOL_NAME,
   SEARCH_REPOSITORY_TOOL_NAME,
@@ -153,6 +154,15 @@ export function repositoryFailedLine({ title, message }) {
   return `Couldn't read the code repository ${title} just now: ${message} The AI is told, and may try again.`
 }
 
+/**
+ * #338: the thread's line while a repository tool call waits for the Gantry server to download its copy of the repository:
+ * "Preparing Billing API… 12.4 MB". The #341 status line may fold it in; `state.preparingRepository` is what it is made from.
+ */
+export function preparingRepositoryLine({ title, receivedBytes }) {
+  const mb = Number(receivedBytes) > 0 ? ` ${(receivedBytes / (1024 * 1024)).toFixed(1)} MB` : ''
+  return `Preparing ${title}…${mb}`
+}
+
 const LAST_ROUND_NOTE = 'That was the last round. Redraft the Fields these answers feed. Ask nothing more: the architect has chosen to finish.'
 
 function sessionNote({ cardMode, textDrafts, reader, repositories = false, handEdits = [] }) {
@@ -193,7 +203,7 @@ function sessionNote({ cardMode, textDrafts, reader, repositories = false, handE
     lines.push(
       textDrafts
         ? REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS
-        : `Read a code repository with the \`${LIST_REPOSITORY_TOOL_NAME}\`, \`${SEARCH_REPOSITORY_TOOL_NAME}\` and \`${READ_REPOSITORY_TOOL_NAME}\` tools before you draft from it; you may call them several times in one reply.`
+        : `Read a code repository with the \`${FIND_REPOSITORY_TOOL_NAME}\`, \`${SEARCH_REPOSITORY_TOOL_NAME}\`, \`${LIST_REPOSITORY_TOOL_NAME}\` and \`${READ_REPOSITORY_TOOL_NAME}\` tools before you draft from it; you may call them several times in one reply. A search covers every file and its results are paged: ask for the next page when you need more.`
     )
   }
   if (handEdits.length) {
@@ -452,6 +462,9 @@ export function createInterviewSession(config = {}) {
     compactOffer: null, // #329: { before, after, window }: the card offering to compact, shown at the end of a turn past about 60% of the window
     compactPending: false, // #329: Compact now was asked for while a round was open or the AI was busy: it is done before the next request
     compacting: false, // #329: the AI is writing its summary and the conversation is being started afresh
+    // #338: { source, title, receivedBytes } while a repository tool call waits for the Gantry server to download its copy of that
+    // repository ("Preparing <title>… N MB" in the thread); null otherwise.
+    preparingRepository: null,
   }
   let queuedReview = [] // review cards waiting to join the next round of a session that is going (#303)
   let updateOpening = '' // the opening a normal session gives the AI once its Bring up to date round is answered (#298)
@@ -707,11 +720,24 @@ export function createInterviewSession(config = {}) {
   async function runRepository(name, input) {
     const context = getContext()
     const live = (context.sources ?? []).filter((s) => s && !s.removedAt)
+    // #338: while the server is still downloading its copy of the repository, the call waits, and the thread says how far it has got.
+    const onPreparing = (entry) => ({ receivedBytes }) => {
+      state.preparingRepository = { source: entry.id, title: entry.title || entry.id, receivedBytes }
+      emit()
+    }
     const reader = (entry) => {
       if (!context.readRepository) throw new Error('Code repositories cannot be read here.')
-      return context.readRepository(entry)
+      return context.readRepository(entry, { onPreparing: onPreparing(entry), signal: controller?.signal })
     }
-    const result = await runRepositoryCall(name, input, { lookup: (wanted) => live.find((s) => s.id === wanted), reader })
+    let result
+    try {
+      result = await runRepositoryCall(name, input, { lookup: (wanted) => live.find((s) => s.id === wanted), reader })
+    } finally {
+      if (state.preparingRepository) {
+        state.preparingRepository = null
+        emit()
+      }
+    }
     if (result.ok) {
       const id = String(input?.id ?? '')
       for (const said of repositoryHiccups) if (said.startsWith(`${id}|`)) repositoryHiccups.delete(said)
@@ -740,16 +766,40 @@ export function createInterviewSession(config = {}) {
     return result
   }
 
+  /**
+   * #338 (docs/adr/0074): starting an interview (or Bring up to date, which starts the same way) asks the Gantry server to start downloading
+   * its copy of each code repository among the Source documents, so the AI's first search rarely waits. Nothing waits on it, and a failure
+   * is ignored: the first read meets it, or the download, as it would have anyway.
+   */
+  function prepareRepositories() {
+    const context = getContext?.()
+    if (!context?.prepareRepository) return
+    for (const source of context.sources ?? []) {
+      if (!source || source.removedAt || !source.repository) continue
+      try {
+        Promise.resolve(context.prepareRepository(source)).catch(() => {})
+      } catch {
+        // as above: nothing waits on it
+      }
+    }
+  }
+
   /** One `read_source_document` call: the text back to the AI, and the read recorded as an input of whatever it drafts next. */
   function runRead(input) {
     const context = getContext()
     const live = (context.sources ?? []).filter((s) => s && !s.removedAt)
     const id = String(input?.id ?? '')
     // #319: a model without tools reads a code repository in the same read blocks: a `path` to read, a folder to `list`, or text to `search`.
+    // #338: or files to `find` by name; with a find or a search, `path` is the folder to look under. The options are the tools' own.
     if (live.some((s) => s.id === id && s.repository)) {
-      if (typeof input?.search === 'string') return runRepository(SEARCH_REPOSITORY_TOOL_NAME, { id, query: input.search })
-      if (typeof input?.path === 'string') return runRepository(READ_REPOSITORY_TOOL_NAME, { id, path: input.path, range: input.range })
-      return runRepository(LIST_REPOSITORY_TOOL_NAME, { id, path: input?.list ?? '' })
+      const { page } = input ?? {}
+      if (typeof input?.find === 'string') return runRepository(FIND_REPOSITORY_TOOL_NAME, { id, pattern: input.find, path: input.path, page })
+      if (typeof input?.search === 'string') {
+        const { regex, fileTypes, context, filesOnly } = input
+        return runRepository(SEARCH_REPOSITORY_TOOL_NAME, { id, query: input.search, path: input.path, regex, fileTypes, context, filesOnly, page })
+      }
+      if (typeof input?.path === 'string') return runRepository(READ_REPOSITORY_TOOL_NAME, { id, path: input.path, range: input.range, lines: input.lines })
+      return runRepository(LIST_REPOSITORY_TOOL_NAME, { id, path: input?.list ?? '', page })
     }
     const result = runReadCall({ id, range: input?.range }, { lookup: (wanted) => live.find((s) => s.id === wanted), access: plan.get(id) })
     if (result.ok) {
@@ -1788,6 +1838,7 @@ ${reviewAnswers.text}` : '',
         emit()
         return
       }
+      prepareRepositories()
       state.phase = 'testing'
       emit()
       try {
@@ -2265,6 +2316,7 @@ ${reviewAnswers.text}` : '',
         kickoffError: null,
         drafting: null,
         preparing: false,
+        preparingRepository: null,
       })
       messages = saved.messages ?? []
       lastInput = saved.compaction?.lastInput ?? 0

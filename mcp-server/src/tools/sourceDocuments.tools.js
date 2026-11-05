@@ -216,18 +216,49 @@ async function fetchSourceDocumentAgain(args, context) {
 // A code repository is a Source document that points at a Provider repository and branch, read live. gantry serve reads it
 // (POST /api/sources/repository) with the credential this server already holds for the instance's workspace, the same one every other call
 // for it carries; a server workspace has none, so only a public repository can be read there. Nothing of the repository is stored.
+// #338 (docs/adr/0074): gantry serve reads it from a copy of the whole repository at the commit, so a search covers every file and comes
+// back in pages that state the totals. While that copy is downloading it answers "preparing" (202); this server asks again every few
+// seconds, so the agent's tool call simply resolves with the result.
 
 /** One read of a file returns at most this many characters, and says where to carry on. */
 export const REPOSITORY_READ_CHARS = 30000
 
+/** #338: how often a call is asked again while gantry serve says its copy of the repository is preparing. */
+export const REPOSITORY_POLL_MS = 3000
+/** #338: the longest one call keeps asking while a copy is preparing (gantry serve gives up on a download well before this). */
+const REPOSITORY_PREPARING_LIMIT_MS = 10 * 60 * 1000
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 // Calls /api/sources/repository for `repository` with the instance's workspace credential: `{ body }` or `{ result }` (a refusal shaped for return).
-async function callRepositoryRoute(args, { gantryClient }, payload) {
+// #338: asked again every `repositoryPollMs` (the context's, for a test) while gantry serve answers that the copy is still preparing.
+async function callRepositoryRoute(args, { gantryClient, repositoryPollMs = REPOSITORY_POLL_MS }, payload) {
   const resolved = await resolveWorkspaceOrError(args, { gantryClient })
   if (resolved.errorResult) return { result: resolved.errorResult }
-  const res = await gantryClient.request({ workspaceId: resolved.workspaceId, path: '/api/sources/repository', method: 'POST', body: payload })
-  if (res.credentialError) return { result: credentialErrorResult(res.credentialError) }
-  if (!res.ok) return { result: errorResult(res.body?.error ?? `gantry serve responded ${res.status}`, { status: res.status, code: res.body?.code }) }
-  return { body: res.body }
+  const startedAt = Date.now()
+  for (;;) {
+    const res = await gantryClient.request({ workspaceId: resolved.workspaceId, path: '/api/sources/repository', method: 'POST', body: payload })
+    if (res.credentialError) return { result: credentialErrorResult(res.credentialError) }
+    if (!res.ok) return { result: errorResult(res.body?.error ?? `gantry serve responded ${res.status}`, { status: res.status, code: res.body?.code }) }
+    if (res.status === 202 && res.body?.preparing) {
+      if (Date.now() - startedAt > REPOSITORY_PREPARING_LIMIT_MS) {
+        return { result: errorResult('Gantry is still preparing its copy of this code repository. Try again in a moment, or something narrower.', { status: 504, code: 'timed-out' }) }
+      }
+      await pause(repositoryPollMs)
+      continue
+    }
+    return { body: res.body }
+  }
+}
+
+/**
+ * #338: asks gantry serve to start downloading its copy of each code repository among `entries` (an instance's Source documents), and
+ * waits on none of them: an outside agent's interview session starts it as the in-app one does, so the agent's first search rarely waits.
+ * Resolves once every request has been made and answered (a test waits on it; a session does not); a failure is ignored.
+ */
+export function prepareRepositories(args, context, entries) {
+  const repositories = (entries ?? []).filter((entry) => entry?.repository && !entry.removedAt)
+  return Promise.all(repositories.map((entry) => callRepositoryRoute(args, context, { action: 'prepare', repository: entry.repository }).catch(() => null)))
 }
 
 // The repository pointer `id` names, from the instance's list: `{ entry }` or `{ result }`.
@@ -263,13 +294,25 @@ async function addRepositorySourceDocument(args, context) {
     body: { repository, ...(title !== undefined ? { title } : {}), ...(uploadedBy !== undefined ? { uploadedBy } : {}) },
   })
   if (result) return result
-  return okResult({ ...res.body, branch: checked.branch, commit: checked.commit, note: 'Only the pointer is kept: read the repository with list_repository_folder, search_repository and read_repository_file.' })
+  return okResult({ ...res.body, branch: checked.branch, commit: checked.commit, note: 'Only the pointer is kept: read the repository with find_repository_files, search_repository, list_repository_folder and read_repository_file.' })
 }
+
+// #338: what an agent may pass on to gantry serve, as it takes it (page from 1, the rest as the search takes them).
+const pageOf = (args) => (Number.isInteger(args.page) && args.page > 1 ? { page: args.page } : {})
 
 async function listRepositoryFolder(args, context) {
   const { entry, result } = await repositoryEntry(args, context)
   if (result) return result
-  const { body, result: refused } = await callRepositoryRoute(args, context, { action: 'list', repository: entry.repository, path: args.path ?? '' })
+  const { body, result: refused } = await callRepositoryRoute(args, context, { action: 'list', repository: entry.repository, path: args.path ?? '', ...pageOf(args) })
+  if (refused) return refused
+  return okResult({ id: entry.id, title: entry.title, ...body })
+}
+
+async function findRepositoryFiles(args, context) {
+  const { entry, result } = await repositoryEntry(args, context)
+  if (result) return result
+  if (!args.pattern) return errorResult('Provide "pattern" — a name pattern such as **/*.tf or src/**/order*.')
+  const { body, result: refused } = await callRepositoryRoute(args, context, { action: 'find', repository: entry.repository, pattern: args.pattern, path: args.path ?? '', ...pageOf(args) })
   if (refused) return refused
   return okResult({ id: entry.id, title: entry.title, ...body })
 }
@@ -278,7 +321,14 @@ async function searchRepository(args, context) {
   const { entry, result } = await repositoryEntry(args, context)
   if (result) return result
   if (!args.query) return errorResult('Provide "query" — the text to look for.')
-  const { body, result: refused } = await callRepositoryRoute(args, context, { action: 'search', repository: entry.repository, query: args.query, path: args.path ?? '' })
+  const options = {
+    ...(args.regex === true ? { regex: true } : {}),
+    ...(Array.isArray(args.fileTypes) && args.fileTypes.length ? { fileTypes: args.fileTypes } : {}),
+    ...(Number.isInteger(args.context) && args.context > 0 ? { context: args.context } : {}),
+    ...(args.filesOnly === true ? { filesOnly: true } : {}),
+    ...pageOf(args),
+  }
+  const { body, result: refused } = await callRepositoryRoute(args, context, { action: 'search', repository: entry.repository, query: args.query, path: args.path ?? '', ...options })
   if (refused) return refused
   return okResult({ id: entry.id, title: entry.title, ...body })
 }
@@ -287,7 +337,8 @@ async function readRepositoryFile(args, context) {
   const { entry, result } = await repositoryEntry(args, context)
   if (result) return result
   if (!args.path) return errorResult('Provide "path" — the file, as a path from the root of the repository.')
-  const { body, result: refused } = await callRepositoryRoute(args, context, { action: 'read', repository: entry.repository, path: args.path })
+  const lines = typeof args.lines === 'string' && args.lines.trim() ? args.lines.trim() : undefined
+  const { body, result: refused } = await callRepositoryRoute(args, context, { action: 'read', repository: entry.repository, path: args.path, ...(lines ? { lines } : {}) })
   if (refused) return refused
   const start = Math.max(0, Math.min(Number(args.start ?? 0) || 0, body.text.length))
   const end = Math.min(body.text.length, start + REPOSITORY_READ_CHARS)
@@ -297,6 +348,8 @@ async function readRepositoryFile(args, context) {
     path: body.path,
     commit: body.commit,
     cite: repositoryCitation(entry, body.path, body.citationQuery),
+    // #338: a read of some lines says which, of how many; `start`, `end` and `next` are then within those lines' text.
+    ...(body.lines ? { lines: body.lines } : {}),
     start,
     end,
     total: body.text.length,
@@ -374,7 +427,7 @@ export const tools = [
     description:
       '1. Lists an instance\'s Source documents — the evidence (client briefs, standards, spreadsheets, PDFs, pictures) the architect uploaded for the AI interview to draw on. Read them before you draft, so a figure or a name comes from a document and not from you. ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". ' +
-      '3. Each document carries its "id" (cite it in content as [Title, p. 4](source:<id>)), "title", "filename", "size", "uploadedBy", "uploadedAt" and "hasText" (false for a picture and for a scanned PDF). One added from a web address also carries its "origin": { address, finalAddress, fetchedAt }. A code repository carries "repository": { provider, location, branch, folders? } instead of a file: read it with list_repository_folder, search_repository and read_repository_file. A document a newer one replaces carries "replacedBy"; the newer one carries "replaces". The older one stays citable. A "removed" document is kept in the list so a citation of it still shows its title, but it can no longer be read. ' +
+      '3. Each document carries its "id" (cite it in content as [Title, p. 4](source:<id>)), "title", "filename", "size", "uploadedBy", "uploadedAt" and "hasText" (false for a picture and for a scanned PDF). One added from a web address also carries its "origin": { address, finalAddress, fetchedAt }. A code repository carries "repository": { provider, location, branch, folders? } instead of a file: read it with find_repository_files, search_repository, list_repository_folder and read_repository_file. A document a newer one replaces carries "replacedBy"; the newer one carries "replaces". The older one stays citable. A "removed" document is kept in the list so a citation of it still shows its title, but it can no longer be read. ' +
       '4. Also returns "totalBytes", a "warning" once the live documents are past about 100 MB, and the "limits" (25 MB per document). ' +
       '5. Works on server, Azure DevOps and GitHub workspaces; a local workspace\'s files are on the architect\'s computer and are not reachable here. GitLab and Atlassian workspaces take Source documents later.',
     inputSchema: { ...slugRefShape },
@@ -456,7 +509,7 @@ export const tools = [
       '1. Adds a code repository to an instance as a Source document: a pointer to a Provider repository and branch that is read live, never a copy. Nothing from the repository is stored in the instance. ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref". "provider" is "github", "azure-devops", "gitlab" or "atlassian" (Bitbucket); "location" is the repository in the shape a workspace location takes: { owner, repository } (GitHub, Bitbucket), { organization, project, repository } (Azure DevOps) or { namespace, repository } (GitLab), with an optional "baseUrl" for a self-hosted server this Gantry accepts. ' +
       '3. "branch" defaults to the repository\'s default branch; "folders" narrows it to some folders. The repository is read with the credential this MCP server holds for the instance\'s workspace (none on a server workspace, so only a public repository there). If it cannot read the repository the call is refused with a sentence saying so; pass it on to the architect. ' +
-      '4. The response carries the "entry" (its "id"), the "branch" and the "commit" it stands at now. Read it with list_repository_folder, search_repository and read_repository_file. ' +
+      '4. The response carries the "entry" (its "id"), the "branch" and the "commit" it stands at now. Read it with find_repository_files, search_repository, list_repository_folder and read_repository_file. ' +
       '5. One commit of the manifest on the current stage\'s branch on an Azure DevOps or GitHub workspace. This is a real write — treat it as final once called.',
     inputSchema: {
       ...slugRefShape,
@@ -470,37 +523,63 @@ export const tools = [
     handler: addRepositorySourceDocument,
   },
   {
-    name: 'list_repository_folder',
+    name: 'find_repository_files',
     description:
-      '1. Lists the files and folders in a folder of a code repository Source document, at its branch\'s latest commit. ' +
-      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" is the repository\'s Source document id; "path" is a folder from the root ("" or left out for the top). ' +
-      '3. Vendored code, build output and binaries are never listed, nor anything outside the folders the pointer is narrowed to. The response names the "commit" it was read at.',
+      '1. Finds files by name in a code repository Source document, at its branch\'s latest commit. "pattern" is matched against paths: * within one folder, ** across folders, ? one character, {a,b} either, as in "**/*.tf", "src/**/order*" or "*.{yml,yaml}"; a pattern with no "/" matches a file\'s own name in any folder. ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" and "pattern" are required; "path" finds under one folder only. ' +
+      '3. This matches names only: to search what files contain, use search_repository. ' +
+      '4. Returns "paths", 200 a page, sorted, with "page", "pages", "total" and "nextPage" when there is another: ask for it with "page". The response names the "commit" it was read at. ' +
+      '5. If the response carries "notCopied", gantry serve had no copy of the repository (too big, or the download could not be made) and listed it folder by folder: "notCopied.message" says why; find within a folder to cover all of it. Vendored code, build output and binaries are never listed.',
     inputSchema: {
       ...slugRefShape,
       id: z.string().describe('The code repository\'s Source document id, from list_source_documents.'),
-      path: z.string().optional().describe('A folder path from the root of the repository.'),
+      pattern: z.string().min(1).describe('The name pattern, such as "**/*.tf" or "src/**/order*".'),
+      path: z.string().optional().describe('Optional: find only under this folder.'),
+      page: z.number().int().positive().optional().describe('The page to read, from 1.'),
     },
-    handler: listRepositoryFolder,
+    handler: findRepositoryFiles,
   },
   {
     name: 'search_repository',
     description:
-      '1. Searches a code repository Source document for text (case-insensitive) in its file names and contents, at its branch\'s latest commit. ' +
-      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" and "query" are required; "path" searches under one folder only. ' +
-      '3. Returns "matches" ({ path, line, text }, or just { path } when the file name matches), "filesSearched", and "truncated" when it stopped early, with "truncatedReason" saying why (a time limit on a large repository or a slow link, or a cap on files or matches). Then the matches are only those found so far: search under a folder ("path") or for something more exact, or read the file you expect with read_repository_file. Skips vendored code, build output and binaries. Read a file with read_repository_file before you rely on it.',
+      '1. Searches what the files of a code repository Source document contain, at its branch\'s latest commit: every file, by plain text ignoring case, or by regular expression with "regex": true (still ignoring case, at most 300 characters, and held to a short time budget). ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" and "query" are required; "path" searches under one folder only; "fileTypes" narrows to extensions ("ts") or name patterns ("*.test.js"). ' +
+      '3. This searches contents only: to find files by name, use find_repository_files. ' +
+      '4. Returns "matches" ({ path, line, text }, with "before" and "after" lines when "context" is 1 to 5), 50 matching lines a page; with "filesOnly": true, the matching files instead ({ path, count }), 200 a page. Every page states "totalMatches", "totalFiles", "page", "pages" and "nextPage" when there is another: ask for it with "page". Nothing is cut short. ' +
+      '5. A regular expression that reaches its time budget comes back with "truncated": true and "truncatedBy": "time-budget": try a simpler pattern or a folder. If the response carries "notCopied", gantry serve had no copy (too big, or the download could not be made) and read it file by file, which may stop early ("truncated", "truncatedReason") and is not paged: "notCopied.message" says why; search within a folder to cover all of it. ' +
+      '6. Skips vendored code, build output and binaries. Read a file with read_repository_file before you rely on it.',
     inputSchema: {
       ...slugRefShape,
       id: z.string().describe('The code repository\'s Source document id, from list_source_documents.'),
-      query: z.string().min(2).describe('The text to look for.'),
+      query: z.string().min(2).describe('The text to look for, or a regular expression when "regex" is true.'),
+      regex: z.boolean().optional().describe('Optional: true to treat "query" as a regular expression.'),
       path: z.string().optional().describe('Optional: search only under this folder.'),
+      fileTypes: z.array(z.string()).optional().describe('Optional: only files of these types, e.g. ["ts", "tf"] or ["*.test.js"].'),
+      context: z.number().int().min(0).max(5).optional().describe('Optional: lines to show before and after each match, 0 to 5.'),
+      filesOnly: z.boolean().optional().describe('Optional: true to return the matching files with a count each, instead of the lines.'),
+      page: z.number().int().positive().optional().describe('The page to read, from 1.'),
     },
     handler: searchRepository,
   },
   {
+    name: 'list_repository_folder',
+    description:
+      '1. Lists the files and folders in a folder of a code repository Source document, at its branch\'s latest commit. ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" is the repository\'s Source document id; "path" is a folder from the root ("" or left out for the top). ' +
+      '3. Vendored code, build output and binaries are never listed, nor anything outside the folders the pointer is narrowed to. The response names the "commit" it was read at. A long folder comes 200 entries a page, with "page", "pages", "total" and "nextPage": ask for it with "page".',
+    inputSchema: {
+      ...slugRefShape,
+      id: z.string().describe('The code repository\'s Source document id, from list_source_documents.'),
+      path: z.string().optional().describe('A folder path from the root of the repository.'),
+      page: z.number().int().positive().optional().describe('The page to read, from 1.'),
+    },
+    handler: listRepositoryFolder,
+  },
+  {
     name: 'read_repository_file',
     description:
-      '1. Reads one file of a code repository Source document at its branch\'s latest commit — what Gantry\'s own AI reads. ' +
-      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" and "path" are required. ' +
+      '1. Reads one file of a code repository Source document at its branch\'s latest commit, or a range of its lines — what Gantry\'s own AI reads. ' +
+      '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" and "path" are required; "lines" ("120-180", counting from 1; a search gives line numbers) reads only those, and the response then says which of how many in "lines": { from, to, total }. ' +
       `3. Returns at most ${REPOSITORY_READ_CHARS.toLocaleString('en-US')} characters from "start" (default 0), with "total" and, when there is more, "next" to carry on from. ` +
       '4. The response names the "commit" it was read at and gives "cite": the citation to write in content for a fact from this file, [title, path](source:<id>?path=…&commit=…). Cite exactly that, so the Field is flagged Out of date only when this file really changes. ' +
       '5. Vendored code, build output, binaries and files over 1 MB are refused with the reason.',
@@ -508,6 +587,7 @@ export const tools = [
       ...slugRefShape,
       id: z.string().describe('The code repository\'s Source document id, from list_source_documents.'),
       path: z.string().min(1).describe('The file path from the root of the repository.'),
+      lines: z.string().optional().describe('Optional: the lines to read, "from-to", such as "120-180".'),
       start: z.number().int().nonnegative().optional().describe('The character to start reading from; defaults to 0.'),
     },
     handler: readRepositoryFile,

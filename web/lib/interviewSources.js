@@ -69,57 +69,159 @@ export const READ_TEXT_FALLBACK_INSTRUCTIONS =
   '{"id":"document-id","range":"pages 3-5"} (range is optional; "section: Heading text" and "start-end" character offsets also work). ' +
   'Gantry replies with the text in its next message. Read what you need before you draft from it.'
 
-/** #319: the same, for a code repository: list a folder, search, or read a file, each in a read block. */
+/**
+ * #319: the same, for a code repository: find files, search, list a folder, or read a file, each in a read block. #338: with the same
+ * options the tools take, and the same paging.
+ */
 export const REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS =
-  `To read a code repository, write a fenced code block tagged ${READ_FENCE} containing {"id":"repository-id","list":"folder/path"} to list a folder ` +
-  '("" for the top), {"id":"repository-id","search":"text"} to search it, or {"id":"repository-id","path":"file/path"} to read a file. Gantry replies in its next message.'
+  `To read a code repository, write a fenced code block tagged ${READ_FENCE} containing one of: ` +
+  '{"id":"repository-id","find":"**/*.tf"} to find files by name; ' +
+  '{"id":"repository-id","search":"text"} to search what the files contain (add "regex":true, "path":"folder", "fileTypes":["ts"], "context":2, "filesOnly":true or "page":2 as you need); ' +
+  '{"id":"repository-id","list":"folder/path"} to list a folder ("" for the top); ' +
+  'or {"id":"repository-id","path":"file/path"} to read a file (add "lines":"120-180" for some of its lines). ' +
+  'Results come in pages that say how many there are in all: ask for the next "page" when you need more. Gantry replies in its next message.'
 
-// ---------- code repositories (#319, docs/adr/0072) ----------
-// A code repository is read live with three read-only tools, never pasted into the brief. Each read records the commit it saw, which is what a
+// ---------- code repositories (#319, docs/adr/0072; #338, docs/adr/0074) ----------
+// A code repository is read live with four read-only tools, never pasted into the brief. Each read records the commit it saw, which is what a
 // citation of the file names. The Gantry server does the reading (lib/repositorySource.js), skipping vendored code, build output and binaries.
+// #338: it reads from a copy of the whole repository at the commit, so a search covers every file and its results are paged, never cut short.
 
+export const FIND_REPOSITORY_TOOL_NAME = 'find_repository_files'
 export const LIST_REPOSITORY_TOOL_NAME = 'list_repository_folder'
 export const SEARCH_REPOSITORY_TOOL_NAME = 'search_repository'
 export const READ_REPOSITORY_TOOL_NAME = 'read_repository_file'
-export const REPOSITORY_TOOL_NAMES = Object.freeze([LIST_REPOSITORY_TOOL_NAME, SEARCH_REPOSITORY_TOOL_NAME, READ_REPOSITORY_TOOL_NAME])
+export const REPOSITORY_TOOL_NAMES = Object.freeze([FIND_REPOSITORY_TOOL_NAME, SEARCH_REPOSITORY_TOOL_NAME, LIST_REPOSITORY_TOOL_NAME, READ_REPOSITORY_TOOL_NAME])
 
 /** What the brief says about reading a repository, the same for the in-app AI and an outside agent (whose MCP tools have the same names). */
 export const REPOSITORY_TOOLS_TEXT =
-  `Read it with \`${LIST_REPOSITORY_TOOL_NAME}\` (a folder's files), \`${SEARCH_REPOSITORY_TOOL_NAME}\` (file names and text) and \`${READ_REPOSITORY_TOOL_NAME}\` (one file). ` +
+  `Read it like a developer reads a checkout: \`${FIND_REPOSITORY_TOOL_NAME}\` finds files by name, \`${SEARCH_REPOSITORY_TOOL_NAME}\` searches what every file contains, ` +
+  `\`${LIST_REPOSITORY_TOOL_NAME}\` lists a folder and \`${READ_REPOSITORY_TOOL_NAME}\` reads a file or some of its lines. Results come in pages that say how many there are in all. ` +
   'Vendored code, build output and binaries are always skipped. Every read names the commit it saw: cite a fact from a file as ' +
   '`[title, path](source:<id>?path=<path>&commit=<commit>)`, exactly as the read gives it, so the citation says which code it came from.'
 
 const repositoryId = { type: 'string', description: 'The Source document id of the code repository.' }
+const pageParameter = { type: 'integer', description: 'Optional: the page to read, from 1. A result says how many pages there are; ask for the next one when you need more.' }
 
 /** The tools as the model is told about them. */
 export const REPOSITORY_TOOLS = Object.freeze([
   {
-    name: LIST_REPOSITORY_TOOL_NAME,
-    description: "List the files and folders in a folder of a code repository Source document, at its branch's latest commit. Leave out the path for the top of the repository.",
-    parameters: { type: 'object', properties: { id: repositoryId, path: { type: 'string', description: 'Optional: a folder path from the root, such as "services/orders".' } }, required: ['id'] },
+    name: FIND_REPOSITORY_TOOL_NAME,
+    description:
+      "Find files by name in a code repository Source document, at its branch's latest commit. The pattern is matched against paths: * within one folder, ** across folders, ? one character, {a,b} either, " +
+      'as in "**/*.tf", "src/**/order*" or "*.{yml,yaml}"; a pattern with no "/" matches a file\'s own name in any folder. ' +
+      `This matches names only: to search what files contain, use \`${SEARCH_REPOSITORY_TOOL_NAME}\`. Results come 200 paths a page with the total; ask for the next page when you need more.`,
+    parameters: {
+      type: 'object',
+      properties: { id: repositoryId, pattern: { type: 'string', description: 'The name pattern, such as "**/*.tf" or "src/**/order*".' }, path: { type: 'string', description: 'Optional: find only under this folder.' }, page: pageParameter },
+      required: ['id', 'pattern'],
+    },
   },
   {
     name: SEARCH_REPOSITORY_TOOL_NAME,
     description:
-      'Search a code repository Source document for text (case-insensitive) in its file names and contents. Returns matching files and lines; read a file before you rely on it. ' +
-      'On a large repository a search may be cut short; then search under a folder or for something more exact.',
-    parameters: { type: 'object', properties: { id: repositoryId, query: { type: 'string', description: 'The text to look for, at least two characters.' }, path: { type: 'string', description: 'Optional: search only under this folder.' } }, required: ['id', 'query'] },
+      "Search what the files of a code repository Source document contain, at its branch's latest commit: every file, by plain text ignoring case, or by regular expression with \"regex\": true. " +
+      `This searches contents only: to find files by name, use \`${FIND_REPOSITORY_TOOL_NAME}\`. Narrow it with "path" (a folder) and "fileTypes" (such as ["ts", "tf"] or ["*.test.js"]). ` +
+      '"context" shows up to 5 lines before and after each match; "filesOnly" lists the matching files, with how many matches each, instead of the lines. ' +
+      'Results come 50 matching lines a page (200 files with "filesOnly"), and every page says how many there are in all: ask for the next page with "page" when you need more. Read a file before you rely on it. ' +
+      'If a result says the repository was read file by file (too big to copy, or the copy could not be made), that search may not have seen every file: search within a folder ("path") to cover all of it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: repositoryId,
+        query: { type: 'string', description: 'The text to look for, at least two characters, or a regular expression when "regex" is true.' },
+        regex: { type: 'boolean', description: 'Optional: true to treat "query" as a regular expression (it still ignores case).' },
+        path: { type: 'string', description: 'Optional: search only under this folder.' },
+        fileTypes: { type: 'array', items: { type: 'string' }, description: 'Optional: only files of these types, as extensions ("ts") or name patterns ("*.test.js").' },
+        context: { type: 'integer', minimum: 0, maximum: 5, description: 'Optional: lines to show before and after each match, 0 to 5.' },
+        filesOnly: { type: 'boolean', description: 'Optional: true to list the matching files with a count each, instead of the lines.' },
+        page: pageParameter,
+      },
+      required: ['id', 'query'],
+    },
+  },
+  {
+    name: LIST_REPOSITORY_TOOL_NAME,
+    description: "List the files and folders in a folder of a code repository Source document, at its branch's latest commit. Leave out the path for the top of the repository. A long folder comes 200 entries a page with the total.",
+    parameters: { type: 'object', properties: { id: repositoryId, path: { type: 'string', description: 'Optional: a folder path from the root, such as "services/orders".' }, page: pageParameter }, required: ['id'] },
   },
   {
     name: READ_REPOSITORY_TOOL_NAME,
-    description: `Read one file of a code repository Source document at its branch's latest commit. One read returns at most ${MAX_READ_CHARS.toLocaleString('en-US')} characters; give a "start-end" range to read on. Gantry records the file and commit as an input of the Fields you then draft.`,
-    parameters: { type: 'object', properties: { id: repositoryId, path: { type: 'string', description: 'The file path from the root of the repository.' }, range: { type: 'string', description: 'Optional: "start-end" character offsets, or "section: Heading" in a Markdown file.' } }, required: ['id', 'path'] },
+    description:
+      "Read one file of a code repository Source document at its branch's latest commit, or a range of its lines (\"lines\": \"120-180\"; a search gives the line numbers). " +
+      `One read returns at most ${MAX_READ_CHARS.toLocaleString('en-US')} characters: for a long file ask for lines, or give a "start-end" character range to read on. Gantry records the file and commit as an input of the Fields you then draft.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        id: repositoryId,
+        path: { type: 'string', description: 'The file path from the root of the repository.' },
+        lines: { type: 'string', description: 'Optional: the lines to read, "from-to" counting from 1, such as "120-180".' },
+        range: { type: 'string', description: 'Optional: "start-end" character offsets, or "section: Heading" in a Markdown file.' },
+      },
+      required: ['id', 'path'],
+    },
   },
 ])
 
 const repositoryTitle = (doc) => doc.title || doc.id
+const count = (n) => Number(n ?? 0).toLocaleString('en-US')
+const plural = (n, one, many = `${one}s`) => `${count(n)} ${n === 1 ? one : many}`
+
+// #338: "page 1 of 7, " when an answer is paged over more than one page; nothing for one page, or an answer that isn't paged.
+const pageOfPages = (answer) => (answer.pages > 1 ? `page ${answer.page} of ${answer.pages}, ` : '')
+// #338: what the AI is told after a page that has another after it.
+const nextPageNote = (answer, ask) => (answer.nextPage ? `\n\n[Page ${answer.page} of ${answer.pages}. ${ask} "page": ${answer.nextPage} for the next.]` : '')
+// #338: why there was no copy to read from (too big, or the download couldn't be made): the server's sentence, which says to narrow.
+const notCopiedNote = (answer) => (answer.notCopied?.message ? `\n\n[${answer.notCopied.message}]` : '')
+
+/**
+ * #338: the lines of a search's matches, compactly, as grep prints them: `path:line: text` for a match, `path-line- text` for a line of
+ * context around it, `--` between groups that are not next to each other. A line already shown (two matches close together) is shown once.
+ */
+export function formatRepositoryMatches(matches, { filesOnly = false } = {}) {
+  if (filesOnly) return matches.map((m) => `${m.path}${m.count ? ` (${plural(m.count, 'match', 'matches')})` : ''}`)
+  const hasContext = matches.some((m) => m.before?.length || m.after?.length)
+  if (!hasContext) return matches.map((m) => (m.line ? `${m.path}:${m.line}: ${m.text}` : `${m.path} (its name matches)`))
+  // Each line once, in order; a line shown as context that is itself a match is shown as a match.
+  const rows = []
+  const at = new Map()
+  const add = (path, line, text, match) => {
+    const key = `${path}\n${line}`
+    if (at.has(key)) {
+      if (match) at.get(key).match = true
+      return
+    }
+    const row = { path, line, text, match }
+    at.set(key, row)
+    rows.push(row)
+  }
+  for (const m of matches) {
+    // A file whose name matched, from a search read file by file: there is no line.
+    if (!m.line) {
+      rows.push({ path: m.path, line: null })
+      continue
+    }
+    for (const b of m.before ?? []) add(m.path, b.line, b.text, false)
+    add(m.path, m.line, m.text, true)
+    for (const a of m.after ?? []) add(m.path, a.line, a.text, false)
+  }
+  const out = []
+  let last = null
+  for (const row of rows) {
+    if (last && (row.line === null || last.line === null || last.path !== row.path || row.line > last.line + 1)) out.push('--')
+    const mark = row.match ? ':' : '-'
+    out.push(row.line === null ? `${row.path} (its name matches)` : `${row.path}${mark}${row.line}${mark} ${row.text}`)
+    last = row
+  }
+  return out
+}
 
 /**
  * Runs one repository tool call. `lookup(id)` returns the Source document as the session knows it; `reader(entry)` the reader the Gantry
- * server answers through (web/lib/sourceRepositoryClient.js): `{ list, search, read }`. Resolves `{ ok, content, read? }`, never rejects
+ * server answers through (web/lib/sourceRepositoryClient.js): `{ find, list, search, read }`. Resolves `{ ok, content, read? }`, never rejects
  * (a refusal carries `blocked` or, #336, `failed`, `{ source, title, code, message }`, for the thread):
- * `content` goes back to the AI, and a file read is recorded as `read`, `{ source, title, range, path, commit, fingerprint, chars }`. A file read
- * and a search also carry `label`, which names them for their `readNote` once they are old (#328).
+ * `content` goes back to the AI, and a file read is recorded as `read`, `{ source, title, range, path, commit, fingerprint, chars }`. A file read,
+ * a find and a search also carry `label`, which names them for their `readNote` once they are old (#328).
+ * #338: results are paged, and the AI is told the page, how many there are in all, and how to ask for the next.
  */
 export async function runRepositoryCall(name, input, { lookup, reader }) {
   const id = String(input?.id ?? '')
@@ -127,36 +229,74 @@ export async function runRepositoryCall(name, input, { lookup, reader }) {
   if (!doc) return { ok: false, content: `There is no Source document "${id}". Use the id of a code repository from the brief.` }
   if (!isRepositorySource(doc)) return { ok: false, content: `"${repositoryTitle(doc)}" (${doc.id}) is not a code repository. Read it with \`${READ_TOOL_NAME}\` or from the brief.` }
   const title = repositoryTitle(doc)
+  const page = Number.isInteger(input?.page) && input.page > 1 ? input.page : undefined
+  const under = input?.path ? ` under ${input.path}` : ''
   try {
     const repo = reader(doc)
     if (name === LIST_REPOSITORY_TOOL_NAME) {
-      const { commit, path, entries } = await repo.list({ path: input?.path })
+      const answer = await repo.list({ path: input?.path, page })
+      const { commit, path, entries } = answer
       const lines = entries.map((e) => `- ${e.path}${e.isFolder ? '/' : ''}`)
-      return { ok: true, content: `[${title} · ${path || 'top of the repository'} · commit ${commit}]\n\n${lines.length ? lines.join('\n') : '(nothing here that Gantry reads)'}` }
+      const paged = answer.pages > 1 ? ` · ${pageOfPages(answer)}${plural(answer.total, 'entry', 'entries')}` : ''
+      return { ok: true, content: `[${title} · ${path || 'top of the repository'} · commit ${commit}${paged}]\n\n${lines.length ? lines.join('\n') : '(nothing here that Gantry reads)'}${nextPageNote(answer, 'List it again with')}` }
+    }
+    if (name === FIND_REPOSITORY_TOOL_NAME) {
+      const answer = await repo.find({ pattern: input?.pattern, path: input?.path, page })
+      const { commit, pattern, paths } = answer
+      const total = Number.isFinite(answer.total) ? answer.total : paths.length
+      const tail = answer.truncated ? `\n\n[This find stopped early (${answer.truncatedReason}), so these are only the files found so far. Find within a folder (with "path") to cover all of it.]` : ''
+      const content = `[${title} · find "${pattern}"${under} · commit ${commit} · ${pageOfPages(answer)}${plural(total, 'file')}]\n\n${paths.length ? paths.join('\n') : 'No files match.'}${nextPageNote(answer, 'Find again with')}${tail}${notCopiedNote(answer)}`
+      return { ok: true, content, label: { title, where: `find "${pattern}"${under}${page ? ` page ${page}` : ''}`, commit, chars: content.length } }
     }
     if (name === SEARCH_REPOSITORY_TOOL_NAME) {
-      const { commit, query, matches, filesSearched, truncated, truncatedReason } = await repo.search({ query: input?.query, path: input?.path })
-      const lines = matches.map((m) => (m.line ? `- ${m.path}:${m.line}: ${m.text}` : `- ${m.path} (its name matches)`))
-      // #335: a search on a big repository, or over a slow link to its Provider, can stop early (at a time limit, or a cap). The AI is told
-      // why, that these are only the matches found so far, and what does better than searching the same way again.
+      const filesOnly = input?.filesOnly === true
+      const answer = await repo.search({
+        query: input?.query,
+        path: input?.path,
+        ...(input?.regex === true ? { regex: true } : {}),
+        ...(Array.isArray(input?.fileTypes) && input.fileTypes.length ? { fileTypes: input.fileTypes.map(String) } : {}),
+        ...(Number.isInteger(input?.context) && input.context > 0 ? { context: input.context } : {}),
+        ...(filesOnly ? { filesOnly: true } : {}),
+        ...(page ? { page } : {}),
+      })
+      const { commit, query, matches, filesSearched, truncated, truncatedBy, truncatedReason } = answer
+      const lines = formatRepositoryMatches(matches, { filesOnly })
+      // #338: from a copy, the totals of the whole search; read file by file, how many files it got through.
+      const counted = Number.isFinite(answer.totalMatches)
+        ? `${pageOfPages(answer)}${plural(answer.totalMatches, 'match', 'matches')} in ${plural(answer.totalFiles, 'file')}`
+        : `${plural(filesSearched, 'file')} searched`
+      // #335: a search read file by file, on a big repository or over a slow link, can stop early (at a time limit, or a cap); #338: a
+      // regular expression can reach its time budget. The AI is told why, that these are only the matches found so far, and what does better.
       const why = truncatedReason || `stopped after ${filesSearched} files`
-      const tail = truncated
-        ? `\n\n[This search was cut short (${why}), so these are only the matches found so far. To do better, search under a folder (with "path") or for something more exact, or read a file you expect to matter with \`${READ_REPOSITORY_TOOL_NAME}\`.]`
-        : ''
-      const content = `[${title} · search "${query}" · commit ${commit} · ${filesSearched} files searched]\n\n${lines.length ? lines.join('\n') : 'No matches.'}${tail}`
-      return { ok: true, content, label: { title, where: `search "${query}"${input?.path ? ` under ${input.path}` : ''}`, commit, chars: content.length } }
+      const tail = !truncated
+        ? ''
+        : truncatedBy === 'time-budget'
+          ? `\n\n[This search stopped at its time budget (${why}), so these are only the matches found so far. A simpler pattern, plain text, or a search under a folder (with "path") will finish.]`
+          : `\n\n[This search was cut short (${why}), so these are only the matches found so far. To do better, search under a folder (with "path") or for something more exact, or read a file you expect to matter with \`${READ_REPOSITORY_TOOL_NAME}\`.]`
+      const kind = answer.regex || input?.regex === true ? `search /${query}/` : `search "${query}"`
+      const content = `[${title} · ${kind}${under} · commit ${commit} · ${counted}]\n\n${lines.length ? lines.join('\n') : 'No matches.'}${nextPageNote(answer, 'Search again with')}${tail}${notCopiedNote(answer)}`
+      return { ok: true, content, label: { title, where: `${kind}${under}${page ? ` page ${page}` : ''}`, commit, chars: content.length } }
     }
     if (name === READ_REPOSITORY_TOOL_NAME) {
-      const { commit, path, text } = await repo.read({ path: input?.path })
-      const result = readSourceText(text, input?.range)
+      const lines = typeof input?.lines === 'string' && input.lines.trim() ? input.lines.trim() : undefined
+      const answer = await repo.read({ path: input?.path, ...(lines ? { lines } : {}) })
+      const { commit, path, text } = answer
+      // #338: some of the file's lines; then a character range is not asked for, but the most one read returns still holds.
+      const result = readSourceText(text, answer.lines ? undefined : input?.range)
       if (!result.ok) return { ok: false, content: `${title}, ${path}: ${result.error}` }
       const cite = sourceCitationFor(doc, { path, commit })
-      const footer = result.truncated ? `\n\n[Stopped at ${trimEnd(result.to)} of ${trimEnd(result.total)} characters. Carry on with range "${result.to}-${Math.min(result.total, result.to + MAX_READ_CHARS)}".]` : ''
+      const span = answer.lines ? `lines ${answer.lines.from}–${answer.lines.to} of ${count(answer.lines.total)}` : result.label
+      const footer = !result.truncated
+        ? ''
+        : answer.lines
+          ? `\n\n[Stopped at ${trimEnd(result.to)} of ${trimEnd(result.total)} characters of these lines. Ask for fewer lines at a time.]`
+          : `\n\n[Stopped at ${trimEnd(result.to)} of ${trimEnd(result.total)} characters. Carry on with range "${result.to}-${Math.min(result.total, result.to + MAX_READ_CHARS)}", or read by "lines".]`
+      const whole = !answer.lines && result.from === 0 && !result.truncated
       return {
         ok: true,
-        content: `[${title} · ${path} · commit ${commit} · ${result.label}]\nCite it as ${cite}\n\n${result.text}${footer}`,
+        content: `[${title} · ${path} · commit ${commit}${span ? ` · ${span}` : ''}]\nCite it as ${cite}\n\n${result.text}${footer}`,
         read: { source: doc.id, title, range: path, path, commit, fingerprint: fingerprintText(result.text), chars: result.text.length },
-        label: { title, where: result.from === 0 && !result.truncated ? path : `${path} (${result.label})`, commit, chars: result.text.length },
+        label: { title, where: whole ? path : `${path} (${span})`, commit, chars: result.text.length },
       }
     }
     return { ok: false, content: `There is no tool called ${name}.` }
@@ -208,7 +348,8 @@ export function extractReadBlocks(text) {
     try {
       const parsed = JSON.parse(match[1])
       for (const item of Array.isArray(parsed) ? parsed : [parsed]) {
-        // #319: a read of a code repository names a `path` to read, or asks to `list` a folder or `search` for text.
+        // #319: a read of a code repository names a `path` to read, or asks to `list` a folder or `search` for text. #338: or to `find`
+        // files by name, with the options its tools take.
         if (item && typeof item.id === 'string') {
           reads.push({
             id: item.id,
@@ -216,6 +357,13 @@ export function extractReadBlocks(text) {
             ...(typeof item.path === 'string' ? { path: item.path } : {}),
             ...(typeof item.list === 'string' ? { list: item.list } : {}),
             ...(typeof item.search === 'string' ? { search: item.search } : {}),
+            ...(typeof item.find === 'string' ? { find: item.find } : {}),
+            ...(typeof item.lines === 'string' ? { lines: item.lines } : {}),
+            ...(item.regex === true ? { regex: true } : {}),
+            ...(item.filesOnly === true ? { filesOnly: true } : {}),
+            ...(Array.isArray(item.fileTypes) ? { fileTypes: item.fileTypes.filter((t) => typeof t === 'string') } : {}),
+            ...(Number.isInteger(item.context) ? { context: item.context } : {}),
+            ...(Number.isInteger(item.page) ? { page: item.page } : {}),
           })
         }
         else errors.push('A read block needs {"id": "document-id"}.')

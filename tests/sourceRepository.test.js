@@ -227,7 +227,7 @@ describe('the AI reads a repository with tools, and every read names its commit'
     const listed = await runRepositoryCall('list_repository_folder', { id: 'billing-api' }, { lookup, reader })
     assert.equal(listed.content, `[Billing API · top of the repository · commit ${HEAD}]\n\n- src/\n- README.md`)
     const found = await runRepositoryCall('search_repository', { id: 'billing-api', query: 'MAX_ORDER' }, { lookup, reader })
-    assert.match(found.content, /- src\/orders\/limits\.ts:1: export const MAX_ORDER_NZD = 5000/)
+    assert.match(found.content, /\nsrc\/orders\/limits\.ts:1: export const MAX_ORDER_NZD = 5000/)
     const read = await runRepositoryCall('read_repository_file', { id: 'billing-api', path: 'src/orders/limits.ts' }, { lookup, reader })
     assert.equal(read.ok, true)
     assert.match(read.content, new RegExp(`Cite it as \\[Billing API, src/orders/limits\\.ts\\]\\(source:billing-api\\?path=src/orders/limits\\.ts&commit=${HEAD}\\)`))
@@ -247,13 +247,121 @@ describe('the AI reads a repository with tools, and every read names its commit'
     const cutShort = () => ({ search: async ({ query }) => ({ commit: HEAD, query, matches: [{ path: 'src/orders/limits.ts', line: 1, text: 'export const MAX_ORDER_NZD = 5000' }], filesSearched: 180, truncated: true, truncatedBy: 'time-limit', truncatedReason: 'stopped after 30 seconds, 180 of 400 files searched' }) })
     const found = await runRepositoryCall('search_repository', { id: 'billing-api', query: 'MAX_ORDER' }, { lookup, reader: cutShort })
     assert.equal(found.ok, true)
-    assert.match(found.content, /- src\/orders\/limits\.ts:1: export const MAX_ORDER_NZD = 5000/)
+    assert.match(found.content, /\nsrc\/orders\/limits\.ts:1: export const MAX_ORDER_NZD = 5000/)
     assert.match(
       found.content,
       /\n\n\[This search was cut short \(stopped after 30 seconds, 180 of 400 files searched\), so these are only the matches found so far\. To do better, search under a folder \(with "path"\) or for something more exact, or read a file you expect to matter with `read_repository_file`\.\]$/
     )
     const complete = await runRepositoryCall('search_repository', { id: 'billing-api', query: 'MAX_ORDER' }, { lookup, reader })
     assert.doesNotMatch(complete.content, /cut short/)
+  })
+
+  // #338 (docs/adr/0074): from a Repository copy, results are complete and paged. The AI gets them compactly, as grep prints them, with
+  // the page, how many there are in all, and how to ask for the next.
+  test('a search from a copy goes back as path:line: text, with context lines, the totals and the next page', async () => {
+    const asked = []
+    const paged = () => ({
+      search: async (options) => (
+        asked.push(options),
+        {
+          commit: HEAD,
+          query: options.query,
+          matches: [
+            { path: 'src/orders/service.ts', line: 2, text: '// Orders are settled nightly.', before: [{ line: 1, text: 'export class OrderService {' }], after: [{ line: 3, text: '  settle() {}' }] },
+            { path: 'src/orders/service.ts', line: 3, text: '  settle() {}', before: [{ line: 2, text: '// Orders are settled nightly.' }], after: [{ line: 4, text: '  refund() {}' }] },
+            { path: 'src/payments/retry.ts', line: 2, text: '// Orders retry three times.', before: [{ line: 1, text: 'export const RETRY_POLICY = { attempts: 3 }' }], after: [] },
+          ],
+          filesSearched: 2000,
+          truncated: false,
+          totalMatches: 312,
+          totalFiles: 40,
+          page: 1,
+          pageSize: 50,
+          total: 312,
+          pages: 7,
+          nextPage: 2,
+        }
+      ),
+    })
+    const found = await runRepositoryCall('search_repository', { id: 'billing-api', query: 'settle', regex: true, fileTypes: ['ts'], context: 1, path: 'src' }, { lookup, reader: paged })
+    assert.deepEqual(asked[0], { query: 'settle', path: 'src', regex: true, fileTypes: ['ts'], context: 1 })
+    assert.equal(
+      found.content,
+      `[Billing API · search /settle/ under src · commit ${HEAD} · page 1 of 7, 312 matches in 40 files]\n\n` +
+        'src/orders/service.ts-1- export class OrderService {\n' +
+        'src/orders/service.ts:2: // Orders are settled nightly.\n' +
+        'src/orders/service.ts:3:   settle() {}\n' +
+        'src/orders/service.ts-4-   refund() {}\n' +
+        '--\n' +
+        'src/payments/retry.ts-1- export const RETRY_POLICY = { attempts: 3 }\n' +
+        'src/payments/retry.ts:2: // Orders retry three times.\n\n' +
+        '[Page 1 of 7. Search again with "page": 2 for the next.]'
+    )
+    assert.doesNotMatch(found.content, /cut short/)
+  })
+
+  test('files only, a find, a paged listing and a line-range read each say what they hold and how to ask for more', async () => {
+    const asked = []
+    const repo = () => ({
+      search: async (options) => (asked.push(['search', options]), { commit: HEAD, query: options.query, matches: [{ path: 'src/a.ts', count: 3 }, { path: 'src/b.ts', count: 1 }], filesSearched: 9, truncated: false, totalMatches: 4, totalFiles: 2, page: 1, pageSize: 200, total: 2, pages: 1 }),
+      find: async (options) => (asked.push(['find', options]), { commit: HEAD, pattern: options.pattern, path: '', paths: ['infra/main.tf', 'infra/network.tf'], page: 2, pageSize: 200, total: 402, pages: 3, nextPage: 3 }),
+      list: async (options) => (asked.push(['list', options]), { commit: HEAD, path: 'src', entries: [{ path: 'src/a.ts', isFolder: false }], page: 1, pageSize: 200, total: 201, pages: 2, nextPage: 2 }),
+      read: async (options) => (asked.push(['read', options]), { commit: HEAD, path: options.path, text: 'line ten\nline eleven', size: 20, lines: { from: 10, to: 11, total: 90 } }),
+    })
+    const files = await runRepositoryCall('search_repository', { id: 'billing-api', query: 'order', filesOnly: true }, { lookup, reader: repo })
+    assert.equal(files.content, `[Billing API · search "order" · commit ${HEAD} · 4 matches in 2 files]\n\nsrc/a.ts (3 matches)\nsrc/b.ts (1 match)`)
+
+    const found = await runRepositoryCall('find_repository_files', { id: 'billing-api', pattern: '**/*.tf', page: 2 }, { lookup, reader: repo })
+    assert.equal(found.content, `[Billing API · find "**/*.tf" · commit ${HEAD} · page 2 of 3, 402 files]\n\ninfra/main.tf\ninfra/network.tf\n\n[Page 2 of 3. Find again with "page": 3 for the next.]`)
+    assert.deepEqual(found.label, { title: 'Billing API', where: 'find "**/*.tf" page 2', commit: HEAD, chars: found.content.length })
+
+    const listed = await runRepositoryCall('list_repository_folder', { id: 'billing-api', path: 'src' }, { lookup, reader: repo })
+    assert.equal(listed.content, `[Billing API · src · commit ${HEAD} · page 1 of 2, 201 entries]\n\n- src/a.ts\n\n[Page 1 of 2. List it again with "page": 2 for the next.]`)
+
+    const read = await runRepositoryCall('read_repository_file', { id: 'billing-api', path: 'src/a.ts', lines: '10-11' }, { lookup, reader: repo })
+    assert.match(read.content, new RegExp(`^\\[Billing API · src/a\\.ts · commit ${HEAD} · lines 10–11 of 90\\]\\nCite it as \\[Billing API, src/a\\.ts\\]`))
+    assert.match(read.content, /\n\nline ten\nline eleven$/)
+    assert.equal(read.read.path, 'src/a.ts')
+    assert.equal(read.label.where, 'src/a.ts (lines 10–11 of 90)')
+    assert.deepEqual(asked.map(([what, options]) => [what, options]), [
+      ['search', { query: 'order', path: undefined, filesOnly: true }],
+      ['find', { pattern: '**/*.tf', path: undefined, page: 2 }],
+      ['list', { path: 'src', page: undefined }],
+      ['read', { path: 'src/a.ts', lines: '10-11' }],
+    ])
+  })
+
+  test('without a copy, a find or search says why and to narrow to a folder; a regular expression that ran out of time says so', async () => {
+    const notCopied = { reason: 'too-big', message: 'acme/billing-api is too big for Gantry to copy for searching (over 150 MB of text), so it was read file by file, and a search may stop before it has seen every file. Search within a folder (path) to cover all of it.' }
+    const repo = () => ({
+      search: async ({ query, regex }) =>
+        regex
+          ? { commit: HEAD, query, regex: true, matches: [], filesSearched: 800, truncated: true, truncatedBy: 'time-budget', truncatedReason: 'stopped after 2 seconds, 800 of 2,000 files searched', totalMatches: 0, totalFiles: 0, page: 1, pageSize: 50, total: 0, pages: 0 }
+          : { commit: HEAD, query, matches: [{ path: 'src/a.ts', line: 1, text: 'order' }], filesSearched: 12, truncated: false, notCopied },
+      find: async ({ pattern }) => ({ commit: HEAD, pattern, path: '', paths: [], page: 1, pageSize: 200, total: 0, pages: 0, notCopied }),
+    })
+    const searched = await runRepositoryCall('search_repository', { id: 'billing-api', query: 'order' }, { lookup, reader: repo })
+    assert.match(searched.content, /· 12 files searched\]/)
+    assert.match(searched.content, /\n\n\[acme\/billing-api is too big for Gantry to copy for searching .* Search within a folder \(path\) to cover all of it\.\]$/)
+    const found = await runRepositoryCall('find_repository_files', { id: 'billing-api', pattern: '*.tf' }, { lookup, reader: repo })
+    assert.match(found.content, /No files match\.\n\n\[acme\/billing-api is too big/)
+    const slow = await runRepositoryCall('search_repository', { id: 'billing-api', query: '(a+)+$', regex: true }, { lookup, reader: repo })
+    assert.match(slow.content, /\[This search stopped at its time budget \(stopped after 2 seconds, 800 of 2,000 files searched\), so these are only the matches found so far\./)
+  })
+
+  test('the AI is told search covers contents and find covers names, both paged with totals', async () => {
+    const { REPOSITORY_TOOLS, REPOSITORY_TOOLS_TEXT, REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS } = await import('../web/lib/interviewSources.js')
+    const byName = Object.fromEntries(REPOSITORY_TOOLS.map((t) => [t.name, t]))
+    assert.deepEqual(Object.keys(byName), ['find_repository_files', 'search_repository', 'list_repository_folder', 'read_repository_file'])
+    assert.match(byName.search_repository.description, /contents only: to find files by name, use `find_repository_files`/)
+    assert.match(byName.search_repository.description, /every page says how many there are in all/)
+    assert.match(byName.search_repository.description, /search within a folder/)
+    assert.match(byName.find_repository_files.description, /names only: to search what files contain, use `search_repository`/)
+    assert.deepEqual(Object.keys(byName.search_repository.parameters.properties), ['id', 'query', 'regex', 'path', 'fileTypes', 'context', 'filesOnly', 'page'])
+    assert.ok(byName.read_repository_file.parameters.properties.lines)
+    assert.match(REPOSITORY_TOOLS_TEXT, /find_repository_files/)
+    assert.match(REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS, /\{"id":"repository-id","find":"\*\*\/\*\.tf"\}/)
+    assert.match(REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS, /"lines":"120-180"/)
   })
 
   test('the decisions log keeps an input\'s path and commit', () => {

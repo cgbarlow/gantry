@@ -586,6 +586,60 @@ describe('the copy behind POST /api/sources/repository', () => {
     )
   })
 
+  // #338: a proxy in front of Gantry (a Cloudflare Tunnel gives up at 100 seconds, others sooner) never sees a request held for a download.
+  test('a copy slower to download than the route waits is answered "preparing", 202, and a later identical request picks up the same download', () => {
+    const { server, logs } = archivingGitHub({ archiveDelayMs: 600 })
+    return withFake(server, (codeBase) =>
+      withRunningServer({ allowGitHubBaseUrlOverride: true, repositoryPreparingWaitMs: 50 }, async (base) => {
+        const ask = async (body) => {
+          const started = Date.now()
+          const res = await fetch(`${base}/api/sources/repository`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(TOKEN) }, body: JSON.stringify({ repository: github(codeBase), ...body }) })
+          return { status: res.status, body: await res.json(), took: Date.now() - started }
+        }
+        const first = await ask({ action: 'search', query: 'orders' })
+        assert.equal(first.status, 202, JSON.stringify(first.body))
+        assert.equal(first.body.preparing, true)
+        assert.equal(first.body.repository, 'acme/billing-api', 'named for the thread, with nothing of the token')
+        assert.equal(typeof first.body.receivedBytes, 'number')
+        assert.ok(first.body.commit, 'the commit it is preparing')
+        assert.ok(first.took < 400, `answered without waiting for the download (${first.took} ms)`)
+
+        let answer = first
+        for (let tries = 0; answer.status === 202 && tries < 40; tries++) {
+          await pause(50)
+          answer = await ask({ action: 'search', query: 'orders' })
+          assert.ok(answer.took < 400, `no request is held for the download (${answer.took} ms)`)
+        }
+        assert.equal(answer.status, 200)
+        assert.ok(answer.body.totalMatches > 0)
+        assert.equal(answer.body.commit, first.body.commit)
+        assert.equal(logs.archives.length, 1, 'every request joined the one download')
+        assert.deepEqual(logs.files, [])
+      })
+    )
+  })
+
+  test('"prepare" starts the download and answers at once, without waiting for it; asked again it says how it stands', () => {
+    const { server, logs } = archivingGitHub({ archiveDelayMs: 300 })
+    return withFake(server, (codeBase) =>
+      withRunningServer({ allowGitHubBaseUrlOverride: true }, async (base) => {
+        const ask = async (body) => {
+          const res = await fetch(`${base}/api/sources/repository`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(TOKEN) }, body: JSON.stringify({ repository: github(codeBase), ...body }) })
+          assert.equal(res.status, 200)
+          return res.json()
+        }
+        const started = Date.now()
+        const prepared = await ask({ action: 'prepare' })
+        assert.ok(Date.now() - started < 250, 'answered before the download is done')
+        assert.equal(prepared.state, 'preparing')
+        await pause(500)
+        assert.equal((await ask({ action: 'prepare' })).state, 'ready')
+        assert.equal((await ask({ action: 'read', path: 'README.md' })).text, CODE['README.md'])
+        assert.equal(logs.archives.length, 1)
+      })
+    )
+  })
+
   test('GANTRY_REPOSITORY_COPY_MEMORY_MB=0 keeps no copies: the route reads file by file', () => {
     const { server, logs } = archivingGitHub()
     return withFake(server, (codeBase) =>
