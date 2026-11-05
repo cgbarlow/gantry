@@ -487,19 +487,79 @@ describe('a search finishes in good time', () => {
   })
 
   test('once nobody is waiting for the search any more, it makes no further file reads', () => {
-    const contentRequests = []
-    return withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: MANY, contentDelayMs: 100, contentRequests }), async (baseUrl) => {
+    // Counted where the requests are made, not where they arrive: a read asked for just before the abort may reach the fake after it.
+    const fetchesMade = []
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (url, ...rest) => {
+      fetchesMade.push(String(url))
+      return realFetch(url, ...rest)
+    }
+    return withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: MANY, contentDelayMs: 100 }), async (baseUrl) => {
       const reader = createRepositoryReader(github(baseUrl), TOKEN, { allowBaseUrl: true, searchTimeLimitMs: 10_000, searchParallelReads: 4 })
       const abandon = new AbortController()
       const searching = reader.search({ query: 'nothing-here', signal: abandon.signal })
       await pause(250)
       abandon.abort()
+      const atAbandon = fetchesMade.length
       await assert.rejects(searching, (err) => err.code === 'abandoned')
-      const atAbandon = contentRequests.length
-      assert.ok(atAbandon > 0 && atAbandon < 400)
+      assert.ok(fetchesMade.filter((url) => url.includes('/contents/')).length > 0 && atAbandon < 400)
       await pause(400)
-      assert.equal(contentRequests.length, atAbandon, 'no file is read after the search was given up')
+      assert.deepEqual(fetchesMade.slice(atAbandon), [], 'nothing is asked of the Provider after the search was given up')
+    }).finally(() => {
+      globalThis.fetch = realFetch
     })
+  })
+
+  test('a search given up before it starts, or while it finds the branch head, asks the Provider for nothing more', async () => {
+    const apiLog = []
+    await withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: MANY, apiLog }), async (baseUrl) => {
+      const reader = createRepositoryReader(github(baseUrl), TOKEN, { allowBaseUrl: true })
+      await assert.rejects(reader.search({ query: 'needle', signal: AbortSignal.abort() }), (err) => err.code === 'abandoned')
+      await pause(100)
+      assert.deepEqual(apiLog, [], 'nothing at all is asked of the Provider for a caller already gone')
+    })
+    // The caller leaves while the branch's head is being looked up: the fake gives up the search as that request arrives.
+    const abandon = new AbortController()
+    const leaving = { push: (entry) => (apiLog.push(entry), entry.includes('/git/ref') && abandon.abort()) }
+    apiLog.length = 0
+    await withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: MANY, apiLog: leaving }), async (baseUrl) => {
+      const reader = createRepositoryReader(github(baseUrl), TOKEN, { allowBaseUrl: true })
+      await assert.rejects(reader.search({ query: 'needle', signal: abandon.signal }), (err) => err.code === 'abandoned')
+      await pause(100)
+      assert.deepEqual(apiLog.filter((entry) => !entry.includes('/git/ref')), [], 'the repository is not listed once the caller has gone')
+    })
+  })
+
+  test('a search whose listing fails asks for the listing once, however many files it reads at once', async () => {
+    for (const searchParallelReads of [1, 8]) {
+      const apiLog = []
+      // The branch head is the one request the limit allows; the listing of the whole repository is refused as over it.
+      await withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: MANY, apiRequestLimit: 1, apiLog }), async (baseUrl) => {
+        const reader = createRepositoryReader(github(baseUrl), TOKEN, { allowBaseUrl: true, searchParallelReads })
+        await assert.rejects(reader.search({ query: 'needle' }), (err) => err.code === 'rate-limited')
+        await pause(50)
+        assert.equal(apiLog.filter((entry) => entry.includes('/git/trees/')).length, 1, `one listing request with ${searchParallelReads} reads at once`)
+      })
+    }
+    // A folder-by-folder walk (Azure DevOps) over two folders, whose first listing fails: the other folder is not listed after it.
+    const folderListings = []
+    const fake = createFakeAzureDevOpsServer({ organization: 'contoso', project: 'Payments', repository: 'billing', validPat: TOKEN, files: CODE })
+    const [answer] = fake.listeners('request')
+    fake.removeAllListeners('request')
+    fake.on('request', (req, res) => {
+      const url = new URL(req.url, 'http://fake.invalid')
+      if (url.searchParams.get('recursionLevel') !== 'OneLevel') return answer(req, res)
+      folderListings.push(url.searchParams.get('scopePath'))
+      if (folderListings.length > 1) return answer(req, res)
+      res.writeHead(500, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ message: 'The listing failed (fake).' }))
+    })
+    await withFake(fake, async (baseUrl) => {
+      const repository = { provider: 'azure-devops', location: { organization: 'contoso', project: 'Payments', repository: 'billing', baseUrl }, branch: 'main', folders: ['infra', 'src'] }
+      await assert.rejects(createRepositoryReader(repository, TOKEN, { allowBaseUrl: true, searchParallelReads: 8 }).search({ query: 'needle' }))
+      await pause(50)
+    })
+    assert.equal(folderListings.length, 1, `no further folder is listed once a listing failed (${folderListings.join(', ')})`)
   })
 
   test('POST /api/sources/repository stops reading files for a search once the caller has gone, and is cut short by the server\'s own time limit', () => {
