@@ -20,7 +20,8 @@ export async function buildMcpServer({ gantryClient }) {
     server.registerTool(
       tool.name,
       { description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations },
-      (args) => tool.handler(args ?? {}, { gantryClient })
+      // #338: `extra.signal` aborts when the agent cancels the call, so a tool that waits (a repository copy preparing) stops.
+      (args, extra) => tool.handler(args ?? {}, { gantryClient, signal: extra?.signal })
     )
   }
 

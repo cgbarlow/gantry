@@ -79,7 +79,7 @@ export const REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS =
   '{"id":"repository-id","search":"text"} to search what the files contain (add "regex":true, "path":"folder", "fileTypes":["ts"], "context":2, "filesOnly":true or "page":2 as you need); ' +
   '{"id":"repository-id","list":"folder/path"} to list a folder ("" for the top); ' +
   'or {"id":"repository-id","path":"file/path"} to read a file (add "lines":"120-180" for some of its lines). ' +
-  'Results come in pages that say how many there are in all: ask for the next "page" when you need more. Gantry replies in its next message.'
+  'Results come in pages that say how many there are in all: ask for the next "page", with the "commit" the result named, when you need more. Gantry replies in its next message.'
 
 // ---------- code repositories (#319, docs/adr/0072; #338, docs/adr/0074) ----------
 // A code repository is read live with four read-only tools, never pasted into the brief. Each read records the commit it saw, which is what a
@@ -101,6 +101,8 @@ export const REPOSITORY_TOOLS_TEXT =
 
 const repositoryId = { type: 'string', description: 'The Source document id of the code repository.' }
 const pageParameter = { type: 'integer', description: 'Optional: the page to read, from 1. A result says how many pages there are; ask for the next one when you need more.' }
+// #338: a later page is asked at the commit of the first, so a branch that moves on between them can't mix two commits' results.
+const commitParameter = { type: 'string', description: 'Optional: with "page", the commit the first page named, so every page is of the same commit.' }
 
 /** The tools as the model is told about them. */
 export const REPOSITORY_TOOLS = Object.freeze([
@@ -112,7 +114,7 @@ export const REPOSITORY_TOOLS = Object.freeze([
       `This matches names only: to search what files contain, use \`${SEARCH_REPOSITORY_TOOL_NAME}\`. Results come 200 paths a page with the total; ask for the next page when you need more.`,
     parameters: {
       type: 'object',
-      properties: { id: repositoryId, pattern: { type: 'string', description: 'The name pattern, such as "**/*.tf" or "src/**/order*".' }, path: { type: 'string', description: 'Optional: find only under this folder.' }, page: pageParameter },
+      properties: { id: repositoryId, pattern: { type: 'string', description: 'The name pattern, such as "**/*.tf" or "src/**/order*".' }, path: { type: 'string', description: 'Optional: find only under this folder.' }, page: pageParameter, commit: commitParameter },
       required: ['id', 'pattern'],
     },
   },
@@ -135,6 +137,7 @@ export const REPOSITORY_TOOLS = Object.freeze([
         context: { type: 'integer', minimum: 0, maximum: 5, description: 'Optional: lines to show before and after each match, 0 to 5.' },
         filesOnly: { type: 'boolean', description: 'Optional: true to list the matching files with a count each, instead of the lines.' },
         page: pageParameter,
+        commit: commitParameter,
       },
       required: ['id', 'query'],
     },
@@ -142,7 +145,7 @@ export const REPOSITORY_TOOLS = Object.freeze([
   {
     name: LIST_REPOSITORY_TOOL_NAME,
     description: "List the files and folders in a folder of a code repository Source document, at its branch's latest commit. Leave out the path for the top of the repository. A long folder comes 200 entries a page with the total.",
-    parameters: { type: 'object', properties: { id: repositoryId, path: { type: 'string', description: 'Optional: a folder path from the root, such as "services/orders".' }, page: pageParameter }, required: ['id'] },
+    parameters: { type: 'object', properties: { id: repositoryId, path: { type: 'string', description: 'Optional: a folder path from the root, such as "services/orders".' }, page: pageParameter, commit: commitParameter }, required: ['id'] },
   },
   {
     name: READ_REPOSITORY_TOOL_NAME,
@@ -168,8 +171,9 @@ const plural = (n, one, many = `${one}s`) => `${count(n)} ${n === 1 ? one : many
 
 // #338: "page 1 of 7, " when an answer is paged over more than one page; nothing for one page, or an answer that isn't paged.
 const pageOfPages = (answer) => (answer.pages > 1 ? `page ${answer.page} of ${answer.pages}, ` : '')
-// #338: what the AI is told after a page that has another after it.
-const nextPageNote = (answer, ask) => (answer.nextPage ? `\n\n[Page ${answer.page} of ${answer.pages}. ${ask} "page": ${answer.nextPage} for the next.]` : '')
+// #338: what the AI is told after a page that has another after it: to ask for the next at this page's commit.
+const nextPageNote = (answer, ask) =>
+  answer.nextPage ? `\n\n[Page ${answer.page} of ${answer.pages}. ${ask} "page": ${answer.nextPage}${answer.commit ? ` and "commit": "${answer.commit}"` : ''} for the next, so every page is of the same commit.]` : ''
 // #338: why there was no copy to read from (too big, or the download couldn't be made): the server's sentence, which says to narrow.
 const notCopiedNote = (answer) => (answer.notCopied?.message ? `\n\n[${answer.notCopied.message}]` : '')
 
@@ -230,18 +234,20 @@ export async function runRepositoryCall(name, input, { lookup, reader }) {
   if (!isRepositorySource(doc)) return { ok: false, content: `"${repositoryTitle(doc)}" (${doc.id}) is not a code repository. Read it with \`${READ_TOOL_NAME}\` or from the brief.` }
   const title = repositoryTitle(doc)
   const page = Number.isInteger(input?.page) && input.page > 1 ? input.page : undefined
+  // #338: the commit of a page before, which a later page of a find, search or listing is asked at.
+  const atCommit = typeof input?.commit === 'string' && input.commit.trim() ? { commit: input.commit.trim() } : {}
   const under = input?.path ? ` under ${input.path}` : ''
   try {
     const repo = reader(doc)
     if (name === LIST_REPOSITORY_TOOL_NAME) {
-      const answer = await repo.list({ path: input?.path, page })
+      const answer = await repo.list({ path: input?.path, page, ...atCommit })
       const { commit, path, entries } = answer
       const lines = entries.map((e) => `- ${e.path}${e.isFolder ? '/' : ''}`)
       const paged = answer.pages > 1 ? ` · ${pageOfPages(answer)}${plural(answer.total, 'entry', 'entries')}` : ''
       return { ok: true, content: `[${title} · ${path || 'top of the repository'} · commit ${commit}${paged}]\n\n${lines.length ? lines.join('\n') : '(nothing here that Gantry reads)'}${nextPageNote(answer, 'List it again with')}` }
     }
     if (name === FIND_REPOSITORY_TOOL_NAME) {
-      const answer = await repo.find({ pattern: input?.pattern, path: input?.path, page })
+      const answer = await repo.find({ pattern: input?.pattern, path: input?.path, page, ...atCommit })
       const { commit, pattern, paths } = answer
       const total = Number.isFinite(answer.total) ? answer.total : paths.length
       const tail = answer.truncated ? `\n\n[This find stopped early (${answer.truncatedReason}), so these are only the files found so far. Find within a folder (with "path") to cover all of it.]` : ''
@@ -258,6 +264,7 @@ export async function runRepositoryCall(name, input, { lookup, reader }) {
         ...(Number.isInteger(input?.context) && input.context > 0 ? { context: input.context } : {}),
         ...(filesOnly ? { filesOnly: true } : {}),
         ...(page ? { page } : {}),
+        ...atCommit,
       })
       const { commit, query, matches, filesSearched, truncated, truncatedBy, truncatedReason } = answer
       const lines = formatRepositoryMatches(matches, { filesOnly })
@@ -364,6 +371,7 @@ export function extractReadBlocks(text) {
             ...(Array.isArray(item.fileTypes) ? { fileTypes: item.fileTypes.filter((t) => typeof t === 'string') } : {}),
             ...(Number.isInteger(item.context) ? { context: item.context } : {}),
             ...(Number.isInteger(item.page) ? { page: item.page } : {}),
+            ...(typeof item.commit === 'string' ? { commit: item.commit } : {}),
           })
         }
         else errors.push('A read block needs {"id": "document-id"}.')

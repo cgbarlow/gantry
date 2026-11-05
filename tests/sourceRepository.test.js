@@ -295,7 +295,7 @@ describe('the AI reads a repository with tools, and every read names its commit'
         '--\n' +
         'src/payments/retry.ts-1- export const RETRY_POLICY = { attempts: 3 }\n' +
         'src/payments/retry.ts:2: // Orders retry three times.\n\n' +
-        '[Page 1 of 7. Search again with "page": 2 for the next.]'
+        `[Page 1 of 7. Search again with "page": 2 and "commit": "${HEAD}" for the next, so every page is of the same commit.]`
     )
     assert.doesNotMatch(found.content, /cut short/)
   })
@@ -311,12 +311,12 @@ describe('the AI reads a repository with tools, and every read names its commit'
     const files = await runRepositoryCall('search_repository', { id: 'billing-api', query: 'order', filesOnly: true }, { lookup, reader: repo })
     assert.equal(files.content, `[Billing API · search "order" · commit ${HEAD} · 4 matches in 2 files]\n\nsrc/a.ts (3 matches)\nsrc/b.ts (1 match)`)
 
-    const found = await runRepositoryCall('find_repository_files', { id: 'billing-api', pattern: '**/*.tf', page: 2 }, { lookup, reader: repo })
-    assert.equal(found.content, `[Billing API · find "**/*.tf" · commit ${HEAD} · page 2 of 3, 402 files]\n\ninfra/main.tf\ninfra/network.tf\n\n[Page 2 of 3. Find again with "page": 3 for the next.]`)
+    const found = await runRepositoryCall('find_repository_files', { id: 'billing-api', pattern: '**/*.tf', page: 2, commit: HEAD }, { lookup, reader: repo })
+    assert.equal(found.content, `[Billing API · find "**/*.tf" · commit ${HEAD} · page 2 of 3, 402 files]\n\ninfra/main.tf\ninfra/network.tf\n\n[Page 2 of 3. Find again with "page": 3 and "commit": "${HEAD}" for the next, so every page is of the same commit.]`)
     assert.deepEqual(found.label, { title: 'Billing API', where: 'find "**/*.tf" page 2', commit: HEAD, chars: found.content.length })
 
     const listed = await runRepositoryCall('list_repository_folder', { id: 'billing-api', path: 'src' }, { lookup, reader: repo })
-    assert.equal(listed.content, `[Billing API · src · commit ${HEAD} · page 1 of 2, 201 entries]\n\n- src/a.ts\n\n[Page 1 of 2. List it again with "page": 2 for the next.]`)
+    assert.equal(listed.content, `[Billing API · src · commit ${HEAD} · page 1 of 2, 201 entries]\n\n- src/a.ts\n\n[Page 1 of 2. List it again with "page": 2 and "commit": "${HEAD}" for the next, so every page is of the same commit.]`)
 
     const read = await runRepositoryCall('read_repository_file', { id: 'billing-api', path: 'src/a.ts', lines: '10-11' }, { lookup, reader: repo })
     assert.match(read.content, new RegExp(`^\\[Billing API · src/a\\.ts · commit ${HEAD} · lines 10–11 of 90\\]\\nCite it as \\[Billing API, src/a\\.ts\\]`))
@@ -325,7 +325,7 @@ describe('the AI reads a repository with tools, and every read names its commit'
     assert.equal(read.label.where, 'src/a.ts (lines 10–11 of 90)')
     assert.deepEqual(asked.map(([what, options]) => [what, options]), [
       ['search', { query: 'order', path: undefined, filesOnly: true }],
-      ['find', { pattern: '**/*.tf', path: undefined, page: 2 }],
+      ['find', { pattern: '**/*.tf', path: undefined, page: 2, commit: HEAD }],
       ['list', { path: 'src', page: undefined }],
       ['read', { path: 'src/a.ts', lines: '10-11' }],
     ])
@@ -357,7 +357,7 @@ describe('the AI reads a repository with tools, and every read names its commit'
     assert.match(byName.search_repository.description, /every page says how many there are in all/)
     assert.match(byName.search_repository.description, /search within a folder/)
     assert.match(byName.find_repository_files.description, /names only: to search what files contain, use `search_repository`/)
-    assert.deepEqual(Object.keys(byName.search_repository.parameters.properties), ['id', 'query', 'regex', 'path', 'fileTypes', 'context', 'filesOnly', 'page'])
+    assert.deepEqual(Object.keys(byName.search_repository.parameters.properties), ['id', 'query', 'regex', 'path', 'fileTypes', 'context', 'filesOnly', 'page', 'commit'])
     assert.ok(byName.read_repository_file.parameters.properties.lines)
     assert.match(REPOSITORY_TOOLS_TEXT, /find_repository_files/)
     assert.match(REPOSITORY_TEXT_FALLBACK_INSTRUCTIONS, /\{"id":"repository-id","find":"\*\*\/\*\.tf"\}/)

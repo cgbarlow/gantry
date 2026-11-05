@@ -156,7 +156,7 @@ test('find_repository_files, and search and read with their new options, pass wh
       return undefined
     },
     async (gantryClient, fetch) => {
-      const found = payload(await tool('find_repository_files').handler({ slug: 'my-instance', id: 'billing-api', pattern: '**/*.tf', page: 2 }, { gantryClient }))
+      const found = payload(await tool('find_repository_files').handler({ slug: 'my-instance', id: 'billing-api', pattern: '**/*.tf', page: 2, commit: HEAD }, { gantryClient }))
       assert.deepEqual([found.paths, found.total, found.pages], [['infra/main.tf'], 201, 2])
       const searched = payload(await tool('search_repository').handler({ slug: 'my-instance', id: 'billing-api', query: 'retry\\w*', regex: true, fileTypes: ['ts'], context: 2, filesOnly: true, path: 'src' }, { gantryClient }))
       assert.equal(searched.totalMatches, 2)
@@ -164,14 +164,17 @@ test('find_repository_files, and search and read with their new options, pass wh
       assert.deepEqual(read.lines, { from: 10, to: 11, total: 90 })
       assert.equal(read.text, 'ten\neleven')
       await tool('list_repository_folder').handler({ slug: 'my-instance', id: 'billing-api', path: 'src', page: 2 }, { gantryClient })
+      await tool('search_repository').handler({ slug: 'my-instance', id: 'billing-api', query: 'retry', page: 2, commit: HEAD }, { gantryClient })
 
       const asked = fetch.calls.filter((c) => c.url.pathname === '/api/sources/repository').map(requestBody)
       assert.deepEqual(asked, [
-        { action: 'find', repository: POINTER, pattern: '**/*.tf', path: '', page: 2 },
+        { action: 'find', repository: POINTER, pattern: '**/*.tf', path: '', page: 2, commit: HEAD },
         { action: 'search', repository: POINTER, query: 'retry\\w*', path: 'src', regex: true, fileTypes: ['ts'], context: 2, filesOnly: true },
         { action: 'read', repository: POINTER, path: 'src/a.ts', lines: '10-11' },
         { action: 'list', repository: POINTER, path: 'src', page: 2 },
+        { action: 'search', repository: POINTER, query: 'retry', path: '', page: 2, commit: HEAD },
       ])
+      for (const name of ['find_repository_files', 'search_repository', 'list_repository_folder']) assert.ok(tool(name).inputSchema.commit, `${name} takes the commit of the page before`)
       const names = tools.map((t) => t.name)
       assert.ok(names.indexOf('find_repository_files') < names.indexOf('search_repository'))
       assert.match(tool('search_repository').description, /contents only: to find files by name, use find_repository_files/)
@@ -195,7 +198,32 @@ test('a copy gantry serve is still preparing (202) is asked again until it is re
       const result = await tool('search_repository').handler({ slug: 'my-instance', id: 'billing-api', query: 'MAX' }, { gantryClient, repositoryPollMs: 0 })
       assert.equal(result.isError, undefined)
       assert.equal(payload(result).totalMatches, 0)
-      assert.equal(fetch.calls.filter((c) => c.url.pathname === '/api/sources/repository').length, 3, 'asked until the copy was ready')
+      const asked = fetch.calls.filter((c) => c.url.pathname === '/api/sources/repository').map(requestBody)
+      assert.equal(asked.length, 3, 'asked until the copy was ready')
+      assert.equal(asked[0].commit, undefined)
+      assert.deepEqual(asked.slice(1).map((body) => body.commit), [HEAD, HEAD], 'asked again at the commit being prepared, so a branch that moves meanwhile starts no second download')
+    }
+  )
+})
+
+test('a call the agent cancels while a copy is preparing stops asking gantry serve', async () => {
+  await withClient(
+    ({ url }) => {
+      if (url.pathname === '/api/instance/sources') return { status: 200, body: { entries: repositoryEntries, totalBytes: 10, warning: null, limits: {} } }
+      if (url.pathname === '/api/sources/repository') return { status: 202, body: { preparing: true, commit: HEAD, receivedBytes: 0, repository: 'acme/billing-api' } }
+      return undefined
+    },
+    async (gantryClient, fetch) => {
+      const stop = new AbortController()
+      const asking = tool('search_repository').handler({ slug: 'my-instance', id: 'billing-api', query: 'MAX' }, { gantryClient, repositoryPollMs: 20, signal: stop.signal })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      stop.abort()
+      const result = await asking
+      assert.equal(result.isError, true)
+      assert.equal(payload(result).detail.code, 'abandoned')
+      const after = fetch.calls.length
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      assert.equal(fetch.calls.length, after, 'nothing more is asked once cancelled')
     }
   )
 })

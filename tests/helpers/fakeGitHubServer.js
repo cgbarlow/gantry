@@ -106,6 +106,10 @@ export function createFakeGitHubServer({
   archiveLog,
   archiveDelayMs = 0,
   archiveExtra = {},
+  // #338: a token that can see the repository's metadata and nothing else: a fine-grained token or GitHub App with only "Metadata: read".
+  // It is answered GET /repos/{owner}/{repo} as any valid token is, and 403 "Resource not accessible" for its contents, refs, trees and
+  // archives, as on the real service.
+  metadataOnlyPat = null,
 } = {}) {
   const issues = new Map() // number -> issue object
   let apiRequestCount = 0
@@ -234,6 +238,10 @@ export function createFakeGitHubServer({
     const [, providedPat] = auth.match(/^Bearer (.+)$/) ?? []
     const validPats = Array.isArray(validPat) ? validPat : [validPat]
     const anonymousGet = anonymousRead && req.method === 'GET' && !req.headers['authorization']
+    if (metadataOnlyPat && providedPat === metadataOnlyPat) {
+      if (req.method === 'GET' && pathname === repoBasePath) return json(200, { id: 1, name: repository, full_name: `${owner}/${repository}`, owner: { login: owner, type: ownerType }, default_branch: 'main' })
+      return json(403, { message: 'Resource not accessible by personal access token (fake: metadata only)' })
+    }
     if (!anonymousGet && !validPats.includes(providedPat)) {
       return json(401, { message: 'Bad credentials (fake server: invalid or missing PAT)' })
     }

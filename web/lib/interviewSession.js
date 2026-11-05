@@ -852,14 +852,14 @@ export function createInterviewSession(config = {}) {
     // #319: a model without tools reads a code repository in the same read blocks: a `path` to read, a folder to `list`, or text to `search`.
     // #338: or files to `find` by name; with a find or a search, `path` is the folder to look under. The options are the tools' own.
     if (live.some((s) => s.id === id && s.repository)) {
-      const { page } = input ?? {}
-      if (typeof input?.find === 'string') return runRepository(FIND_REPOSITORY_TOOL_NAME, { id, pattern: input.find, path: input.path, page })
+      const { page, commit } = input ?? {}
+      if (typeof input?.find === 'string') return runRepository(FIND_REPOSITORY_TOOL_NAME, { id, pattern: input.find, path: input.path, page, commit })
       if (typeof input?.search === 'string') {
         const { regex, fileTypes, context, filesOnly } = input
-        return runRepository(SEARCH_REPOSITORY_TOOL_NAME, { id, query: input.search, path: input.path, regex, fileTypes, context, filesOnly, page })
+        return runRepository(SEARCH_REPOSITORY_TOOL_NAME, { id, query: input.search, path: input.path, regex, fileTypes, context, filesOnly, page, commit })
       }
       if (typeof input?.path === 'string') return runRepository(READ_REPOSITORY_TOOL_NAME, { id, path: input.path, range: input.range, lines: input.lines })
-      return runRepository(LIST_REPOSITORY_TOOL_NAME, { id, path: input?.list ?? '', page })
+      return runRepository(LIST_REPOSITORY_TOOL_NAME, { id, path: input?.list ?? '', page, commit })
     }
     state.tool = toolActivity(READ_TOOL_NAME, input) // #341: shown until the next request goes
     const result = runReadCall({ id, range: input?.range }, { lookup: (wanted) => live.find((s) => s.id === wanted), access: plan.get(id) })

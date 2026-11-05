@@ -64,16 +64,19 @@ const pause = (ms, signal) =>
  * #336: a request that is cut off (no answer at all, or a proxy's answer that it gave up) is asked once more, after `retryWaitMs`. Cut off
  * again, it is refused as `cut-off` when the server has answered recently, and as `server-unreachable` (REPOSITORY_NEEDS_SERVER) when not.
  * #338: while the server answers that its copy of the repository is preparing (202 `{ preparing: true, receivedBytes }`), it is asked
- * again every `pollMs`, and `onPreparing({ receivedBytes, repository })` hears how far the download has got. `signal` abandons the call:
- * nothing more is asked and it rejects as `abandoned`.
+ * again every `pollMs`, and `onPreparing({ receivedBytes, repository })` hears how far the download has got. It is asked again at the
+ * commit the server said it is preparing, so that a branch that moves on meanwhile can't start a second download. `signal` abandons the
+ * call: nothing more is asked and it rejects as `abandoned`.
  */
 export async function callRepository(action, repository, extra = {}, { token = null, fetchImpl = fetch, retryWaitMs = 500, pollMs = REPOSITORY_POLL_MS, onPreparing, signal } = {}) {
   const auth = basicAuthHeaderForValue(token)
+  // #338: the commit a 202 named, which every later poll of this call asks at.
+  let preparingCommit = null
   const ask = () =>
     fetchImpl('/api/sources/repository', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) },
-      body: JSON.stringify({ action, repository, ...extra }),
+      body: JSON.stringify({ action, repository, ...extra, ...(preparingCommit ? { commit: preparingCommit } : {}) }),
       ...(signal ? { signal } : {}),
     }).then(
       async (res) => {
@@ -108,6 +111,7 @@ export async function callRepository(action, repository, extra = {}, { token = n
     const { res, body } = await askOnce()
     if (res.status === 202 && body.preparing) {
       if (Date.now() - startedAt > PREPARING_LIMIT_MS) throw new SourceDocumentError(REPOSITORY_STILL_PREPARING, { code: 'timed-out', status: 504 })
+      if (typeof body.commit === 'string' && body.commit) preparingCommit = body.commit
       onPreparing?.({ receivedBytes: Number(body.receivedBytes) || 0, repository: body.repository ?? null })
       await pause(pollMs, signal)
       continue
@@ -119,7 +123,8 @@ export async function callRepository(action, repository, extra = {}, { token = n
 
 /**
  * A reader for one pointer, with the architect's stored token: `{ prepare(), list({ path, commit, page }), read({ path, commit, lines }),
- * find({ pattern, path, page }), search({ query, regex, path, fileTypes, context, filesOnly, page }), compare(reads) }`. What the AI's tools
+ * find({ pattern, path, page, commit }), search({ query, regex, path, fileTypes, context, filesOnly, page, commit }), compare(reads) }`.
+ * #338: a find or search given the `commit` of its first page reads its later pages at that commit too. What the AI's tools
  * (web/lib/interviewSources.js) and Out of date (web/lib/outOfDateLoad.js) are given. #338: each call waits through "preparing", telling
  * `onPreparing` (the reader's, or one call's own as its second argument, with that call's `signal`).
  */
@@ -137,8 +142,8 @@ export function repositoryReaderFor(repository, { fetchImpl = fetch, token, retr
     prepare: ({ commit } = {}, own) => call('prepare', { commit }, own),
     list: ({ path, commit, page } = {}, own) => call('list', { path, commit, page }, own),
     read: ({ path, commit, lines } = {}, own) => call('read', { path, commit, lines }, own),
-    find: ({ pattern, path, page } = {}, own) => call('find', { pattern, path, page }, own),
-    search: ({ query, path, regex, fileTypes, context, filesOnly, page } = {}, own) => call('search', { query, regex, path, fileTypes, context, filesOnly, page }, own),
+    find: ({ pattern, path, page, commit } = {}, own) => call('find', { pattern, path, page, commit }, own),
+    search: ({ query, path, regex, fileTypes, context, filesOnly, page, commit } = {}, own) => call('search', { query, regex, path, fileTypes, context, filesOnly, page, commit }, own),
     compare: (reads, own) => call('compare', { reads }, own),
   }
 }

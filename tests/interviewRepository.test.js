@@ -323,6 +323,9 @@ describe('a repository read cut off on its way from the Gantry server', () => {
     assert.equal(asked.length, 3, 'asked again until the copy was ready')
     assert.deepEqual(progress.map((p) => p.receivedBytes), [1024 * 1024, 2 * 1024 * 1024])
     assert.deepEqual(asked[0], { action: 'search', repository, query: 'MAX_ORDER', regex: true, fileTypes: ['ts'], context: 2, filesOnly: false, page: 1 })
+    // Asked again at the commit the server is preparing, so a branch that moves meanwhile can't start a second download.
+    assert.deepEqual(asked.slice(1).map((body) => body.commit), [HEAD, HEAD])
+    assert.deepEqual(asked[1], { ...asked[0], commit: HEAD })
 
     // Abandoned (the architect stopped the turn): no further request is made.
     const stop = new AbortController()
@@ -341,15 +344,17 @@ describe('a repository read cut off on its way from the Gantry server', () => {
     const asked = []
     const fetchImpl = async (_url, init) => (asked.push(JSON.parse(init.body)), answer(200, { commit: HEAD }))
     const reader = repositoryReaderFor(repository, { fetchImpl, token: null, retryWaitMs: 0 })
-    await reader.find({ pattern: '**/*.tf', path: 'infra', page: 2 })
+    await reader.find({ pattern: '**/*.tf', path: 'infra', page: 2, commit: HEAD })
     await reader.prepare()
     await reader.list({ path: 'src', page: 3 })
     await reader.read({ path: 'src/a.ts', lines: '10-20' })
+    await reader.search({ query: 'retry', page: 2, commit: HEAD })
     assert.deepEqual(asked, [
-      { action: 'find', repository, pattern: '**/*.tf', path: 'infra', page: 2 },
+      { action: 'find', repository, pattern: '**/*.tf', path: 'infra', page: 2, commit: HEAD },
       { action: 'prepare', repository },
       { action: 'list', repository, path: 'src', page: 3 },
       { action: 'read', repository, path: 'src/a.ts', lines: '10-20' },
+      { action: 'search', repository, query: 'retry', page: 2, commit: HEAD },
     ])
   })
 
@@ -432,9 +437,9 @@ describe('a repository copy that is preparing, in an interview', () => {
     const openAiReply = (text) =>
       new Response(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { status: 200, headers: { 'content-type': 'text/event-stream' } })
     const blocks = [
-      { id: 'billing-api', find: '**/*.tf', page: 2 },
-      { id: 'billing-api', search: 'retry\\w*', regex: true, path: 'src', fileTypes: ['ts'], context: 2, filesOnly: true, page: 3 },
-      { id: 'billing-api', list: 'src', page: 2 },
+      { id: 'billing-api', find: '**/*.tf', page: 2, commit: HEAD },
+      { id: 'billing-api', search: 'retry\\w*', regex: true, path: 'src', fileTypes: ['ts'], context: 2, filesOnly: true, page: 3, commit: HEAD },
+      { id: 'billing-api', list: 'src', page: 2, commit: HEAD },
       { id: 'billing-api', path: 'src/a.ts', lines: '10-20' },
     ]
     const ai = fakeAi((_request, n) => (n === 0 ? openAiReply('Reading.\n\n```gantry-read\n' + JSON.stringify(blocks) + '\n```') : openAiReply('Done.')))
@@ -449,9 +454,9 @@ describe('a repository copy that is preparing, in an interview', () => {
     await session.start()
     assert.match(ai.calls[0].body.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n'), /"find":"\*\*\/\*\.tf"/, 'the model is told how to find')
     assert.deepEqual(asked, [
-      ['find', { pattern: '**/*.tf', path: undefined, page: 2 }],
-      ['search', { query: 'retry\\w*', path: 'src', regex: true, fileTypes: ['ts'], context: 2, filesOnly: true, page: 3 }],
-      ['list', { path: 'src', page: 2 }],
+      ['find', { pattern: '**/*.tf', path: undefined, page: 2, commit: HEAD }],
+      ['search', { query: 'retry\\w*', path: 'src', regex: true, fileTypes: ['ts'], context: 2, filesOnly: true, page: 3, commit: HEAD }],
+      ['list', { path: 'src', page: 2, commit: HEAD }],
       ['read', { path: 'src/a.ts', lines: '10-20' }],
     ])
   })

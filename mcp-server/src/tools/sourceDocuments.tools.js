@@ -228,23 +228,42 @@ export const REPOSITORY_POLL_MS = 3000
 /** #338: the longest one call keeps asking while a copy is preparing (gantry serve gives up on a download well before this). */
 const REPOSITORY_PREPARING_LIMIT_MS = 10 * 60 * 1000
 
-const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+// Waits `ms`, or resolves early once `signal` aborts.
+const pause = (ms, signal) =>
+  new Promise((resolve) => {
+    if (signal?.aborted) return resolve()
+    const timer = setTimeout(done, ms)
+    function done() {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', done)
+      resolve()
+    }
+    signal?.addEventListener('abort', done, { once: true })
+  })
+
+// #338: the answer to a call the agent cancelled while a copy was preparing.
+const cancelledResult = () => errorResult('The call was cancelled while Gantry prepared its copy of the code repository.', { status: 499, code: 'abandoned' })
 
 // Calls /api/sources/repository for `repository` with the instance's workspace credential: `{ body }` or `{ result }` (a refusal shaped for return).
-// #338: asked again every `repositoryPollMs` (the context's, for a test) while gantry serve answers that the copy is still preparing.
-async function callRepositoryRoute(args, { gantryClient, repositoryPollMs = REPOSITORY_POLL_MS }, payload) {
+// #338: asked again every `repositoryPollMs` (the context's, for a test) while gantry serve answers that the copy is still preparing, at the
+// commit it said it is preparing, so that a branch that moves on meanwhile can't start a second download. `signal` (the MCP request's own,
+// which aborts when the agent cancels the call) stops the asking.
+async function callRepositoryRoute(args, { gantryClient, repositoryPollMs = REPOSITORY_POLL_MS, signal }, payload) {
   const resolved = await resolveWorkspaceOrError(args, { gantryClient })
   if (resolved.errorResult) return { result: resolved.errorResult }
   const startedAt = Date.now()
+  let body = payload
   for (;;) {
-    const res = await gantryClient.request({ workspaceId: resolved.workspaceId, path: '/api/sources/repository', method: 'POST', body: payload })
+    if (signal?.aborted) return { result: cancelledResult() }
+    const res = await gantryClient.request({ workspaceId: resolved.workspaceId, path: '/api/sources/repository', method: 'POST', body })
     if (res.credentialError) return { result: credentialErrorResult(res.credentialError) }
     if (!res.ok) return { result: errorResult(res.body?.error ?? `gantry serve responded ${res.status}`, { status: res.status, code: res.body?.code }) }
     if (res.status === 202 && res.body?.preparing) {
       if (Date.now() - startedAt > REPOSITORY_PREPARING_LIMIT_MS) {
         return { result: errorResult('Gantry is still preparing its copy of this code repository. Try again in a moment, or something narrower.', { status: 504, code: 'timed-out' }) }
       }
-      await pause(repositoryPollMs)
+      if (typeof res.body.commit === 'string' && res.body.commit) body = { ...payload, commit: res.body.commit }
+      await pause(repositoryPollMs, signal)
       continue
     }
     return { body: res.body }
@@ -297,8 +316,13 @@ async function addRepositorySourceDocument(args, context) {
   return okResult({ ...res.body, branch: checked.branch, commit: checked.commit, note: 'Only the pointer is kept: read the repository with find_repository_files, search_repository, list_repository_folder and read_repository_file.' })
 }
 
-// #338: what an agent may pass on to gantry serve, as it takes it (page from 1, the rest as the search takes them).
-const pageOf = (args) => (Number.isInteger(args.page) && args.page > 1 ? { page: args.page } : {})
+// #338: what an agent may pass on to gantry serve, as it takes it (page from 1, the rest as the search takes them). A later page carries the
+// commit of the first, so a branch that moves on between them can't mix two commits' results.
+const pageOf = (args) => ({
+  ...(Number.isInteger(args.page) && args.page > 1 ? { page: args.page } : {}),
+  ...(typeof args.commit === 'string' && args.commit.trim() ? { commit: args.commit.trim() } : {}),
+})
+const commitInput = z.string().optional().describe('Optional: with "page", the "commit" the first page named, so every page is of the same commit.')
 
 async function listRepositoryFolder(args, context) {
   const { entry, result } = await repositoryEntry(args, context)
@@ -528,7 +552,7 @@ export const tools = [
       '1. Finds files by name in a code repository Source document, at its branch\'s latest commit. "pattern" is matched against paths: * within one folder, ** across folders, ? one character, {a,b} either, as in "**/*.tf", "src/**/order*" or "*.{yml,yaml}"; a pattern with no "/" matches a file\'s own name in any folder. ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" and "pattern" are required; "path" finds under one folder only. ' +
       '3. This matches names only: to search what files contain, use search_repository. ' +
-      '4. Returns "paths", 200 a page, sorted, with "page", "pages", "total" and "nextPage" when there is another: ask for it with "page". The response names the "commit" it was read at. ' +
+      '4. Returns "paths", 200 a page, sorted, with "page", "pages", "total" and "nextPage" when there is another: ask for it with "page" and the "commit" this page named. The response names the "commit" it was read at. ' +
       '5. If the response carries "notCopied", gantry serve had no copy of the repository (too big, or the download could not be made) and listed it folder by folder: "notCopied.message" says why; find within a folder to cover all of it. Vendored code, build output and binaries are never listed.',
     inputSchema: {
       ...slugRefShape,
@@ -536,6 +560,7 @@ export const tools = [
       pattern: z.string().min(1).describe('The name pattern, such as "**/*.tf" or "src/**/order*".'),
       path: z.string().optional().describe('Optional: find only under this folder.'),
       page: z.number().int().positive().optional().describe('The page to read, from 1.'),
+      commit: commitInput,
     },
     handler: findRepositoryFiles,
   },
@@ -545,7 +570,7 @@ export const tools = [
       '1. Searches what the files of a code repository Source document contain, at its branch\'s latest commit: every file, by plain text ignoring case, or by regular expression with "regex": true (still ignoring case, at most 300 characters, and held to a short time budget). ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" and "query" are required; "path" searches under one folder only; "fileTypes" narrows to extensions ("ts") or name patterns ("*.test.js"). ' +
       '3. This searches contents only: to find files by name, use find_repository_files. ' +
-      '4. Returns "matches" ({ path, line, text }, with "before" and "after" lines when "context" is 1 to 5), 50 matching lines a page; with "filesOnly": true, the matching files instead ({ path, count }), 200 a page. Every page states "totalMatches", "totalFiles", "page", "pages" and "nextPage" when there is another: ask for it with "page". Nothing is cut short. ' +
+      '4. Returns "matches" ({ path, line, text }, with "before" and "after" lines when "context" is 1 to 5), 50 matching lines a page; with "filesOnly": true, the matching files instead ({ path, count }), 200 a page. Every page states "totalMatches", "totalFiles", "page", "pages" and "nextPage" when there is another: ask for it with "page" and the "commit" this page named. Nothing is cut short. ' +
       '5. A regular expression that reaches its time budget comes back with "truncated": true and "truncatedBy": "time-budget": try a simpler pattern or a folder. If the response carries "notCopied", gantry serve had no copy (too big, or the download could not be made) and read it file by file, which may stop early ("truncated", "truncatedReason") and is not paged: "notCopied.message" says why; search within a folder to cover all of it. ' +
       '6. Skips vendored code, build output and binaries. Read a file with read_repository_file before you rely on it.',
     inputSchema: {
@@ -558,6 +583,7 @@ export const tools = [
       context: z.number().int().min(0).max(5).optional().describe('Optional: lines to show before and after each match, 0 to 5.'),
       filesOnly: z.boolean().optional().describe('Optional: true to return the matching files with a count each, instead of the lines.'),
       page: z.number().int().positive().optional().describe('The page to read, from 1.'),
+      commit: commitInput,
     },
     handler: searchRepository,
   },
@@ -566,12 +592,13 @@ export const tools = [
     description:
       '1. Lists the files and folders in a folder of a code repository Source document, at its branch\'s latest commit. ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" is the repository\'s Source document id; "path" is a folder from the root ("" or left out for the top). ' +
-      '3. Vendored code, build output and binaries are never listed, nor anything outside the folders the pointer is narrowed to. The response names the "commit" it was read at. A long folder comes 200 entries a page, with "page", "pages", "total" and "nextPage": ask for it with "page".',
+      '3. Vendored code, build output and binaries are never listed, nor anything outside the folders the pointer is narrowed to. The response names the "commit" it was read at. A long folder comes 200 entries a page, with "page", "pages", "total" and "nextPage": ask for it with "page" and the "commit" this page named.',
     inputSchema: {
       ...slugRefShape,
       id: z.string().describe('The code repository\'s Source document id, from list_source_documents.'),
       path: z.string().optional().describe('A folder path from the root of the repository.'),
       page: z.number().int().positive().optional().describe('The page to read, from 1.'),
+      commit: commitInput,
     },
     handler: listRepositoryFolder,
   },

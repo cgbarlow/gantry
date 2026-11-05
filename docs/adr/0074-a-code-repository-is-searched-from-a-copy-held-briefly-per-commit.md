@@ -83,8 +83,9 @@ of searches, and a submodule shows as a folder that isn't followed.
 **One copy, shared, but each caller proves access.** A copy of a public
 repository read without a token is shared. Any other copy is shared by
 repository and commit among callers who have each shown, within the last few
-minutes and with their own token, that they can read that repository: one cheap
-request to the Provider. Nobody reaches content they couldn't read themselves,
+minutes and with their own token, that they can read that repository's code: one
+cheap request to the Provider for its top folder at that commit (seeing the
+repository's metadata is not enough). Nobody reaches content they couldn't read themselves,
 and fifteen architects on one private repository need one copy, not fifteen.
 
 ## Considered options

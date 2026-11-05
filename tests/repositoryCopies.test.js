@@ -336,11 +336,33 @@ describe('sharing a copy, but only with callers who can read the repository', ()
       logs.api.length = 0
       const shared = await reader(OTHER).read({ path: 'src/orders/limits.ts', commit: at })
       assert.equal(shared.text, CODE['src/orders/limits.ts'])
-      assert.deepEqual(logs.api, ['GET /repos/acme/billing-api'], 'one cheap check with their own token')
+      assert.deepEqual(logs.api, ['GET /repos/acme/billing-api/contents'], 'one cheap read of the code, with their own token: the top folder at that commit')
       logs.api.length = 0
       await reader(OTHER).search({ query: 'orders' })
       assert.deepEqual(logs.api, ['GET /repos/acme/billing-api/git/ref/heads/main'], 'once passed, not asked again for a while (their own head, though)')
       assert.equal(logs.archives.length, 1, 'one copy for both')
+    })
+  })
+
+  // #338: seeing a repository is not reading it. A fine-grained GitHub token with only "Metadata: read" (or a GitLab Guest on a private
+  // project) is answered the repository's metadata but refused its code, and a commit is easy to come by: every citation carries one.
+  test('a token that can see the repository but not read its code gets nothing from a copy, even naming the commit, and even after a check', () => {
+    const SEES_ONLY = 'a-metadata-only-token'
+    const { server, logs } = archivingGitHub({ metadataOnlyPat: SEES_ONLY })
+    return withFake(server, async (baseUrl) => {
+      const copies = createRepositoryCopyStore()
+      const reader = (pat) => createRepositoryReader(github(baseUrl), pat, { allowBaseUrl: true, copies })
+      const at = (await reader(TOKEN).read({ path: 'src/orders/limits.ts' })).commit
+      await assert.rejects(reader(SEES_ONLY).check(), (err) => err.code === 'no-access', 'its check is refused at the branch head')
+      for (const ask of [(r) => r.read({ path: 'src/orders/limits.ts', commit: at }), (r) => r.list({ commit: at }), (r) => r.search({ query: 'orders', commit: at }), (r) => r.find({ pattern: '*', commit: at }), (r) => r.prepare({ commit: at })]) {
+        await assert.rejects(ask(reader(SEES_ONLY)), (err) => {
+          assert.equal(err.code, 'no-access')
+          assert.match(err.message, /with the token you gave/)
+          return true
+        })
+      }
+      await assert.rejects(reader(SEES_ONLY).compare({ reads: [{ path: 'src/orders/limits.ts', commit: at }] }), (err) => err.code === 'no-access')
+      assert.equal(logs.archives.length, 1)
     })
   })
 
@@ -396,6 +418,77 @@ describe('memory stays within its limits', () => {
     assert.deepEqual(copies.stats().copies.map((c) => c.key.split('\n')[1]), ['c1', 'c3'])
     assert.equal(copies.stats().heldBytes, 800)
     assert.ok(copies.stats().heldBytes <= 1000)
+  })
+
+  // A download the test finishes by hand: `finish(bytes)` makes it a copy of that size.
+  function heldDownload() {
+    let finish
+    const done = new Promise((resolve) => (finish = resolve))
+    const download = async (work) => {
+      download.work = work
+      const bytes = await done
+      return { files: new Map([['f.ts', 'x'.repeat(bytes)]]), leftOut: new Map(), folders: new Set(), bytes }
+    }
+    download.finish = finish
+    return download
+  }
+  const booksBalance = (copies) => {
+    const { heldBytes, copies: held } = copies.stats()
+    assert.equal(heldBytes, held.reduce((sum, c) => sum + c.bytes, 0), 'what the store counts is what it holds')
+  }
+
+  test('a copy dropped while a caller\'s access check is under way is not put back behind the store\'s back', async () => {
+    const copies = createRepositoryCopyStore({ totalBytes: 100, perRepositoryBytes: 80 })
+    await copies.ensureCopy({ repositoryKey: 'github|x|acme/app', commit: 'a', credential: credentialHash(TOKEN), download: copyOf(80), checkAccess: async () => {} }).then((h) => h.settled)
+    // A caller whose check of copy a takes a while (a slow Provider), with a token the copy was not made with.
+    let passCheck
+    const checking = copies.ensureCopy({ repositoryKey: 'github|x|acme/app', commit: 'a', credential: credentialHash(OTHER), download: copyOf(80), checkAccess: () => new Promise((resolve) => (passCheck = resolve)) })
+    await pause(0)
+    // Meanwhile another copy needs the room, and a goes.
+    await ensure(copies, 'b', 80)
+    assert.deepEqual(copies.stats().copies.map((c) => c.key.split('\n')[1]), ['b'])
+    passCheck()
+    const handle = await checking
+    assert.equal(handle.state, 'ready', 'the caller still gets the copy it was admitted to, this once')
+    assert.deepEqual(copies.stats().copies.map((c) => c.key.split('\n')[1]), ['b'], 'but it is not held again')
+    booksBalance(copies)
+    assert.ok(copies.stats().heldBytes <= 100)
+  })
+
+  test('a download under way takes its room in the total before it starts, so copies and downloads together stay within it', async () => {
+    const copies = createRepositoryCopyStore({ totalBytes: 300, perRepositoryBytes: 100 })
+    await ensure(copies, 'old', 60)
+    const downloads = [heldDownload(), heldDownload(), heldDownload()]
+    const start = (commit, download, who) => copies.ensureCopy({ repositoryKey: 'github|x|acme/app', commit, credential: credentialHash(who), download, checkAccess: async () => {} })
+    assert.equal((await start('c1', downloads[0], 'a')).state, 'preparing')
+    assert.equal((await start('c2', downloads[1], 'b')).state, 'preparing')
+    assert.equal(copies.stats().reservedBytes, 200)
+    assert.equal(copies.stats().heldBytes, 60, 'the old copy still fits')
+    assert.equal((await start('c3', downloads[2], 'c')).state, 'preparing')
+    assert.deepEqual(copies.stats().copies, [], 'the least recently used copy went, to make room for the third')
+    assert.equal(downloads[0].work.archiveLimitBytes, 100, 'an archive is held to the per-repository limit, not the total')
+
+    assert.deepEqual(await start('c4', heldDownload(), 'd'), { state: 'unavailable', reason: 'busy' }, 'no room for a fourth: read file by file this time')
+    assert.equal(copies.stats().preparing.length, 3)
+
+    downloads[0].finish(40)
+    await (await start('c1', downloads[0], 'a')).settled
+    assert.equal(copies.stats().reservedBytes, 200, 'a finished download gives back its room')
+    assert.equal(copies.stats().heldBytes, 40, 'and holds only what it is')
+    booksBalance(copies)
+    assert.equal((await start('c4', heldDownload(), 'd')).state, 'preparing', 'busy is not remembered: once there is room, it starts')
+  })
+
+  test('one caller has at most two downloads under way at once', async () => {
+    const copies = createRepositoryCopyStore({ totalBytes: 1000, perRepositoryBytes: 100 })
+    const start = (commit, who) => copies.ensureCopy({ repositoryKey: 'github|x|acme/app', commit, credential: who ? credentialHash(who) : null, download: heldDownload(), checkAccess: async () => {} })
+    assert.equal((await start('c1', 'a')).state, 'preparing')
+    assert.equal((await start('c2', 'a')).state, 'preparing')
+    assert.deepEqual(await start('c3', 'a'), { state: 'unavailable', reason: 'busy' })
+    assert.equal((await start('c3', 'b')).state, 'preparing', 'another caller is not held up by them')
+    assert.equal((await start('c4', null)).state, 'preparing')
+    assert.equal((await start('c5', null)).state, 'preparing')
+    assert.deepEqual(await start('c6', null), { state: 'unavailable', reason: 'busy' }, 'every caller with no token counts as one')
   })
 
   test('one repository over the per-repository limit is not copied, and is not tried again on every read', async () => {
@@ -482,14 +575,15 @@ describe('every Provider\'s archive, and what happens without one', () => {
   })
 
   test('too big for a copy, narrowed to folders on GitLab or Azure DevOps: copied for those folders only', async () => {
+    const PADDED = { ...CODE, 'docs/handbook.md': 'A long handbook outside the folders.\n'.repeat(70) }
     for (const [fake, apiRoot, repository] of [
-      [(log) => createFakeGitLabServer({ namespace: 'acme/payments', repository: 'billing-api', validPat: TOKEN, files: CODE, archives: true, archiveLog: log }), '/api/v4', (baseUrl) => ({ provider: 'gitlab', location: { namespace: 'acme/payments', repository: 'billing-api', baseUrl }, branch: 'main', folders: ['src/orders', 'infra'] })],
-      [(log) => createFakeAzureDevOpsServer({ organization: 'contoso', project: 'Payments', repository: 'billing', validPat: TOKEN, files: CODE, archives: true, archiveLog: log }), '', (baseUrl) => ({ provider: 'azure-devops', location: { organization: 'contoso', project: 'Payments', repository: 'billing', baseUrl }, branch: 'main', folders: ['src/orders', 'infra'] })],
+      [(log) => createFakeGitLabServer({ namespace: 'acme/payments', repository: 'billing-api', validPat: TOKEN, files: PADDED, archives: true, archiveLog: log }), '/api/v4', (baseUrl) => ({ provider: 'gitlab', location: { namespace: 'acme/payments', repository: 'billing-api', baseUrl }, branch: 'main', folders: ['src/orders', 'infra'] })],
+      [(log) => createFakeAzureDevOpsServer({ organization: 'contoso', project: 'Payments', repository: 'billing', validPat: TOKEN, files: PADDED, archives: true, archiveLog: log }), '', (baseUrl) => ({ provider: 'azure-devops', location: { organization: 'contoso', project: 'Payments', repository: 'billing', baseUrl }, branch: 'main', folders: ['src/orders', 'infra'] })],
     ]) {
       const log = []
       await withFake(fake(log), async (baseUrl) => {
-        // The whole repository's text is about 500 bytes; the two folders' about 300.
-        const copies = createRepositoryCopyStore({ perRepositoryBytes: 400 })
+        // The whole repository's text is about 3,000 bytes; the two folders' about 300 (their archives, with a zip's own overhead, about 800).
+        const copies = createRepositoryCopyStore({ perRepositoryBytes: 1500 })
         const reader = createRepositoryReader(repository(baseUrl), TOKEN, { allowBaseUrl: true, copies })
         const provider = repository(baseUrl).provider
         const found = await reader.search({ query: 'billing' })
@@ -546,6 +640,45 @@ describe('every Provider\'s archive, and what happens without one', () => {
       assert.equal((await reader.search({ query: 'orders' })).notCopied.reason, 'unavailable')
       assert.deepEqual(log, [])
     }, '/2.0')
+  })
+
+  // #338: an egress firewall that drops the connection rather than refusing it costs about ten seconds a try. The archive is tried once,
+  // not again after a temporary failure, and an archive host that couldn't be reached is remembered for everyone, not per caller.
+  test('an archive host that can\'t be reached is tried once, and not again for a while by anyone', async () => {
+    const { server, logs } = archivingGitHub({ validPat: [TOKEN, OTHER] })
+    const realFetch = globalThis.fetch
+    let archiveTries = 0
+    globalThis.fetch = (url, init) => {
+      if (/\/zipball\//.test(String(url))) {
+        archiveTries++
+        return Promise.reject(new TypeError('fetch failed', { cause: Object.assign(new Error('Connect Timeout Error'), { code: 'UND_ERR_CONNECT_TIMEOUT' }) }))
+      }
+      return realFetch(url, init)
+    }
+    try {
+      await withFake(server, async (baseUrl) => {
+        const copies = createRepositoryCopyStore()
+        const reader = (pat) => createRepositoryReader(github(baseUrl), pat, { allowBaseUrl: true, copies, retries: 2, retryWaitMs: 0 })
+        assert.equal((await reader(TOKEN).search({ query: 'orders' })).notCopied.reason, 'unavailable')
+        assert.equal(archiveTries, 1, 'not asked again after the first failure')
+        assert.equal((await reader(OTHER).search({ query: 'orders' })).notCopied.reason, 'unavailable')
+        assert.equal(archiveTries, 1, 'a colleague is not made to wait for it again')
+        assert.deepEqual(logs.archives, [])
+      })
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  })
+
+  test('a search read file by file stops at its time limit counted from when the request arrived, not from when the search began', () => {
+    const { server } = archivingGitHub({ contentDelayMs: 200 })
+    return withFake(server, async (baseUrl) => {
+      const reader = createRepositoryReader(github(baseUrl), TOKEN, { allowBaseUrl: true, copies: createRepositoryCopyStore({ totalBytes: 0 }), searchTimeLimitMs: 1000 })
+      const started = Date.now()
+      const found = await reader.search({ query: 'orders', startedAt: Date.now() - 900 })
+      assert.equal(found.truncatedBy, 'time-limit')
+      assert.ok(Date.now() - started < 600, `answered within what was left of the limit (${Date.now() - started} ms)`)
+    })
   })
 
   test('the errors of #325 and #336 are unchanged with a copy store: rate-limited, no access, no such branch', () => {
