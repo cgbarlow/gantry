@@ -1,0 +1,25 @@
+# Asks the private cgbarlow/stack repo to deploy this app on the Mac Mini.
+# Runs on GitHub's own runners, never on the Mac, and only on pushes to main.
+# Needs repo secret STACK_DEPLOY_TOKEN: a fine-grained token with Actions read/write
+# on cgbarlow/stack only. Without it the job skips quietly.
+name: deploy-mac-mini
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger deploy in cgbarlow/stack
+        env:
+          TOKEN: ${{ secrets.STACK_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "STACK_DEPLOY_TOKEN not set; skipping"; exit 0; fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/cgbarlow/stack/actions/workflows/deploy.yml/dispatches \
+            -d '{"ref":"main","inputs":{"project":"gantry"}}'
+          echo "Deploy of gantry requested on the Mac Mini"
