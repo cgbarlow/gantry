@@ -145,6 +145,14 @@ export function repositoryBlockedLine({ title, code, message }) {
   return `Can't read the code repository ${title}: ${message}${fix} The AI is told so and won't rely on it.`
 }
 
+/**
+ * #336: the thread's line for a repository read that failed for a temporary reason (cut off, out of time). The repository isn't blocked:
+ * the AI is told the read failed and may try it again.
+ */
+export function repositoryFailedLine({ title, message }) {
+  return `Couldn't read the code repository ${title} just now: ${message} The AI is told, and may try again.`
+}
+
 const LAST_ROUND_NOTE = 'That was the last round. Redraft the Fields these answers feed. Ask nothing more: the architect has chosen to finish.'
 
 function sessionNote({ cardMode, textDrafts, reader, repositories = false, handEdits = [] }) {
@@ -472,6 +480,7 @@ export function createInterviewSession(config = {}) {
   let controller = null
   let readsSinceDraft = [] // the reads made since the last drafts landed (#292)
   const repositoryBlocks = new Set() // #319: the repositories (and why) the architect has been told this session they can't be read
+  const repositoryHiccups = new Set() // #336: the repositories (and why) a read just failed for a temporary reason, until one is read again
   let plan = new Map() // how each Source document reaches the AI Provider in use (#292)
   let announced = '' // what the thread last said about unreadable documents, so a repeat is not said twice
   const attachmentCache = new Map()
@@ -703,10 +712,22 @@ export function createInterviewSession(config = {}) {
       return context.readRepository(entry)
     }
     const result = await runRepositoryCall(name, input, { lookup: (wanted) => live.find((s) => s.id === wanted), reader })
+    if (result.ok) {
+      const id = String(input?.id ?? '')
+      for (const said of repositoryHiccups) if (said.startsWith(`${id}|`)) repositoryHiccups.delete(said)
+    }
     if (result.ok && result.read) {
       readsSinceDraft.push(result.read)
       say('sys', `Read ${describeInput(result.read)}`, { read: result.read.source })
       emit()
+    } else if (result.failed) {
+      // #336: said once until the repository is read again, so a run of failed reads is one line and a later one is heard.
+      const said = `${result.failed.source}|${result.failed.code}`
+      if (!repositoryHiccups.has(said)) {
+        repositoryHiccups.add(said)
+        say('sys', repositoryFailedLine(result.failed), { repositoryFailed: result.failed.source })
+        emit()
+      }
     } else if (result.blocked) {
       // Said once per repository and reason: the AI may try several reads in a row, and the architect needs to hear it once.
       const said = `${result.blocked.source}|${result.blocked.code}`

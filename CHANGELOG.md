@@ -17,6 +17,60 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.15.1 — 2026-11-05
+
+Reading a code repository holds up on a large repository and over a slow or unreliable link. Before this, a search
+could be dropped by a proxy in front of Gantry, and one dropped read made the AI stop using the repository for the
+rest of the interview.
+
+### Fixed
+
+- **A code repository search finishes in good time** (#335).
+  - **What went wrong.** A search read up to 400 files one after another. On a large repository, or over a slow link, it
+    could run past the 100 seconds a Cloudflare Tunnel (and many proxies) waits, and the request was dropped. The
+    interview then said the Gantry server couldn't be reached.
+  - **What it does now.**
+    - A search reads 8 files at once.
+    - It stops after 30 seconds and returns the matches found so far, marked as cut short, with the reason (*stopped
+      after 30 seconds, 180 of 400 files searched*).
+    - The AI, or an outside agent over MCP, is told the search was cut short, and to search a folder, search for
+      something more exact, or read the file it expects to matter.
+    - A search the browser or proxy has given up on stops reading files, so it no longer uses up the Provider's rate limit.
+- **Reading a code repository survives a temporary failure** (#336).
+  - **Time limits and retries.** Each request the server makes to GitHub, Azure DevOps, GitLab or Bitbucket now has its
+    own time limit. A dropped connection, a request that ran out of time, or a 502, 503 or 504 is tried again, twice,
+    with a short wait. Your browser also asks the server once more if its request is cut off on the way.
+  - **Never retried.** A used-up rate limit is never tried again: it still says when the limit resets. Neither is any
+    other definite answer: no access, not found, no such branch.
+  - **One failed read is just one failed read.** A read that still fails no longer sets the repository aside for the
+    rest of the interview: the AI is told it can try again or read something narrower. Only a definite answer still
+    sets it aside: no access, a used-up limit, a missing branch, or an address your server doesn't take.
+  - **Clearer wording.** The thread says a read *took too long or was cut off* when that's what happened. It says the
+    Gantry server *can't be reached* only when it really can't be, for example a Local Workspace with no server running.
+  - **Out of date.** Its repository check gets the same retries, and a temporary failure still shows as "couldn't check",
+    not as a change.
+
+### For operators
+
+- **New settings**, all optional, and all described in the README's code-repository section. Each takes a whole number,
+  and a value out of range stops `gantry serve` at startup with a line naming it.
+  - `GANTRY_REPOSITORY_SEARCH_TIME_LIMIT_SECONDS` (default `30`): how long one search may take before it returns what it
+    has found. Keep it under your proxy's own limit.
+  - `GANTRY_REPOSITORY_SEARCH_PARALLEL_READS` (default `8`): how many files a search reads at once.
+  - `GANTRY_REPOSITORY_REQUEST_TIME_LIMIT_SECONDS` (default `15`): how long one request to a Provider may take.
+  - `GANTRY_REPOSITORY_RETRIES` (default `2`): how many more times a request that failed for a temporary reason is tried.
+  - `GANTRY_REPOSITORY_RETRY_WAIT_MILLISECONDS` (default `500`): the wait before the first retry. Each later retry waits
+    twice as long.
+- With the defaults, a Provider that never answers fails a single read within about 47 seconds, under a Cloudflare
+  Tunnel's 100. If you raise the request time limit or the retries, keep the request time limit × (retries + 1) under
+  your proxy's limit.
+
+### Notes
+
+- **The AI will search a whole repository** (#338, ADR-0074). Instead of reading it file by file, the server will
+  download the repository once per commit and search every file. Results will be paged and never cut short. That
+  supersedes #337 (remembering files already read), which will not be built.
+
 ## 0.15.0 — 2026-11-04
 
 Cheaper, longer AI interviews, and more say over where a run is heading. Each call now costs a fraction of what it did,

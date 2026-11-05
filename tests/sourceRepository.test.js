@@ -24,6 +24,7 @@ import { buildInterviewBrief } from '../web/lib/interviewBrief.js'
 import { applyDecisionsDelta, emptyDecisionsLog } from '../web/lib/decisionsLog.js'
 import { loadInterviewSkills } from '../web/lib/interviewSkills.js'
 import { readFileSync } from 'node:fs'
+import { repositoryReaderFor } from '../web/lib/sourceRepositoryClient.js'
 
 const skills = await loadInterviewSkills((path) => readFileSync(new URL(path, new URL('../web/interview-skills/', import.meta.url)), 'utf8'))
 
@@ -241,6 +242,20 @@ describe('the AI reads a repository with tools, and every read names its commit'
     assert.deepEqual(inputs.map((i) => [i.source, i.path, i.commit]), [['billing-api', 'src/orders/limits.ts', HEAD], ['billing-api', 'README.md', OLD]])
   })
 
+  // #335: a search on a big repository, or over a slow link, can stop early. The AI is told it was cut short, why, and what will do better.
+  test('a search that was cut short says so, and says how to do better', async () => {
+    const cutShort = () => ({ search: async ({ query }) => ({ commit: HEAD, query, matches: [{ path: 'src/orders/limits.ts', line: 1, text: 'export const MAX_ORDER_NZD = 5000' }], filesSearched: 180, truncated: true, truncatedBy: 'time-limit', truncatedReason: 'stopped after 30 seconds, 180 of 400 files searched' }) })
+    const found = await runRepositoryCall('search_repository', { id: 'billing-api', query: 'MAX_ORDER' }, { lookup, reader: cutShort })
+    assert.equal(found.ok, true)
+    assert.match(found.content, /- src\/orders\/limits\.ts:1: export const MAX_ORDER_NZD = 5000/)
+    assert.match(
+      found.content,
+      /\n\n\[This search was cut short \(stopped after 30 seconds, 180 of 400 files searched\), so these are only the matches found so far\. To do better, search under a folder \(with "path"\) or for something more exact, or read a file you expect to matter with `read_repository_file`\.\]$/
+    )
+    const complete = await runRepositoryCall('search_repository', { id: 'billing-api', query: 'MAX_ORDER' }, { lookup, reader })
+    assert.doesNotMatch(complete.content, /cut short/)
+  })
+
   test('the decisions log keeps an input\'s path and commit', () => {
     const log = applyDecisionsDelta(emptyDecisionsLog('s'), { fields: { 'm.f': { drafted: '2026-11-04T09:00:00.000Z', inputs: [{ source: 'billing-api', title: 'Billing API', range: 'src/a.ts', path: 'src/a.ts', commit: HEAD, fingerprint: 'abc' }] } } })
     assert.deepEqual(log.fields['m.f'].inputs, [{ source: 'billing-api', title: 'Billing API', range: 'src/a.ts', path: 'src/a.ts', commit: HEAD, fingerprint: 'abc' }])
@@ -307,6 +322,30 @@ describe('Out of date for a repository: only a real change to a file a Field dre
     assert.doesNotMatch(uncheckedRepositoryLine({ title: 'Billing API', code: 'server-unreachable', reason: 'The server is down.' }), /Your token/, 'a token is offered only when access is the problem')
     // #325: a used-up rate limit offers a token too, as what raises the limit.
     assert.match(uncheckedRepositoryLine({ title: 'Billing API', code: 'rate-limited', reason: 'GitHub limits how much…' }), /A token given with "Your token" on its row in Source documents raises the limit\.$/)
+  })
+
+  // #336: the browser asks the Gantry server to compare once more when the request is cut off; cut off again, nothing is flagged, and the
+  // repository is named as not checked, never as changed.
+  test('a comparison cut off once is asked again; cut off twice, the repository is "not checked", never "changed"', async () => {
+    const sourceStore = { list: async () => ({ entries: sources }) }
+    const decisionsStore = { read: async (id) => logs[id] }
+    const gantry = (cuts) => {
+      let asked = 0
+      return async (_url, init) => {
+        if (asked++ < cuts) throw new TypeError('Failed to fetch')
+        assert.equal(JSON.parse(init.body).action, 'compare')
+        return new Response(JSON.stringify(compared(['limits'])['billing-api']), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+    }
+    const load = (fetchImpl) =>
+      loadOutOfDate({ sourceStore, decisionsStore, stages: [{ id: 'shape' }], currentStageId: 'shape', currentModules: modules, loadStageModules: async () => [], compareRepository: (entry, reads) => repositoryReaderFor(entry.repository, { fetchImpl, token: null, retryWaitMs: 0 }).compare(reads) })
+    const once = await load(gantry(1))
+    assert.deepEqual(once.flags.map((f) => f.field), ['details.summary'])
+    assert.deepEqual(once.unchecked, [])
+    const twice = await load(gantry(2))
+    assert.deepEqual(twice.flags, [], 'no evidence either way, so nothing is flagged')
+    assert.deepEqual(twice.unchecked.map((u) => [u.source, u.code]), [['billing-api', 'server-unreachable']])
+    assert.match(uncheckedRepositoryLine(twice.unchecked[0]), /^Billing API was not checked for changes/)
   })
 
   test("over MCP, get_instance's Out of date names a repository it could not compare, with the reason", async () => {

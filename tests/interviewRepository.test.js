@@ -1,4 +1,4 @@
-import { test, beforeEach } from 'node:test'
+import { describe, test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { withFlatSystem } from './helpers/aiRequest.js'
@@ -16,6 +16,8 @@ const providers = await import('../web/lib/aiProviders.js')
 const { createInterviewSession, repositoryBlockedLine } = await import('../web/lib/interviewSession.js')
 const { REPOSITORY_BLOCKED_CODES } = await import('../web/lib/interviewSources.js')
 const { loadInterviewSkills } = await import('../web/lib/interviewSkills.js')
+const { repositoryReaderFor, REPOSITORY_NEEDS_SERVER, REPOSITORY_READ_CUT_OFF } = await import('../web/lib/sourceRepositoryClient.js')
+const { SourceDocumentError } = await import('../web/lib/sourceDocuments.js')
 
 beforeEach(() => {
   for (const p of [...providers.aiProviders.value]) providers.deleteAiProvider(p.id)
@@ -140,7 +142,6 @@ test('the AI lists, searches and reads a repository through tools, skipped paths
 test('an existing pointer this architect cannot read: the thread says so plainly, once, as well as the AI, and nothing is recorded as read', async () => {
   const p = providers.addAiProvider({ name: 'Work Anthropic', type: 'anthropic', address: 'https://api.anthropic.com', key: 'sk-ant-1', model: 'claude-x' })
   providers.setAiProviderTest(p.id, { status: 'passed', testedAt: 'now', questionCards: 'native', readsImages: false, steps: [], message: 'ok' }, null)
-  const { SourceDocumentError } = await import('../web/lib/sourceDocuments.js')
   const refusal = "You can't read the GitHub repository acme/billing-api without a token. If it is private, give a token that can read it."
   const ai = fakeAi((_request, n) => {
     if (n === 0) {
@@ -192,4 +193,120 @@ test('a used-up rate limit is told to the architect in the thread, with a token 
   assert.match(line, /^Can't read the code repository gantry: GitHub limits how much this Gantry server can read without a token/)
   assert.match(line, /To carry on now, give a token with "Your token" on its row in the Source documents list\. The AI is told so and won't rely on it\.$/)
   assert.ok(REPOSITORY_BLOCKED_CODES.includes('rate-limited'), 'it is shown to the architect, not only to the AI')
+})
+
+// #336: a repository read that is cut off on its way from the Gantry server is asked once more; cut off twice, that read has failed, not
+// the repository. It doesn't block the repository: the AI is told the read failed and may try it again, and its next read is still made.
+describe('a repository read cut off on its way from the Gantry server', () => {
+  const repository = { provider: 'github', location: { owner: 'acme', repository: 'billing-api' }, branch: 'main' }
+  const answer = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  const readOf = (path) => ({ commit: HEAD, path, text: 'export const MAX_ORDER_NZD = 5000\n' })
+
+  // The Gantry server, behind `fetch`: `plan` says for each request, in turn, whether it is cut off ('cut'), a proxy gave up on it
+  // ('gateway'), or is answered (anything else). Records each request's action and path.
+  function server(plan) {
+    const asked = []
+    const fetchImpl = async (_url, init) => {
+      const { action, path } = JSON.parse(init.body)
+      const what = plan[asked.length] ?? 'answer'
+      asked.push(`${action} ${path ?? ''}`.trim())
+      if (what === 'cut') throw new TypeError('Failed to fetch')
+      if (what === 'gateway') return new Response('<html>A timeout occurred</html>', { status: 524, headers: { 'content-type': 'text/html' } })
+      if (what === 'no-access') return answer(403, { error: "You can't read the GitHub repository acme/billing-api without a token. If it is private, give a token that can read it.", code: 'no-access' })
+      return answer(200, readOf(path))
+    }
+    return { asked, fetchImpl }
+  }
+
+  test('cut off once, it is asked again and the read succeeds; cut off by a proxy giving up, the same', async () => {
+    for (const first of ['cut', 'gateway']) {
+      const gantry = server([first])
+      const reader = repositoryReaderFor(repository, { fetchImpl: gantry.fetchImpl, token: null, retryWaitMs: 0 })
+      assert.equal((await reader.read({ path: 'src/orders/limits.ts' })).text, 'export const MAX_ORDER_NZD = 5000\n', first)
+      assert.deepEqual(gantry.asked, ['read src/orders/limits.ts', 'read src/orders/limits.ts'])
+    }
+  })
+
+  test('cut off twice after the server has answered, it says the read took too long or was cut off; with no server at all, that the server can\'t be reached', async () => {
+    const gantry = server(['answer', 'cut', 'cut'])
+    const reader = repositoryReaderFor(repository, { fetchImpl: gantry.fetchImpl, token: null, retryWaitMs: 0 })
+    await reader.read({ path: 'README.md' })
+    await assert.rejects(reader.read({ path: 'src/orders/limits.ts' }), (err) => err instanceof SourceDocumentError && err.code === 'cut-off' && err.message === REPOSITORY_READ_CUT_OFF)
+    assert.match(REPOSITORY_READ_CUT_OFF, /took too long or was cut off/)
+    assert.doesNotMatch(REPOSITORY_READ_CUT_OFF, /can't be reached/)
+
+    const proxy = server(['gateway', 'gateway'])
+    await assert.rejects(repositoryReaderFor(repository, { fetchImpl: proxy.fetchImpl, token: null, retryWaitMs: 0 }).read({ path: 'README.md' }), (err) => err.code === 'cut-off', 'a proxy answered, so something is there')
+
+    // A Local Workspace with no Gantry server running: nothing has ever answered.
+    const none = server(['cut', 'cut'])
+    await assert.rejects(repositoryReaderFor(repository, { fetchImpl: none.fetchImpl, token: null, retryWaitMs: 0 }).read({ path: 'README.md' }), (err) => err.code === 'server-unreachable' && err.message === REPOSITORY_NEEDS_SERVER)
+    assert.equal(none.asked.length, 2, 'asked once more before saying so')
+  })
+
+  function interview(fetchImpl, aiTools) {
+    const p = providers.addAiProvider({ name: 'Work Anthropic', type: 'anthropic', address: 'https://api.anthropic.com', key: 'sk-ant-1', model: 'claude-x' })
+    providers.setAiProviderTest(p.id, { status: 'passed', testedAt: 'now', questionCards: 'native', readsImages: false, steps: [], message: 'ok' }, null)
+    const ai = fakeAi((_request, n) => (aiTools[n] ? anthropicReply({ tools: aiTools[n] }) : anthropicReply({ text: 'Done.' })))
+    const context = {
+      definition: definition(),
+      stageId: 'shape',
+      artefactId: 'light',
+      size: 'medium',
+      saved: [{ id: 'details', status: 'draft', fields: [{ id: 'summary', value: '' }] }],
+      sources: [{ id: 'billing-api', title: 'Billing API', uploadedAt: '2026-11-01T00:00:00.000Z', repository }],
+      skills,
+      readRepository: (entry) => repositoryReaderFor(entry.repository, { fetchImpl, token: null, retryWaitMs: 0 }),
+    }
+    return { ai, session: createInterviewSession({ providerId: p.id, getContext: () => context, fetchImpl: ai.fetchImpl }) }
+  }
+  const read = (id, path) => ({ id, name: 'read_repository_file', input: { id: 'billing-api', path } })
+
+  test('in an interview: cut off once, the read succeeds and the thread shows nothing unusual', async () => {
+    const gantry = server(['cut'])
+    const { ai, session } = interview(gantry.fetchImpl, [[read('r1', 'src/orders/limits.ts')]])
+    await session.start()
+    assert.deepEqual(toolResults(ai.calls[1]).map((r) => Boolean(r.is_error)), [false])
+    const snap = session.snapshot()
+    assert.deepEqual(snap.thread.filter((t) => t.who === 'sys' && !/^Interview started/.test(t.text)).map((t) => t.text), ['Read Billing API (src/orders/limits.ts at c0ffee1)'])
+  })
+
+  test('in an interview: cut off twice, the AI is told that read failed and may try again, the repository is not blocked, and the next read is made and succeeds', async () => {
+    const gantry = server(['answer', 'cut', 'cut'])
+    const { ai, session } = interview(gantry.fetchImpl, [[read('r0', 'README.md'), read('r1', 'src/orders/limits.ts')], [read('r2', 'src/orders/limits.ts')]])
+    await session.start()
+    const failed = toolResults(ai.calls[1])
+    assert.deepEqual(failed.map((r) => Boolean(r.is_error)), [false, true])
+    assert.match(failed[1].content, /^Billing API: This read of the code repository took too long or was cut off/)
+    assert.match(failed[1].content, /try it again, or something narrower/i)
+    assert.doesNotMatch(failed[1].content, /won't rely|can't be reached/)
+    assert.deepEqual(toolResults(ai.calls[2]).map((r) => Boolean(r.is_error)), [false], 'the next read of the same repository is made, and succeeds')
+    assert.deepEqual(gantry.asked, ['read README.md', 'read src/orders/limits.ts', 'read src/orders/limits.ts', 'read src/orders/limits.ts'])
+
+    const snap = session.snapshot()
+    assert.deepEqual(snap.thread.filter((t) => t.repositoryBlocked), [], 'not blocked for the session')
+    const line = snap.thread.find((t) => t.repositoryFailed)
+    assert.equal(line.repositoryFailed, 'billing-api')
+    assert.match(line.text, /^Couldn't read the code repository Billing API just now: This read of the code repository took too long or was cut off/)
+    assert.doesNotMatch(line.text, /can't be reached|won't rely/)
+  })
+
+  test('in an interview: no access still blocks the repository; a Local Workspace with no server still says the server can\'t be reached', async () => {
+    const refused = server(['no-access'])
+    const one = interview(refused.fetchImpl, [[read('r1', 'src/orders/limits.ts')]])
+    await one.session.start()
+    assert.equal(one.session.snapshot().thread.filter((t) => t.repositoryBlocked).length, 1)
+
+    const none = server(['cut', 'cut'])
+    const two = interview(none.fetchImpl, [[read('r1', 'src/orders/limits.ts')]])
+    await two.session.start()
+    const lines = two.session.snapshot().thread.filter((t) => t.repositoryBlocked || t.repositoryFailed)
+    assert.equal(lines.length, 1)
+    assert.match(lines[0].text, /Reading a code repository needs the Gantry server, which can't be reached right now\./)
+  })
+
+  test('cut off and timed-out reads never block a repository; definite answers do', () => {
+    for (const code of ['cut-off', 'timed-out', 'unreachable']) assert.ok(!REPOSITORY_BLOCKED_CODES.includes(code), code)
+    for (const code of ['no-access', 'rate-limited', 'no-branch', 'base-url-not-allowed', 'server-unreachable']) assert.ok(REPOSITORY_BLOCKED_CODES.includes(code), code)
+  })
 })

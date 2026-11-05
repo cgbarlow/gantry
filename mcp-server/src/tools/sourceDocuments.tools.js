@@ -487,7 +487,7 @@ export const tools = [
     description:
       '1. Searches a code repository Source document for text (case-insensitive) in its file names and contents, at its branch\'s latest commit. ' +
       '2. Identify the instance with "slug" (optionally narrowed with "scope") or with "ref"; "id" and "query" are required; "path" searches under one folder only. ' +
-      '3. Returns "matches" ({ path, line, text }, or just { path } when the file name matches), "filesSearched", and "truncated" when it stopped early. Skips vendored code, build output and binaries. Read a file with read_repository_file before you rely on it.',
+      '3. Returns "matches" ({ path, line, text }, or just { path } when the file name matches), "filesSearched", and "truncated" when it stopped early, with "truncatedReason" saying why (a time limit on a large repository or a slow link, or a cap on files or matches). Then the matches are only those found so far: search under a folder ("path") or for something more exact, or read the file you expect with read_repository_file. Skips vendored code, build output and binaries. Read a file with read_repository_file before you rely on it.',
     inputSchema: {
       ...slugRefShape,
       id: z.string().describe('The code repository\'s Source document id, from list_source_documents.'),
