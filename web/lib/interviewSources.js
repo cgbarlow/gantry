@@ -100,7 +100,9 @@ export const REPOSITORY_TOOLS = Object.freeze([
   },
   {
     name: SEARCH_REPOSITORY_TOOL_NAME,
-    description: 'Search a code repository Source document for text (case-insensitive) in its file names and contents. Returns matching files and lines; read a file before you rely on it.',
+    description:
+      'Search a code repository Source document for text (case-insensitive) in its file names and contents. Returns matching files and lines; read a file before you rely on it. ' +
+      'On a large repository a search may be cut short; then search under a folder or for something more exact.',
     parameters: { type: 'object', properties: { id: repositoryId, query: { type: 'string', description: 'The text to look for, at least two characters.' }, path: { type: 'string', description: 'Optional: search only under this folder.' } }, required: ['id', 'query'] },
   },
   {
@@ -132,9 +134,14 @@ export async function runRepositoryCall(name, input, { lookup, reader }) {
       return { ok: true, content: `[${title} · ${path || 'top of the repository'} · commit ${commit}]\n\n${lines.length ? lines.join('\n') : '(nothing here that Gantry reads)'}` }
     }
     if (name === SEARCH_REPOSITORY_TOOL_NAME) {
-      const { commit, query, matches, filesSearched, truncated } = await repo.search({ query: input?.query, path: input?.path })
+      const { commit, query, matches, filesSearched, truncated, truncatedReason } = await repo.search({ query: input?.query, path: input?.path })
       const lines = matches.map((m) => (m.line ? `- ${m.path}:${m.line}: ${m.text}` : `- ${m.path} (its name matches)`))
-      const tail = truncated ? `\n\n[Stopped after ${filesSearched} files. Search under a folder, or for something more exact, to see the rest.]` : ''
+      // #335: a search on a big repository, or over a slow link to its Provider, can stop early (at a time limit, or a cap). The AI is told
+      // why, that these are only the matches found so far, and what does better than searching the same way again.
+      const why = truncatedReason || `stopped after ${filesSearched} files`
+      const tail = truncated
+        ? `\n\n[This search was cut short (${why}), so these are only the matches found so far. To do better, search under a folder (with "path") or for something more exact, or read a file you expect to matter with \`${READ_REPOSITORY_TOOL_NAME}\`.]`
+        : ''
       const content = `[${title} · search "${query}" · commit ${commit} · ${filesSearched} files searched]\n\n${lines.length ? lines.join('\n') : 'No matches.'}${tail}`
       return { ok: true, content, label: { title, where: `search "${query}"${input?.path ? ` under ${input.path}` : ''}`, commit, chars: content.length } }
     }

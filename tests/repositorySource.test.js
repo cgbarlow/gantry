@@ -432,3 +432,103 @@ describe('POST /api/sources/repository and adding a pointer to an Instance', () 
       ))
   }
 })
+
+// #335: a search finishes in good time however big the repository and however slow the link to the Provider. It reads several files at
+// once, stops at a time limit with the matches found so far (marked cut short, with why), and stops reading once nobody is waiting for it.
+describe('a search finishes in good time', () => {
+  // 400 searchable files, `src/f000.ts` to `src/f399.ts`; every 40th has a line with "needle" in it.
+  const MANY = Object.fromEntries(
+    Array.from({ length: 400 }, (_, i) => [`src/f${String(i).padStart(3, '0')}.ts`, `export const n${i} = ${i}\n${i % 40 === 0 ? `// needle ${i}\n` : ''}`])
+  )
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  test('against a slow Provider, a search over 400 files with no match stops at its time limit, cut short, saying why and how far it got', () =>
+    withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: MANY, contentDelayMs: 300 }), async (baseUrl) => {
+      const reader = createRepositoryReader(github(baseUrl), TOKEN, { allowBaseUrl: true, searchTimeLimitMs: 1000, searchParallelReads: 8 })
+      const started = Date.now()
+      const found = await reader.search({ query: 'nothing-here' })
+      const took = Date.now() - started
+      assert.ok(took < 1500, `it finishes within its time limit (took ${took} ms)`)
+      assert.deepEqual(found.matches, [])
+      assert.equal(found.truncated, true)
+      assert.equal(found.truncatedBy, 'time-limit')
+      assert.ok(found.filesSearched >= 16 && found.filesSearched < 400, `several files are read at once (${found.filesSearched} in a second, at 300 ms each)`)
+      assert.equal(found.truncatedReason, `stopped after 1 second, ${found.filesSearched} of 400 files searched`)
+    }))
+
+  test('against a fast Provider, the same search still reads all 400 files and returns every match, in order', () =>
+    withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: MANY }), async (baseUrl) => {
+      const found = await createRepositoryReader(github(baseUrl), TOKEN, { allowBaseUrl: true }).search({ query: 'needle' })
+      assert.equal(found.filesSearched, 400)
+      assert.equal(found.truncated, false)
+      assert.equal(found.truncatedReason, undefined)
+      assert.deepEqual(found.matches, Array.from({ length: 10 }, (_, k) => ({ path: `src/f${String(k * 40).padStart(3, '0')}.ts`, line: 2, text: `// needle ${k * 40}` })))
+    }))
+
+  test('matches come back in the same order and form however many files are read at once, also when they reach their cap', async () => {
+    // Every file matches three times, so 60 matches are reached part way through, and file names match too for some.
+    const busy = Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`lib/needle-${String(i).padStart(2, '0')}.js`, 'a needle\nb\nc needle\nNEEDLE d\n']))
+    for (const [fake, apiRoot, repository] of [
+      [() => createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: { ...CODE, ...busy } }), '', (baseUrl) => github(baseUrl)],
+      [() => createFakeAzureDevOpsServer({ organization: 'contoso', project: 'Payments', repository: 'billing', validPat: TOKEN, files: { ...CODE, ...busy } }), '', (baseUrl) => ({ provider: 'azure-devops', location: { organization: 'contoso', project: 'Payments', repository: 'billing', baseUrl }, branch: 'main' })],
+    ]) {
+      await withFake(fake(), async (baseUrl) => {
+        const search = (searchParallelReads, query) => createRepositoryReader(repository(baseUrl), TOKEN, { allowBaseUrl: true, searchParallelReads }).search({ query })
+        const oneAtATime = await search(1, 'needle')
+        assert.equal(oneAtATime.matches.length, 60)
+        assert.equal(oneAtATime.truncated, true)
+        assert.equal(oneAtATime.truncatedBy, 'match-limit')
+        assert.match(oneAtATime.truncatedReason, new RegExp(`^stopped at 60 matches, ${oneAtATime.filesSearched}( of 55)? files searched$`), 'how many there were to search, where the Provider lists them all at once')
+        assert.deepEqual(oneAtATime.matches.slice(0, 4), [{ path: 'lib/needle-00.js' }, { path: 'lib/needle-00.js', line: 1, text: 'a needle' }, { path: 'lib/needle-00.js', line: 3, text: 'c needle' }, { path: 'lib/needle-00.js', line: 4, text: 'NEEDLE d' }])
+        assert.deepEqual(await search(8, 'needle'), oneAtATime)
+        assert.deepEqual(await search(8, 'orderservice'), await search(1, 'orderservice'))
+      }, apiRoot)
+    }
+  })
+
+  test('once nobody is waiting for the search any more, it makes no further file reads', () => {
+    const contentRequests = []
+    return withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: MANY, contentDelayMs: 100, contentRequests }), async (baseUrl) => {
+      const reader = createRepositoryReader(github(baseUrl), TOKEN, { allowBaseUrl: true, searchTimeLimitMs: 10_000, searchParallelReads: 4 })
+      const abandon = new AbortController()
+      const searching = reader.search({ query: 'nothing-here', signal: abandon.signal })
+      await pause(250)
+      abandon.abort()
+      await assert.rejects(searching, (err) => err.code === 'abandoned')
+      const atAbandon = contentRequests.length
+      assert.ok(atAbandon > 0 && atAbandon < 400)
+      await pause(400)
+      assert.equal(contentRequests.length, atAbandon, 'no file is read after the search was given up')
+    })
+  })
+
+  test('POST /api/sources/repository stops reading files for a search once the caller has gone, and is cut short by the server\'s own time limit', () => {
+    const contentRequests = []
+    return withFake(createFakeGitHubServer({ owner: 'acme', repository: 'billing-api', validPat: TOKEN, files: MANY, contentDelayMs: 100, contentRequests }), async (codeBase) => {
+      const body = JSON.stringify({ action: 'search', repository: github(codeBase), query: 'nothing-here' })
+      const ask = (base, signal) => fetch(`${base}/api/sources/repository`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(TOKEN) }, body, signal })
+
+      await withRunningServer({ allowGitHubBaseUrlOverride: true, repositoryReader: { searchTimeLimitMs: 10_000, searchParallelReads: 4 } }, async (base) => {
+        const gone = new AbortController()
+        const asked = ask(base, gone.signal).catch((err) => err)
+        await pause(300)
+        gone.abort()
+        assert.equal((await asked).name, 'AbortError')
+        await pause(150)
+        const afterLeaving = contentRequests.length
+        assert.ok(afterLeaving > 0 && afterLeaving < 400)
+        await pause(400)
+        assert.equal(contentRequests.length, afterLeaving, 'the server reads no more files for a search nobody is waiting for')
+      })
+
+      await withRunningServer({ allowGitHubBaseUrlOverride: true, repositoryReader: { searchTimeLimitMs: 500 } }, async (base) => {
+        const res = await ask(base)
+        assert.equal(res.status, 200)
+        const found = await res.json()
+        assert.equal(found.truncated, true)
+        assert.equal(found.truncatedBy, 'time-limit')
+        assert.match(found.truncatedReason, /^stopped after 0\.5 seconds, \d+ of 400 files searched$/)
+      })
+    })
+  })
+})

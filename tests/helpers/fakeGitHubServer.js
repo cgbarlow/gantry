@@ -94,6 +94,10 @@ export function createFakeGitHubServer({
   // API request's `METHOD path`, so a test can count what a read cost.
   apiRequestLimit = null,
   apiLog,
+  // #335: a slow link to the Provider. Every file read (raw-host or Contents API) waits `contentDelayMs` before it is answered, and
+  // `contentRequests`, when an array, gets each file read's path the moment it arrives, so a test can see how many were asked for, and when.
+  contentDelayMs = 0,
+  contentRequests,
 } = {}) {
   const issues = new Map() // number -> issue object
   let apiRequestCount = 0
@@ -189,6 +193,8 @@ export function createFakeGitHubServer({
       const [ref, ...rest] = pathname.slice(rawPrefix.length).split('/')
       const store = branches.get(ref) ?? (commits.get(ref) ? trees.get(commits.get(ref).treeSha) : undefined)
       const content = anonymousRead ? store?.get(`/${rest.join('/')}`) : undefined
+      contentRequests?.push(rest.join('/'))
+      if (contentDelayMs) await new Promise((resolve) => setTimeout(resolve, contentDelayMs))
       if (!content) {
         res.writeHead(404, { 'Content-Type': 'text/plain' })
         res.end('404: Not Found')
@@ -293,6 +299,8 @@ export function createFakeGitHubServer({
       // assuming it's UTF-8 text first, is what makes this byte-accurate for a binary file.
       if (store.has(`/${normalizedScope}`)) {
         const content = store.get(`/${normalizedScope}`)
+        contentRequests?.push(normalizedScope)
+        if (contentDelayMs) await new Promise((resolve) => setTimeout(resolve, contentDelayMs))
         const meta = { type: 'file', name: normalizedScope.split('/').pop(), path: normalizedScope, size: content.length, sha: `blob-of-${normalizedScope}` }
         if (content.length > 100 * 1024 * 1024) {
           return json(403, { message: 'This API returns blobs up to 1 MB in size. The requested blob is too large to fetch via the API (fake: over 100 MB).' })

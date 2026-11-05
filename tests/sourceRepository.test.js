@@ -241,6 +241,20 @@ describe('the AI reads a repository with tools, and every read names its commit'
     assert.deepEqual(inputs.map((i) => [i.source, i.path, i.commit]), [['billing-api', 'src/orders/limits.ts', HEAD], ['billing-api', 'README.md', OLD]])
   })
 
+  // #335: a search on a big repository, or over a slow link, can stop early. The AI is told it was cut short, why, and what will do better.
+  test('a search that was cut short says so, and says how to do better', async () => {
+    const cutShort = () => ({ search: async ({ query }) => ({ commit: HEAD, query, matches: [{ path: 'src/orders/limits.ts', line: 1, text: 'export const MAX_ORDER_NZD = 5000' }], filesSearched: 180, truncated: true, truncatedBy: 'time-limit', truncatedReason: 'stopped after 30 seconds, 180 of 400 files searched' }) })
+    const found = await runRepositoryCall('search_repository', { id: 'billing-api', query: 'MAX_ORDER' }, { lookup, reader: cutShort })
+    assert.equal(found.ok, true)
+    assert.match(found.content, /- src\/orders\/limits\.ts:1: export const MAX_ORDER_NZD = 5000/)
+    assert.match(
+      found.content,
+      /\n\n\[This search was cut short \(stopped after 30 seconds, 180 of 400 files searched\), so these are only the matches found so far\. To do better, search under a folder \(with "path"\) or for something more exact, or read a file you expect to matter with `read_repository_file`\.\]$/
+    )
+    const complete = await runRepositoryCall('search_repository', { id: 'billing-api', query: 'MAX_ORDER' }, { lookup, reader })
+    assert.doesNotMatch(complete.content, /cut short/)
+  })
+
   test('the decisions log keeps an input\'s path and commit', () => {
     const log = applyDecisionsDelta(emptyDecisionsLog('s'), { fields: { 'm.f': { drafted: '2026-11-04T09:00:00.000Z', inputs: [{ source: 'billing-api', title: 'Billing API', range: 'src/a.ts', path: 'src/a.ts', commit: HEAD, fingerprint: 'abc' }] } } })
     assert.deepEqual(log.fields['m.f'].inputs, [{ source: 'billing-api', title: 'Billing API', range: 'src/a.ts', path: 'src/a.ts', commit: HEAD, fingerprint: 'abc' }])

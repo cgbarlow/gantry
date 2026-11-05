@@ -984,6 +984,12 @@ An architect, or an outside agent over MCP, can add a **Source document** by giv
 
 An architect, or an outside agent over MCP, can add a **code repository** on GitHub, Azure DevOps, GitLab or Bitbucket as a Source document (`docs/adr/0072-a-code-repository-is-a-source-document-read-live-through-a-pointer.md`). Nothing from the repository is stored: the Instance keeps a pointer (Provider, repository, branch, optional folders), and the server reads it live, read-only, through `POST /api/sources/repository` whenever the AI asks. It uses the token the architect gives in their browser (none for a public repository); over MCP, the token the MCP server already holds for the workspace. The server needs outbound HTTPS to those Providers (see **Outbound network**), and for GitHub also to `raw.githubusercontent.com`: a public repository read without a token takes its files from there, which GitHub's token-less limit of 60 API requests an hour doesn't count. When a Provider's limit is used up, architects are told so and when it resets, never that they can't read the repository. There is no switch for it: it takes exactly the Provider addresses a workspace may use, so a self-hosted GitHub Enterprise, Azure DevOps Server or GitLab address is accepted only where the matching workspace setting already allows one.
 
+A search reads several files at once and stops at a time limit, well under the 100 seconds a Cloudflare Tunnel (and many proxies) waits for an answer. It then returns the matches it has found so far, marked `truncated`, with `truncatedReason` saying why (`stopped after 30 seconds, 180 of 400 files searched`), and the AI, or an outside agent over MCP, is told to narrow the search or read a file. A search whose caller has gone (the browser or the proxy gave up on the request) stops reading files, so it doesn't keep spending the Provider's rate limit. Two settings change this; each takes a whole number, and a value out of range stops `gantry serve` at startup with a line naming it:
+
+**`GANTRY_REPOSITORY_SEARCH_TIME_LIMIT_SECONDS`** (default `30`, from `1` to `600`): how long one search may take before it returns what it has found. Keep it under your proxy's own limit.
+
+**`GANTRY_REPOSITORY_SEARCH_PARALLEL_READS`** (default `8`, from `1` to `32`): how many files one search reads at once. More finishes a search sooner over a slow link, and spends a Provider's rate limit faster.
+
 ### Health and restart
 
 The `runtime` stage declares a `HEALTHCHECK`:
