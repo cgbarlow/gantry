@@ -116,7 +116,8 @@ const repositoryTitle = (doc) => doc.title || doc.id
 
 /**
  * Runs one repository tool call. `lookup(id)` returns the Source document as the session knows it; `reader(entry)` the reader the Gantry
- * server answers through (web/lib/sourceRepositoryClient.js): `{ list, search, read }`. Resolves `{ ok, content, read? }`, never rejects:
+ * server answers through (web/lib/sourceRepositoryClient.js): `{ list, search, read }`. Resolves `{ ok, content, read? }`, never rejects
+ * (a refusal carries `blocked` or, #336, `failed`, `{ source, title, code, message }`, for the thread):
  * `content` goes back to the AI, and a file read is recorded as `read`, `{ source, title, range, path, commit, fingerprint, chars }`. A file read
  * and a search also carry `label`, which names them for their `readNote` once they are old (#328).
  */
@@ -163,16 +164,30 @@ export async function runRepositoryCall(name, input, { lookup, reader }) {
     const message = err?.message ?? 'it could not be read'
     // #319: a refusal the architect has to act on (no access, no server, a branch that has gone) is also theirs to see, not only the AI's.
     const blocked = REPOSITORY_BLOCKED_CODES.includes(err?.code) ? { blocked: { source: doc.id, title, code: err.code, message } } : {}
+    // #336: a read that failed for a temporary reason (cut off, out of time, a Provider briefly not answering) failed, not the repository.
+    // The AI is told it can try that read again, or something narrower; the architect sees it in the thread, but nothing is blocked.
+    if (REPOSITORY_TEMPORARY_CODES.includes(err?.code)) {
+      const note = `\n\n[Only this read failed; ${title} can still be read. Try it again, or something narrower: one folder, a search under a path, or one file.]`
+      return { ok: false, content: `${title}: ${message}${note}`, failed: { source: doc.id, title, code: err.code, message } }
+    }
     return { ok: false, content: `${title}: ${message}`, ...blocked }
   }
 }
 
 /**
  * #319: the refusals of a repository read that come from where the architect stands, not from what the AI asked: they can't read it (or
- * can't with the token this browser holds), the Gantry server or the Provider can't be reached, or the branch is gone. The interview tells
- * the architect these, as well as the AI; a bad path or a skipped file is the AI's to sort out.
+ * can't with the token this browser holds), its Provider's rate limit is used up, the Gantry server can't be reached at all, the branch is
+ * gone, or this server doesn't take its address. Each is a definite answer: the interview tells the architect, as well as the AI, and the
+ * repository is not relied on for the session. A bad path or a skipped file is the AI's to sort out.
  */
-export const REPOSITORY_BLOCKED_CODES = Object.freeze(['no-access', 'rate-limited', 'server-unreachable', 'unreachable', 'no-branch', 'base-url-not-allowed'])
+export const REPOSITORY_BLOCKED_CODES = Object.freeze(['no-access', 'rate-limited', 'server-unreachable', 'no-branch', 'base-url-not-allowed'])
+
+/**
+ * #336: the refusals of one repository read that failed for a temporary reason, after the retries on the server and in the browser: the
+ * request was cut off on its way from the Gantry server (`cut-off`), the Provider took too long (`timed-out`) or couldn't be reached or
+ * answer just then (`unreachable`). None of them blocks the repository: the next read is made as usual.
+ */
+export const REPOSITORY_TEMPORARY_CODES = Object.freeze(['cut-off', 'timed-out', 'unreachable'])
 
 // ---------- the text fallback ----------
 

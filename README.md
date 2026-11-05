@@ -990,6 +990,14 @@ A search reads several files at once and stops at a time limit, well under the 1
 
 **`GANTRY_REPOSITORY_SEARCH_PARALLEL_READS`** (default `8`, from `1` to `32`): how many files one search reads at once. More finishes a search sooner over a slow link, and spends a Provider's rate limit faster.
 
+Reading a repository survives a temporary failure (#336). Every request the server makes to a Provider while reading one (check, list, read, the file reads of a search, Out of date's compare) has its own time limit, so one that never answers can't hold a request open until a proxy gives up. A request that fails for a temporary reason (a dropped or reset connection, one that ran out of time, a 502, 503 or 504) is tried again, with a short wait that doubles each time. A definite answer is never tried again: a used-up rate limit (it still says when the limit resets), no access, not found, no such branch. A read still failing after its retries is refused as `timed-out` (*GitHub took too long to answer a read of acme/billing-api …*) or `unreachable`, and it fails only that read: in an interview the repository isn't set aside for the session, the AI is told it can try again or try something narrower, and Out of date says the repository *was not checked*, never that it changed. An outside agent over MCP reaches repositories through the same route, so it gets the same retries and time limits. The browser, too, asks once more when its request to `POST /api/sources/repository` is cut off; cut off again, the interview says the read *took too long or was cut off*, and says the Gantry server *can't be reached* only when no answer has come from it recently (a Local Workspace with no Gantry server running). Three settings change this, each a whole number, with a value out of range stopping `gantry serve` at startup:
+
+**`GANTRY_REPOSITORY_REQUEST_TIME_LIMIT_SECONDS`** (default `15`, from `1` to `300`): how long one request to the Provider may take, answer included, before it counts as a temporary failure.
+
+**`GANTRY_REPOSITORY_RETRIES`** (default `2`, from `0` to `5`): how many more times a request that failed for a temporary reason is tried. `0` never tries again.
+
+**`GANTRY_REPOSITORY_RETRY_WAIT_MILLISECONDS`** (default `500`, from `0` to `10000`): the wait before the first retry; each later one waits twice as long (by default 0.5 and then 1 second). With the defaults, a Provider that never answers fails a request within about 47 seconds; keep the time limit times one more than the retries under your proxy's own limit (100 seconds on a Cloudflare Tunnel).
+
 ### Health and restart
 
 The `runtime` stage declares a `HEALTHCHECK`:
