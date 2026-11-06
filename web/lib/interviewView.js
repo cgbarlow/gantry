@@ -15,7 +15,7 @@ import { aiProviders, defaultAiProvider, updateAiProvider } from './aiProviders.
 import { AiProviderDialog, AiRecoveryPrompt } from './aiProvidersView.js'
 import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
 import { repositoryReaderFor } from './sourceRepositoryClient.js'
-import { citationIndex, openCitation, renderMarkdownPreview } from './markdownPreview.js'
+import { citationIndex, citedRef, openCitation, renderMarkdownPreview } from './markdownPreview.js'
 import { createInterviewSession, statusLine, CARRY_ON_MESSAGE } from './interviewSession.js'
 import { finishTheseMessage, outstandingItems, stageReadiness } from './interviewReadiness.js'
 import { PAGE_SIZE, isAnswered, pageCards, pageCount } from './interviewRounds.js'
@@ -75,15 +75,55 @@ const loadSkills = () => (skillsPromise ??= loadInterviewSkillsInBrowser().catch
 const PROGRESS_LABELS = { key: 'Checking the key…', model: 'Checking the model…', cards: 'Checking question cards…', images: 'Checking whether it reads images…' }
 
 /**
+ * #347: what an AI reply was drawn from, as a string to compare: its text (asset references resolved), whether its diagrams were drawn, and
+ * what the index says of each Source document it cites (`cited`, the ids the last drawing found; an index of null keeps no documents). A
+ * document uploaded since, which the reply does not cite, changes nothing, so the reply and its diagrams are not drawn again for it.
+ */
+export function replyDrawing(text, { index = null, mermaid = true, cited = [] } = {}) {
+  return JSON.stringify([text, mermaid, index === null ? null : cited.map((id) => index[id] ?? null)])
+}
+
+// #347: the blocks a reply's last words can sit in, and the ones that hold other blocks, for caretBlock.
+const CARET_BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE', 'LI', 'TD', 'TH'])
+const CARET_CONTAINERS = new Set(['UL', 'OL', 'LI', 'BLOCKQUOTE', 'TABLE', 'THEAD', 'TBODY', 'TR'])
+
+/**
+ * #347: where the caret goes while a reply arrives: the innermost block its last words are in, following the last element down through
+ * lists, quotes and tables, so it sits in a table's last cell and in a nested list's last item. Null when the last thing is a rule or a
+ * diagram, or nothing has arrived.
+ */
+export function caretBlock(node) {
+  let found = null
+  for (let at = node?.lastElementChild ?? null; at; at = at.lastElementChild) {
+    if (CARET_BLOCKS.has(at.tagName)) found = at
+    if (!CARET_CONTAINERS.has(at.tagName)) break
+  }
+  return found
+}
+
+/**
  * #347: an AI reply in the thread, drawn as Markdown by the module editor's preview (web/lib/markdownPreview.js): the same renderer and
- * sanitising, asset images, and Source document citations that open the document. `preview` is `{ resolveAssets, sources }` for it. A reply
- * is drawn again as each piece arrives, so half-finished Markdown (an unclosed fence or table) may show raw until it closes; its Mermaid
- * diagrams are drawn once, when it is finished.
+ * sanitising, asset images, and Source document citations that open the document. `preview` is `{ resolveAssets, sources, onDrawn }` for
+ * it. A reply is drawn again as each piece arrives, so half-finished Markdown (an unclosed fence or table) may show raw until it closes; its
+ * Mermaid diagrams are drawn once, when it is finished, and `onDrawn` is told when they are, as they make the reply taller. A finished reply
+ * is drawn again only when that changes what it shows (replyDrawing), not each time the page lists its Source documents again.
  */
 export function AiReply({ m, preview }) {
   const ref = useRef(null)
+  const drawn = useRef(null)
   useLayoutEffect(() => {
-    renderMarkdownPreview(ref.current, m.text, { ...preview, mermaid: !m.streaming })
+    const node = ref.current
+    if (!node) return
+    const text = preview?.resolveAssets ? preview.resolveAssets(m.text ?? '') : (m.text ?? '')
+    const sources = preview?.sources ?? {}
+    const index = sources.index ?? null
+    const mermaid = !m.streaming
+    if (drawn.current && drawn.current.key === replyDrawing(text, { index, mermaid, cited: drawn.current.cited })) return
+    const diagrams = renderMarkdownPreview(node, text, { sources, mermaid })
+    const cited = [...new Set([...node.querySelectorAll('[data-source-id]')].map((el) => citedRef(el.dataset.sourceId).id))]
+    drawn.current = { key: replyDrawing(text, { index, mermaid, cited }), cited }
+    if (m.streaming) caretBlock(node)?.classList.add('caret-at')
+    else diagrams.then(() => node.isConnected && preview?.onDrawn?.())
   }, [m.text, m.streaming, preview])
   return html`<div class=${`msg ai md${m.streaming ? ' streaming caret' : ''}`} data-testid="interview-msg" data-who="ai" ref=${ref}></div>`
 }
@@ -388,6 +428,20 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const sessionRef = useRef(null)
   const ctxRef = useRef(null)
   const threadRef = useRef(null)
+  // #347: whether the thread is at its foot, so a reply that grows once it is drawn (its diagrams) keeps it there, and the architect who
+  // scrolled up to read is left where they are. `autoTop` is where the thread last put itself, so the scroll that causes isn't taken for theirs.
+  const threadFoot = useRef({ at: true, autoTop: null })
+  const scrollThreadToFoot = useCallback(() => {
+    const el = threadRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    threadFoot.current = { at: true, autoTop: el.scrollTop }
+  }, [])
+  const keepThreadAtFoot = useCallback(() => threadFoot.current.at && scrollThreadToFoot(), [])
+  const onThreadScroll = useCallback((e) => {
+    const el = e.currentTarget
+    threadFoot.current.at = el.scrollTop === threadFoot.current.autoTop || el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  }, [])
   const chatRef = useRef(null)
   const providers = aiProviders.value
 
@@ -488,7 +542,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       setCiteMessage('')
       openCitation(storeRef.current, index, ref).catch((err) => setCiteMessage(err.message))
     }
-    return { resolveAssets, sources: { index, open } }
+    return { resolveAssets, sources: { index, open }, onDrawn: keepThreadAtFoot }
   }, [sources, resolveAssets])
 
   // #293: the run's target Stage ("Run until"). The current Stage when no other is picked, which is a run of one Stage.
@@ -686,10 +740,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     if (session && providerId && session.providerId !== providerId && snap?.phase === 'kickoff') session.setProvider(providerId)
   }, [providerId, snap?.phase])
 
-  useEffect(() => {
-    const el = threadRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [snap?.thread?.length, snap?.thread?.[snap.thread.length - 1]?.text])
+  useEffect(scrollThreadToFoot, [snap?.thread?.length, snap?.thread?.[snap.thread.length - 1]?.text])
 
   const drafts = snap?.drafts ?? {}
   const draftKeys = Object.keys(drafts)
@@ -2431,7 +2482,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           ${switchMessage ? html`<span class="inline-error" role="alert" data-testid="interview-switch-error">${switchMessage}</span>` : null}
           ${citeMessage ? html`<span class="inline-error" role="alert" data-testid="interview-cite-error">${citeMessage}</span>` : null}
         </div>
-        <div class="interview-thread" data-testid="interview-thread" ref=${threadRef} role="region" aria-label="Interview" tabindex="-1">
+        <div class="interview-thread" data-testid="interview-thread" ref=${threadRef} onScroll=${onThreadScroll} role="region" aria-label="Interview" tabindex="-1">
           <div class="inner">
             ${setup.status === 'loading' ? html`<p class="loading">Loading…</p>` : null}
             ${setup.status === 'error' ? html`<p class="inline-error" role="alert">${setup.message}</p>` : null}

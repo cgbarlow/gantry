@@ -84,20 +84,22 @@ export function activateSourceCitations(node, { index = null, open = null } = {}
 /**
  * Draws `text` into `node` as the module editor's preview does (the steps at the top of this file). `resolveAssets(text)` rewrites the
  * asset references (none when left out); `sources` is `{ index, open }` for activateSourceCitations. #347: `mermaid: false` leaves the
- * ```mermaid fences as code, for an AI reply that is still arriving: a diagram is drawn once, when the reply is finished.
+ * ```mermaid fences as code, for an AI reply that is still arriving: a diagram is drawn once, when the reply is finished. Returns a promise
+ * that settles once the diagrams are drawn (or have failed), for a caller whose layout grows with them; the editor needn't wait for it.
  */
 export function renderMarkdownPreview(node, text, { resolveAssets = null, sources = {}, mermaid = true } = {}) {
-  if (!node) return
+  if (!node) return Promise.resolve()
   const withSources = resolveAssets ? resolveAssets(text ?? '') : (text ?? '')
   // #347: without the newline markdown-it ends on, a one-line reply's text is its words alone.
   node.innerHTML = renderMarkdown(withSources).trimEnd()
   activateSourceCitations(node, sources)
   // WI #353: ```mermaid fences render as diagrams in place. Async and fire-and-forget — a
   // re-render before a diagram finishes just leaves the swap with nothing to replace.
-  if (mermaid) hydrateMermaidPreview(node).catch(() => {})
+  const diagrams = mermaid ? hydrateMermaidPreview(node).catch(() => {}) : Promise.resolve()
   // Caption-styling hook: the citation renders as <p><em>Source: …</em></p>; mark that paragraph so the stylesheet can make it visually subordinate (caption) rather than body text.
   node.querySelectorAll('p').forEach((p) => {
     const em = p.querySelector('em')
     if (em && em.textContent.startsWith('Source:')) p.classList.add('asset-source')
   })
+  return diagrams
 }

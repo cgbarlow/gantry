@@ -2230,7 +2230,8 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-page .msg.sys.carry-on { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text); }
 .interview-page .caret::after { content: '▍'; animation: interview-blink 1s steps(1) infinite; }
 /* #347: an AI reply drawn as Markdown (web/lib/markdownPreview.js), sized for a chat bubble. The bubble keeps to the thread's width at any
- * size: a wide table or code block scrolls within itself. While the reply arrives the caret sits at the end of its last line. */
+ * size: a wide table or code block scrolls within itself. While the reply arrives the caret sits at the end of its last line, in the block
+ * the reply marks for it (caretBlock in web/lib/interviewView.js): a table's last cell, a nested list's last item. */
 .interview-page .msg.md { white-space: normal; }
 .interview-page .msg.md > :first-child { margin-top: 0; }
 .interview-page .msg.md > :last-child { margin-bottom: 0; }
@@ -2254,8 +2255,7 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-page .msg.md img { max-width: 100%; height: auto; }
 .interview-page .msg.md a.source-citation { cursor: pointer; }
 .interview-page .msg.md.caret:not(:empty)::after { content: none; }
-.interview-page .msg.md.caret > :is(p, h1, h2, h3, h4, h5, h6, pre, blockquote):last-child::after,
-.interview-page .msg.md.caret > :is(ul, ol):last-child > li:last-child::after { content: '▍'; animation: interview-blink 1s steps(1) infinite; }
+.interview-page .msg.md.caret .caret-at::after { content: '▍'; animation: interview-blink 1s steps(1) infinite; }
 .interview-page .status-detail { font-variant-numeric: tabular-nums; }
 @keyframes interview-blink { 50% { opacity: 0; } }
 .interview-page .kick { max-width: 460px; }

@@ -11,7 +11,7 @@ globalThis.localStorage = {
   setItem: (k, v) => map.set(k, String(v)),
   removeItem: (k) => map.delete(k),
 }
-const { ThreadMessage, AiReply } = await import('../web/lib/interviewView.js')
+const { ThreadMessage, AiReply, replyDrawing, caretBlock } = await import('../web/lib/interviewView.js')
 
 const preview = { resolveAssets: null, sources: { index: {}, open: () => {} } }
 
@@ -51,4 +51,51 @@ test('#345: the system line a quiet turn left keeps its Carry on button, and the
   assert.equal(sent, 1)
   // Once Carry on no longer answers it, it is a plain system line like any other.
   assert.equal(ThreadMessage({ m, preview }).props.class, 'msg sys')
+})
+
+// #347: a finished reply is drawn again only when that would change what it shows. The page hands the thread a new set of things to draw with
+// whenever the Source documents panel lists again (after an upload, say) or the Instance's assets are read again; drawing every reply again
+// then would draw each of their diagrams again from scratch, the code showing in place of each while it does.
+test('a reply is drawn again when its text, its diagrams or a Source document it cites changes, and not for a document it does not cite', () => {
+  const notes = { title: 'Workshop notes', filename: 'Notes.txt', removed: false }
+  const index = { notes }
+  const drawn = replyDrawing('See [notes](source:notes).', { index, mermaid: true, cited: ['notes'] })
+  // A document uploaded since, which this reply does not cite, and a new index object with the same documents in it: nothing to draw again.
+  assert.equal(replyDrawing('See [notes](source:notes).', { index: { ...index, brief: { title: 'Client brief', filename: 'brief.md', removed: false } }, mermaid: true, cited: ['notes'] }), drawn)
+  // The document it cites was removed or renamed: drawn again, so the citation says so.
+  assert.notEqual(replyDrawing('See [notes](source:notes).', { index: { notes: { ...notes, removed: true } }, mermaid: true, cited: ['notes'] }), drawn)
+  assert.notEqual(replyDrawing('See [notes](source:notes).', { index: { notes: { ...notes, title: 'Notes' } }, mermaid: true, cited: ['notes'] }), drawn)
+  // The Source documents have not been listed yet (none kept), then they are.
+  assert.notEqual(replyDrawing('See [notes](source:notes).', { index: null, mermaid: true, cited: [] }), replyDrawing('See [notes](source:notes).', { index: {}, mermaid: true, cited: [] }))
+  // More text arrived, or the reply finished and its diagrams are drawn now.
+  assert.notEqual(replyDrawing('See [notes](source:notes). More.', { index, mermaid: true, cited: ['notes'] }), drawn)
+  assert.notEqual(replyDrawing('See [notes](source:notes).', { index, mermaid: false, cited: ['notes'] }), drawn)
+})
+
+// #347: while a reply arrives, the caret sits at the end of what has arrived: the innermost block its last words are in. A stand-in for the
+// drawn reply's elements, each with its tag and children.
+const el = (tagName, ...children) => ({ tagName, children, get lastElementChild() { return children[children.length - 1] ?? null } })
+
+test('the caret goes in the block the last words are in: a paragraph, the last cell of a table, the innermost last item of a list', () => {
+  const p = el('P', el('STRONG'))
+  assert.equal(caretBlock(el('DIV', el('H3'), p)), p)
+  const pre = el('PRE', el('CODE'))
+  assert.equal(caretBlock(el('DIV', pre)), pre)
+  // A table: its last row's last cell, in the body or, while only the header row has arrived, the header.
+  const td = el('TD')
+  assert.equal(caretBlock(el('DIV', el('TABLE', el('THEAD', el('TR', el('TH'))), el('TBODY', el('TR', el('TD'), td))))), td)
+  const th = el('TH')
+  assert.equal(caretBlock(el('DIV', el('TABLE', el('THEAD', el('TR', el('TH'), th))))), th)
+  // A list: its last item, or the last item of the list nested in it, or the paragraph of a loose list's item.
+  const item = el('LI', el('CODE'))
+  assert.equal(caretBlock(el('DIV', el('UL', el('LI'), item))), item)
+  const inner = el('LI')
+  assert.equal(caretBlock(el('DIV', el('OL', el('LI'), el('LI', el('STRONG'), el('UL', el('LI'), inner))))), inner)
+  const loose = el('P')
+  assert.equal(caretBlock(el('DIV', el('UL', el('LI', el('P'), loose)))), loose)
+  const quoted = el('P')
+  assert.equal(caretBlock(el('DIV', el('BLOCKQUOTE', el('P'), quoted))), quoted)
+  // A rule, or nothing yet: no block to put it in.
+  assert.equal(caretBlock(el('DIV', el('P'), el('HR'))), null)
+  assert.equal(caretBlock(el('DIV')), null)
 })

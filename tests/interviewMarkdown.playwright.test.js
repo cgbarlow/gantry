@@ -13,8 +13,8 @@ import { writeTrio } from './helpers/trioDefinition.js'
 // #347: the AI interview's thread draws the AI's replies as Markdown, with the module editor's preview (web/lib/markdownPreview.js). A real
 // server and relay, a real Chromium page and a stand-in for Anthropic on the three-Stage trio, whose Instance has two Source documents, one
 // of them removed. The AI's first reply is the issue's SOAP example and more: a heading, a table, citations of both documents, a fenced code
-// block, a Mermaid diagram and markup that must not run. It arrives in three pieces, and stops part-way through the code block for a while
-// so the test can look at the thread mid-fence. Which messages are drawn as Markdown is covered under node --test in
+// block, a Mermaid diagram and markup that must not run. It arrives in three pieces, and stops for a while after the table and again part-way
+// through the code block, so the test can look at the thread mid-reply: the caret where the words end, and the diagram not drawn yet. Which messages are drawn as Markdown is covered under node --test in
 // tests/interviewThread.test.js, and the drawing step by step in tests/markdownPreview.test.js; this is the screen.
 
 const SLUG = 'markdown-test'
@@ -34,16 +34,16 @@ Five things in the drafts are worth a check:
 
 Is there anything you want to change before the stage-end card?`
 
-// The first reply, in the pieces it arrives in. The second piece ends inside an unclosed fence.
+// The first reply, in the pieces it arrives in. The first ends with a table, after a whole Mermaid fence; the second inside an unclosed fence.
 const PIECES = [
-  `${SOAP_REPLY}\n\n### Where it comes from\n\nThe storage question is open [Workshop notes, p. 2](source:notes). The old plan said otherwise [Old plan](source:old-plan). More at [the Gantry site](https://example.com/gantry).\n\n| Question | Status | Owner | Where it was raised | What is still needed |\n| - | - | - | - | - |\n| Q1 storage-account-replication-strategy | Open | Infrastructure-architecture-guild | Workshop-notes-page-two | A-decision-from-the-infrastructure-lead |\n\n`,
+  `${SOAP_REPLY}\n\n### Where it comes from\n\nThe storage question is open [Workshop notes, p. 2](source:notes). The old plan said otherwise [Old plan](source:old-plan). More at [the Gantry site](https://example.com/gantry).\n\n\`\`\`mermaid\ngraph TD\n  A[Brief] --> B[Draft]\n\`\`\`\n\n| Question | Status | Owner | Where it was raised | What is still needed |\n| - | - | - | - | - |\n| Q1 storage-account-replication-strategy | Open | Infrastructure-architecture-guild | Workshop-notes-page-two | A-decision-from-the-infrastructure-lead |\n\n`,
   '```yaml\nregistry: <set-me>\n',
-  '```\n\n<script>window.__pwned = true</script>\n\n[a bad link](javascript:window.__pwned=true) and <img src="x" onerror="window.__pwned = true">\n\n```mermaid\ngraph TD\n  A[Brief] --> B[Draft]\n```\n\nThat is all for now.',
+  '```\n\n<script>window.__pwned = true</script>\n\n[a bad link](javascript:window.__pwned=true) and <img src="x" onerror="window.__pwned = true">\n\nThat is all for now.',
 ]
 
-// The stand-in. A fresh interview's first request answers with PIECES, waiting `pauseMs` after the unclosed fence; every later request answers
-// with a short sentence.
-function withMarkdownAnthropic({ pauseMs = 2500 } = {}, fn) {
+// The stand-in. A fresh interview's first request answers with PIECES, waiting `pauses[i]` after each piece; every later request answers with a
+// short sentence.
+function withMarkdownAnthropic({ pauses = [2000, 2500, 0] } = {}, fn) {
   const posts = []
   const upstream = createHttpServer((req, res) => {
     let raw = ''
@@ -62,8 +62,7 @@ function withMarkdownAnthropic({ pauseMs = 2500 } = {}, fn) {
       event(res, 'content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })
       for (const [i, text] of (fresh ? PIECES : ['Noted.']).entries()) {
         event(res, 'content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })
-        if (fresh && i === 1) await wait(pauseMs)
-        else if (fresh) await wait(150)
+        if (fresh) await wait(pauses[i])
       }
       event(res, 'content_block_stop', { type: 'content_block_stop', index: 0 })
       event(res, 'message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } })
@@ -132,17 +131,40 @@ async function withTrio(fn) {
 }
 
 const reply = (page) => page.locator('[data-testid="interview-msg"][data-who="ai"]').first()
+// The caret drawn after an element, or null when there is none.
+const caretAfter = (locator) => locator.evaluate((node) => (getComputedStyle(node, '::after').content === '"▍"' ? node.tagName : null))
 
 test("an AI reply is formatted, part-way through a fence included; its citation opens the Source document; nothing in it runs; the architect's message stays as typed", async () => {
   await withTrio(async ({ page, ai }) => {
+    // A short window, so the finished reply runs past the foot of the thread. Mermaid is loaded before the reply starts, so a diagram drawn
+    // while the reply arrives would show well within the pauses below.
+    await page.setViewportSize({ width: 1500, height: 700 })
+    await page.evaluate(() => import('/node_modules/mermaid/dist/mermaid.esm.min.mjs'))
     await page.click('[data-testid="interview-start"]')
 
-    // Part-way: the reply is formatted as it arrives, the unclosed fence is code so far, the status line is up, and no diagram is drawn yet.
+    // After the first piece: the table is the last thing to have arrived, and the caret is at the end of its last cell. The Mermaid fence
+    // before it is whole, and stays code while the reply arrives.
+    await page.waitForSelector('[data-testid="interview-msg"][data-who="ai"].streaming table')
+    const first = reply(page)
+    await page.waitForFunction(() => {
+      const cell = document.querySelector('[data-testid="interview-msg"][data-who="ai"].streaming table > tbody > tr:last-child > :last-child')
+      return cell && getComputedStyle(cell, '::after').content === '"▍"'
+    })
+    assert.equal(await caretAfter(first.locator('table')), null, 'the caret is in the last cell, not under the table')
+    assert.equal(await first.locator('pre > code.language-mermaid').count(), 1)
+
+    // Part-way: the reply is formatted as it arrives, the unclosed fence is code so far with the caret after it, the status line is up, and
+    // the diagram is still not drawn a second into the pause.
     await page.waitForSelector('[data-testid="interview-msg"][data-who="ai"].streaming pre > code.language-yaml')
     const midway = reply(page)
     assert.match(await midway.locator('pre > code.language-yaml').textContent(), /^registry: <set-me>\n?$/)
     assert.equal(await midway.locator('ul').count(), 2)
     assert.equal(await page.locator('[data-testid="interview-status"]').count(), 1, 'the status line is still there')
+    assert.equal(await caretAfter(midway.locator('pre:has(> code.language-yaml)')), 'PRE')
+    assert.equal(await caretAfter(midway.locator('table td').last()), null, 'only one caret')
+    await wait(1000)
+    assert.equal(await midway.evaluate((el) => el.classList.contains('streaming')), true, 'the reply is still arriving')
+    assert.equal(await midway.locator('pre > code.language-mermaid').count(), 1)
     assert.equal(await midway.locator('figure.mermaid-diagram').count(), 0)
 
     // Finished: rendered in full.
@@ -164,8 +186,23 @@ test("an AI reply is formatted, part-way through a fence included; its citation 
     const text = await done.textContent()
     for (const raw of ['**', '### ', '| - |', '```', '](source:']) assert.ok(!text.includes(raw), `no raw ${raw}`)
 
-    // The Mermaid fence is drawn as a diagram once the reply has finished.
+    // The Mermaid fence is drawn as a diagram once the reply has finished, and the thread, which was at its foot, stays there as the diagram
+    // makes the reply taller.
     await done.locator('figure.mermaid-diagram svg').waitFor()
+    assert.equal(await done.locator('pre > code.language-mermaid').count(), 0)
+    const thread = page.locator('[data-testid="interview-thread"]')
+    assert.ok(await thread.evaluate((t) => t.scrollHeight > t.clientHeight + 200), 'the thread is taller than its box')
+    await page.waitForFunction(() => {
+      const t = document.querySelector('[data-testid="interview-thread"]')
+      return t.scrollHeight - t.scrollTop - t.clientHeight < 2
+    })
+
+    // A Source document added now, which the reply does not cite, leaves the reply as drawn: the diagram is not drawn again.
+    await done.locator('figure.mermaid-diagram svg').evaluate((svg) => (svg.dataset.kept = 'yes'))
+    await page.setInputFiles('[data-testid="source-documents-compact"] [data-testid="source-documents-input"]', { name: 'Client brief.md', mimeType: 'text/markdown', buffer: Buffer.from('# Client brief\n\nClaims take too long to settle.\n') })
+    await page.waitForSelector('[data-testid="source-documents-list"] [data-source-id="client-brief"]')
+    await wait(1000)
+    assert.equal(await done.locator('figure.mermaid-diagram svg[data-kept="yes"]').count(), 1, 'the same diagram')
 
     // Nothing in the reply runs: no script, no javascript: link, no event handler, and the page's own state is untouched.
     assert.equal(await done.locator('script').count(), 0)
