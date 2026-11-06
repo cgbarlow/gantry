@@ -7,7 +7,7 @@
 // #319 (docs/adr/0072): a citation of a code repository may carry the file and the commit it was read at after the id, as a query
 // (web/lib/sourceRepository.js): `[orders service](source:billing-api?path=src/orders.ts&commit=3f2a9c1…)`. Every other citation is unchanged.
 //
-// In the editor the link is clickable and opens the document (web/app.js's renderPreview). Word readers usually have no repo access, so the Word render prints it as plain "(Client brief, p. 4)" with no hyperlink. The exported `.md` keeps the link as written, as it keeps a diagram caption's syntax. Only a link is a citation: an image (`![…](source:…)`) is not, and neither is anything inside a code span or a fenced code block.
+// In the editor the link is clickable and opens the document (web/lib/markdownPreview.js). Word readers usually have no repo access, so the Word render prints it as plain "(Client brief, p. 4)" with no hyperlink. The exported `.md` keeps the link as written, as it keeps a diagram caption's syntax. Only a link is a citation: an image (`![…](source:…)`) is not, and neither is anything inside a code span or a fenced code block.
 //
 // An Artefact whose Definition sets `source-appendix: true` ends with a Sources list of the documents it cites: each with its title, original filename and upload date (or, #318, for a page fetched from a web address, its address and "retrieved <date>"). A removed document is still listed, marked removed. With the key off (its default) there is no list.
 //
