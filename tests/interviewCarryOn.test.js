@@ -17,6 +17,7 @@ globalThis.localStorage = {
 const providers = await import('../web/lib/aiProviders.js')
 const { createInterviewSession, statusLine, MAX_ROUNDS, CARRY_ON_MESSAGE } = await import('../web/lib/interviewSession.js')
 const { loadInterviewSkills } = await import('../web/lib/interviewSkills.js')
+const { carryOnLine } = await import('../web/lib/interviewView.js')
 
 beforeEach(() => {
   for (const p of [...providers.aiProviders.value]) providers.deleteAiProvider(p.id)
@@ -79,10 +80,22 @@ const anthropic = () => {
   return p
 }
 
-function sessionWith(ai) {
+// A model that does not use tools (questionCards 'text'): it asks for reads, drafts and cards in fenced blocks, over the OpenAI format.
+const openAiReply = (text) =>
+  new Response(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+  })
+const textOnly = () => {
+  const p = providers.addAiProvider({ name: 'Local', type: 'custom', address: 'https://models.example/v1', key: 'k', model: 'small' })
+  providers.setAiProviderTest(p.id, { status: 'passed', testedAt: 'now', questionCards: 'text', readsImages: false, steps: [], message: 'ok' }, null)
+  return p
+}
+
+function sessionWith(ai, { provider } = {}) {
   const context = { definition: definition(), stageId: 'shape', artefactId: 'light', size: 'medium', saved: [{ id: 'details', status: 'draft', fields: [{ id: 'summary', value: '' }, { id: 'notes', value: '' }] }], sources, skills }
   const lines = []
-  const session = createInterviewSession({ providerId: anthropic().id, getContext: () => context, fetchImpl: ai.fetchImpl, onChange: (snap) => lines.push(statusLine(snap)) })
+  const session = createInterviewSession({ providerId: (provider ?? anthropic()).id, getContext: () => context, fetchImpl: ai.fetchImpl, onChange: (snap) => lines.push(statusLine(snap)) })
   return { session, lines }
 }
 
@@ -186,4 +199,80 @@ test('an earlier turn\'s text does not count: a later turn that replies with not
   await session.start()
   await session.send('What next?')
   assert.deepEqual(carryOnLines(session.snapshot()).map((t) => t.carryOn), ['empty'])
+})
+
+// ---------- what the page offers Carry on for ----------
+
+test('the page offers Carry on for the line the latest turn left, and announces it', async () => {
+  const ai = fakeAi(() => anthropicReply())
+  const { session } = sessionWith(ai)
+  await session.start()
+  const snap = session.snapshot()
+  assert.equal(carryOnLine(snap), carryOnLines(snap)[0])
+})
+
+test("a later turn that starts with no message from the architect and ends in a draft does not bring an earlier turn's Carry on back", async () => {
+  // Turn 1 replies with nothing. Turn 2 is #296's: an earlier Stage merged, so Gantry (not the architect) starts it, and its only lines are
+  // system ones: the merge, then the draft. The draft is something to show, so no new line is said, and the old one is only a record.
+  const ai = fakeAi((_req, n) => (n === 1 ? anthropicReply({ tools: [{ id: 'd1', input: { field: 'details.summary', value: 'Move to managed hosting.' } }] }) : anthropicReply()))
+  const { session } = sessionWith(ai)
+  await session.start()
+  assert.ok(carryOnLine(session.snapshot()), 'turn 1 left a line to carry on from')
+  assert.deepEqual(await session.modulesOpened({ modules: [{ id: 'details', title: 'Details' }], stageTitle: 'Earlier' }), { ok: true })
+  const snap = session.snapshot()
+  assert.ok(snap.thread.slice(-2).every((t) => t.who === 'sys'), 'turn 2 added only system lines')
+  assert.ok(snap.thread.at(-1).drafted, 'turn 2 drafted')
+  assert.equal(carryOnLines(snap).length, 1, 'the earlier line stays as a record')
+  assert.equal(carryOnLine(snap), null, 'but Carry on is not offered for it')
+})
+
+test('Carry on is not offered while a turn runs, nor once the architect has written since', async () => {
+  let release
+  const ai = fakeAi((_req, n) => (n === 0 ? anthropicReply() : new Promise((r) => (release = () => r(anthropicReply({ text: 'Picking up.' }))))))
+  const { session } = sessionWith(ai)
+  await session.start()
+  const going = session.send(CARRY_ON_MESSAGE)
+  assert.equal(carryOnLine(session.snapshot()), null, 'while the AI works')
+  for (let i = 0; !release && i < 2000; i++) await new Promise((r) => setTimeout(r, 1))
+  release()
+  await going
+  assert.equal(carryOnLine(session.snapshot()), null, 'after a turn that replied')
+})
+
+test("the line to carry on from is kept in the browser's working copy, and Start this stage over clears it", async () => {
+  const ai = fakeAi(() => anthropicReply())
+  const { session } = sessionWith(ai)
+  await session.start()
+  const line = carryOnLine(session.snapshot())
+  const other = sessionWith(ai).session
+  assert.equal(other.importState(JSON.parse(JSON.stringify(session.exportState()))), true)
+  assert.deepEqual([carryOnLine(other.snapshot())?.id, carryOnLine(other.snapshot())?.text], [line.id, line.text])
+  other.startOver()
+  assert.equal(carryOnLine(other.snapshot()), null)
+})
+
+// ---------- a model that does not use tools ----------
+
+const readBlock = '```gantry-read\n{"id":"tech-lt"}\n```'
+
+test('a text-only model that keeps asking for reads until the per-turn limit: the thread says the rounds were used up, not that it stopped without replying', async () => {
+  const ai = fakeAi(() => openAiReply(`Reading.\n\n${readBlock}`))
+  const { session } = sessionWith(ai, { provider: textOnly() })
+  await session.start()
+  assert.equal(ai.calls.length, MAX_ROUNDS)
+  assert.deepEqual(carryOnLines(session.snapshot()).map((t) => [t.carryOn, t.text]), [['rounds', `The AI used up its ${MAX_ROUNDS} rounds of tool calls for this turn and stopped.`]])
+})
+
+test("Carry on after a text-only model's rounds ran out: \"go on\" follows Gantry's answers to the last round's reads", async () => {
+  const ai = fakeAi((_req, n) => openAiReply(n < MAX_ROUNDS ? readBlock : 'Read enough.'))
+  const { session } = sessionWith(ai, { provider: textOnly() })
+  await session.start()
+  await session.send(CARRY_ON_MESSAGE)
+  assert.equal(ai.calls.length, MAX_ROUNDS + 1)
+  const messages = ai.calls[MAX_ROUNDS].body.messages
+  assert.equal(messages.filter((m) => m.role === 'assistant').length, MAX_ROUNDS, 'every round is in the history')
+  const last = messages.at(-1)
+  assert.equal(last.role, 'user')
+  assert.match(last.content, /Gantry's reply to your read requests/, 'the last round\'s reads were answered')
+  assert.match(last.content, /go on$/)
 })

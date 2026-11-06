@@ -855,7 +855,7 @@ When the status line goes, the AI has handed the turn back to you. Usually it le
 - *The AI stopped without replying.* The AI's last reply was empty: no text, no question cards and no draft. Anything it read on the way (the *Read …* lines) is still in the conversation, but the AI didn't follow it with anything.
 - *The AI used up its 24 rounds of tool calls for this turn and stopped.* The AI can read documents and draft Fields up to 24 times in one turn before it has to hand back to you. A turn spent reading a large repository file by file can reach that limit.
 
-Both lines carry a **Carry on** button. It sends "go on" to the AI as your own message, exactly as if you had typed it, and the next turn starts with the status line as usual. You can type something else instead, such as which file to read next or what to draft, and the button goes once the conversation moves on. Screen readers announce the line once, when the turn ends, and the button is reachable with the keyboard like any other.
+Both lines carry a **Carry on** button. It sends "go on" to the AI as your own message, exactly as if you had typed it, and the next turn starts with the status line as usual. You can type something else instead, such as which file to read next or what to draft, and the button goes once the conversation moves on, including when the next turn only drafts. Screen readers announce the line once, when the turn ends, and the button is reachable with the keyboard like any other. Pressing it moves the focus to the conversation while the AI works, then to the chat box once its turn is over.
 
 #### Gantry checks every draft
 

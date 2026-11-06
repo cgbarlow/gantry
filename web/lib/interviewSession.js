@@ -546,6 +546,9 @@ export function createInterviewSession(config = {}) {
     compactOffer: null, // #329: { before, after, window }: the card offering to compact, shown at the end of a turn past about 60% of the window
     compactPending: false, // #329: Compact now was asked for while a round was open or the AI was busy: it is done before the next request
     compacting: false, // #329: the AI is writing its summary and the conversation is being started afresh
+    // #345: the id of the line the latest turn left because it ended with nothing to show (the line Carry on answers), or null. Each turn
+    // clears it as it starts, so an earlier turn's line stays in the thread as a record but is never offered again.
+    carryOnAt: null,
     // #338: { source, title, receivedBytes } while a repository tool call waits for the Gantry server to download its copy of that
     // repository ("Preparing <title>… N MB" in the thread); null otherwise.
     preparingRepository: null,
@@ -1750,6 +1753,7 @@ export function createInterviewSession(config = {}) {
   async function runLoop() {
     state.phase = 'working'
     const firstId = nextId // #345: the thread items from here on are this turn's
+    state.carryOnAt = null
     let ended = false // #345: the turn ended of itself, not because its rounds ran out
     cutOffs = 0
     cutOffSaid = false
@@ -1871,10 +1875,8 @@ export function createInterviewSession(config = {}) {
           const logOutcomes = logged.requests.map((request) => runLog(request))
           if (drafts.length) readsSinceDraft = []
           notes.push(...errors, ...requested.errors, ...logged.errors, ...outcomes.filter((o) => !o.ok).map((o) => o.content), ...logOutcomes.filter((o) => !o.ok).map((o) => o.content))
-          if (round < MAX_ROUNDS - 1 && (answers.length || (notes.length && outcomes.some((o) => !o.ok) && held.size))) {
-            retry = true
-            readsReply = answers.length ? joinParts([{ text: "Gantry's reply to your read requests:" }, ...answers.map((a) => ({ text: a.content, ...readsOf(a) }))], '\n\n') : null
-          }
+          readsReply = answers.length ? joinParts([{ text: "Gantry's reply to your read requests:" }, ...answers.map((a) => ({ text: a.content, ...readsOf(a) }))], '\n\n') : null
+          if (round < MAX_ROUNDS - 1 && (answers.length || (notes.length && outcomes.some((o) => !o.ok) && held.size))) retry = true
         }
         // Question cards the model wrote that were unusable: a text-fallback model is told once; a model that keeps failing is asked in plain chat.
         if (result.invalidCards?.length && state.cardMode !== 'chat') {
@@ -1889,12 +1891,18 @@ export function createInterviewSession(config = {}) {
         }
         // #344: a reply the output limit cut off is answered, so the AI sends a shorter one rather than stopping part-way.
         const cutOff = result.cutOff && round < MAX_ROUNDS - 1
+        const check = notes.length ? `Gantry's check of your drafts:\n- ${notes.join('\n- ')}` : ''
         if (retry || cutOff) {
-          const check = notes.length ? `Gantry's check of your drafts:\n- ${notes.join('\n- ')}` : ''
           messages.push({ role: 'user', fromGantry: true, ...joinParts([cutOff ? { text: CUT_OFF_NOTE } : null, readsReply, check ? { text: check } : null].filter(Boolean), '\n\n') })
           if (cutOff) askShorter()
           emit()
           continue
+        }
+        // #345: reads asked for in the last round, as a native model's read calls would be: the rounds ran out, the turn did not end of
+        // itself. Gantry's answers are kept in the history, so "go on" picks up with them, and the thread says the rounds were used up.
+        if (readsReply) {
+          messages.push({ role: 'user', fromGantry: true, ...joinParts([readsReply, check ? { text: check } : null].filter(Boolean), '\n\n') })
+          break
         }
         // #349: the turn would end here. If the Stage is not ready and nothing is open for the architect, the AI is told what stands in the
         // way and carries on, once a turn, so a Stage only the architect can make ready never loops.
@@ -1915,8 +1923,8 @@ export function createInterviewSession(config = {}) {
       if (state.compactPending && !state.round && !state.clash) await compact()
       // #345: a turn that ends with nothing new to show says why, with Carry on, rather than just stopping: the AI used up its rounds while
       // still calling tools, or its last reply was empty. Reads are not something to show (they were what the turn was spent on).
-      if (!ended) say('sys', roundsUsedUpLine(), { carryOn: 'rounds' })
-      else if (!state.round && !state.clash && !state.thread.some((t) => t.id >= firstId && (t.who === 'ai' || t.drafted))) say('sys', STOPPED_LINE, { carryOn: 'empty' })
+      if (!ended) state.carryOnAt = say('sys', roundsUsedUpLine(), { carryOn: 'rounds' }).id
+      else if (!state.round && !state.clash && !state.thread.some((t) => t.id >= firstId && (t.who === 'ai' || t.drafted))) state.carryOnAt = say('sys', STOPPED_LINE, { carryOn: 'empty' }).id
       state.phase = state.round ? 'asking' : 'waiting'
       offerCompaction()
     } catch (err) {
@@ -2546,6 +2554,7 @@ ${reviewAnswers.text}` : '',
           opening: state.opening,
           compactOffer: state.compactOffer,
           compactPending: state.compactPending,
+          carryOnAt: state.carryOnAt,
         },
         compaction: { lastInput, askAgainAt, contextTokens },
         pendingChanges: [...pendingChanges],
@@ -2590,6 +2599,7 @@ ${reviewAnswers.text}` : '',
         opening: s.opening ?? '',
         compactOffer: s.compactOffer ?? null,
         compactPending: s.compactPending === true,
+        carryOnAt: s.carryOnAt ?? null,
         compacting: false,
         kickoffError: null,
         drafting: null,
@@ -2693,6 +2703,7 @@ ${reviewAnswers.text}` : '',
       state.compactOffer = null
       state.compactPending = false
       state.thread = []
+      state.carryOnAt = null
       state.drafts = {}
       state.fieldInputs = {}
       state.savedKeys = []

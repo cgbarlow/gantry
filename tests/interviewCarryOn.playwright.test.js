@@ -124,6 +124,9 @@ test('a reply with nothing in it: the thread says the AI stopped without replyin
 
     // The next turn runs with the status line as usual, and "go on" is the architect's message in the thread and to the AI.
     await page.waitForSelector('[data-testid="interview-status"]')
+    // The button goes with the turn, and the focus is not dropped on the page: it is on the thread, where the status line and the reply
+    // appear, until the turn is over.
+    assert.equal(await page.evaluate(() => document.activeElement?.dataset.testid), 'interview-thread')
     assert.match(await page.textContent('[data-testid="interview-status-text"]'), /^Waiting for the AI/)
     assert.equal(await page.$('[data-testid="interview-carry-on"]'), null, 'the button goes once it has been used')
     const you = await page.$$eval('[data-testid="interview-msg"][data-who="you"]', (els) => els.map((e) => e.textContent))
@@ -132,6 +135,8 @@ test('a reply with nothing in it: the thread says the AI stopped without replyin
     assert.equal(await page.textContent('[data-testid="interview-msg"][data-who="ai"]'), 'Picking up where I stopped.')
     await page.waitForSelector('[data-testid="interview-status"]', { state: 'detached' })
     assert.equal(await page.$('[data-testid="interview-carry-on"]'), null, 'a turn that replied adds no line')
+    // Then the chat box has it, ready for the architect's reply.
+    await page.waitForFunction(() => document.activeElement?.dataset.testid === 'interview-chat')
     assert.equal(await page.$$eval('[data-testid="interview-msg"][data-carry-on]', (els) => els.length), 1, 'the first line stays as a record')
     assert.equal(ai.posts.length, 2)
   })

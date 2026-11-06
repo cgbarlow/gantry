@@ -89,6 +89,19 @@ export function AiReply({ m, preview }) {
 }
 
 /**
+ * #345: the line Carry on answers, or null: the one the latest turn left because it ended with nothing to show (`snap.carryOnAt`), while
+ * it is still the last word: between turns, with no round of cards or clash open, and with nothing from the architect or the AI after it.
+ * An earlier turn's line stays in the thread as a record and is never offered again, even when the turns since added only system lines.
+ */
+export function carryOnLine(snap) {
+  if (snap?.carryOnAt == null || snap.phase !== 'waiting' || snap.round || snap.clash) return null
+  const list = snap.thread ?? []
+  const at = list.findIndex((t) => t.id === snap.carryOnAt)
+  if (at === -1 || list.slice(at + 1).some((t) => t.who !== 'sys')) return null
+  return list[at]
+}
+
+/**
  * One message of the thread. #347: only the AI's replies are Markdown; the architect's messages and Gantry's system lines are plain text, as
  * typed. #345: `carryOn` marks the system line a quiet turn left while Carry on still answers it, and `onCarryOn` sends "go on".
  */
@@ -375,6 +388,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const sessionRef = useRef(null)
   const ctxRef = useRef(null)
   const threadRef = useRef(null)
+  const chatRef = useRef(null)
   const providers = aiProviders.value
 
   const providerId = (providers.find((p) => p.id === pickedProvider) ?? defaultAiProvider())?.id ?? null
@@ -1677,19 +1691,23 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     `
   }
 
-  // #345: the line a turn that ended with nothing to show left, while Carry on still answers it: between turns, with no round of cards open,
-  // and with nothing from the architect or the AI after it.
-  const carryOnAt = (() => {
-    const list = snap?.thread ?? []
-    if (phase !== 'waiting' || snap?.round || snap?.clash) return null
-    for (let i = list.length - 1; i >= 0; i--) {
-      if (list[i].carryOn) return list[i].id
-      if (list[i].who !== 'sys') return null
-    }
-    return null
-  })()
-  const sendCarryOn = () => sessionRef.current?.send(CARRY_ON_MESSAGE)
-  const thread = () => (snap?.thread ?? []).map((m) => html`<${ThreadMessage} key=${m.id} m=${m} preview=${replyPreview} carryOn=${m.id === carryOnAt} onCarryOn=${sendCarryOn} />`)
+  // #345: the line a turn that ended with nothing to show left, while Carry on still answers it.
+  const carryOnNow = carryOnLine(snap)
+  // Carry on goes as the turn it starts begins, so the focus would fall to the page: it moves to the thread, where the status line and the
+  // reply appear, and on to the chat box once the turn is over, unless the architect has put it somewhere else meanwhile.
+  const carryOnFocus = useRef(false)
+  const sendCarryOn = () => {
+    carryOnFocus.current = true
+    threadRef.current?.focus({ preventScroll: true })
+    sessionRef.current?.send(CARRY_ON_MESSAGE)
+  }
+  useEffect(() => {
+    if (busy || !carryOnFocus.current) return
+    carryOnFocus.current = false
+    const at = document.activeElement
+    if (!at || at === document.body || at === threadRef.current) chatRef.current?.focus()
+  }, [busy])
+  const thread = () => (snap?.thread ?? []).map((m) => html`<${ThreadMessage} key=${m.id} m=${m} preview=${replyPreview} carryOn=${m === carryOnNow} onCarryOn=${sendCarryOn} />`)
 
   // The `fields` part of the decisions log (ADR-0064): what each drafted Field was drafted from, including every read the AI made (#292).
   const inputsLog = () => {
@@ -2413,7 +2431,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           ${switchMessage ? html`<span class="inline-error" role="alert" data-testid="interview-switch-error">${switchMessage}</span>` : null}
           ${citeMessage ? html`<span class="inline-error" role="alert" data-testid="interview-cite-error">${citeMessage}</span>` : null}
         </div>
-        <div class="interview-thread" data-testid="interview-thread" ref=${threadRef}>
+        <div class="interview-thread" data-testid="interview-thread" ref=${threadRef} role="region" aria-label="Interview" tabindex="-1">
           <div class="inner">
             ${setup.status === 'loading' ? html`<p class="loading">Loading…</p>` : null}
             ${setup.status === 'error' ? html`<p class="inline-error" role="alert">${setup.message}</p>` : null}
@@ -2457,8 +2475,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                     ? html`<p class="msg sys" data-testid="interview-status" data-activity=${status.kind}>
                         <span data-testid="interview-status-text">${status.text}</span>${status.detail ? html` <span class="status-detail" data-testid="interview-status-detail" aria-hidden="true">${status.detail}</span>` : null}<span class="caret"></span>
                       </p>`
-                    : carryOnAt !== null
-                      ? html`<span class="visually-hidden" data-testid="interview-carry-on-announce">${snap.thread.find((t) => t.id === carryOnAt).text} Choose Carry on to let it continue.</span>`
+                    : carryOnNow
+                      ? html`<span class="visually-hidden" data-testid="interview-carry-on-announce">${carryOnNow.text} Choose Carry on to let it continue.</span>`
                       : notReadyNow
                         ? html`<span class="visually-hidden" data-testid="interview-not-ready-announce">${stage?.title ?? instance.stage.title} isn't ready yet. The Not ready yet card says what's outstanding.</span>`
                         : null}
@@ -2482,6 +2500,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             : null}
           <div class="inner chatbox">
             <textarea
+              ref=${chatRef}
               data-testid="interview-chat"
               aria-label="Tell the AI anything"
               placeholder=${started ? 'Tell the AI anything — "the budget is capped at $1.2M", "leave out Finance"…' : 'Start the interview to chat with the AI.'}
