@@ -445,6 +445,17 @@ test('Test connection checks the key, the model, question cards and images, in t
   assert.equal(providers.aiProviderReadsImagesLabel(stored), 'Yes')
 })
 
+test('#346: Test connection keeps its own small output limit, whatever the AI Provider\'s Max tokens says', async () => {
+  for (const [name, maxTokens] of [['Blank', null], ['Big', 16000]]) {
+    const p = anthropic({ name, maxTokens })
+    const ai = connectionAi({ image: 'red', models: { data: [{ id: 'claude-x', max_input_tokens: 200000 }] } })
+    await client.testConnection(providers.getAiProvider(p.id), { fetchImpl: ai.fetchImpl })
+    const sent = ai.calls.filter((c) => c.method === 'POST').map((c) => c.body.max_tokens)
+    assert.ok(sent.length >= 2, name)
+    assert.ok(sent.every((n) => n === 2048), `${name}: ${sent}`)
+  }
+})
+
 test('a model that cannot use the tool is a text fallback, not a failure', async () => {
   for (const card of ['text', 'unsupported', 'invalid-tool']) {
     const p = anthropic({ name: `A-${card}` })
