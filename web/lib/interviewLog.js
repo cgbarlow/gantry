@@ -27,7 +27,8 @@ export const LOG_TOOL = {
     'Record something in the Stage’s decisions log. kind "fact": the architect told you something in free chat that you used or will use in a Field. ' +
     'Give a short `quote` copied exactly from their message and the `fields` (module.field) it feeds; Gantry keeps THEIR message word for word, never your wording, and ' +
     'refuses anything they did not type. Do not log thanks, "go on" or anything that feeds no Field. kind "open-question": something that stays unanswered, ' +
-    'including a select Field where none of the options fits; give the `question`, why it matters in `why`, and the `field` it blocks if any. ' +
+    'including a select Field where none of the options fits; give the `question`, why it matters in `why`, and the `fields` it is about if any. ' +
+    'Logging it records it; it does not hold the Field back. ' +
     'Answers to question cards are logged by Gantry itself: never log those.',
   parameters: {
     type: 'object',
@@ -36,7 +37,7 @@ export const LOG_TOOL = {
       quote: { type: 'string', description: 'For a fact: a piece of the architect’s message, copied exactly.' },
       question: { type: 'string', description: 'For an open question: the question, in one sentence.' },
       why: { type: 'string', description: 'For an open question: why it is open or why it matters.' },
-      fields: { type: 'array', items: { type: 'string' }, description: 'The Fields this feeds or blocks, each as module.field.' },
+      fields: { type: 'array', items: { type: 'string' }, description: 'The Fields this feeds or is about, each as module.field.' },
     },
     required: ['kind'],
   },
@@ -46,7 +47,7 @@ export const LOG_TOOL = {
 export const LOG_TEXT_FALLBACK_INSTRUCTIONS =
   `To log a fact the architect told you, or an open question, write a fenced code block tagged ${LOG_FENCE} containing JSON such as ` +
   '{"kind":"fact","quote":"copied exactly from their message","fields":["module.field"]} or {"kind":"open-question","question":"...","why":"...","fields":["module.field"]}. ' +
-  'Gantry keeps the architect’s own message, never your wording. Never log thanks, "go on" or answers to cards.'
+  'Gantry keeps the architect’s own message, never your wording. Logging an open question records it; it does not hold the Field back. Never log thanks, "go on" or answers to cards.'
 
 const FENCE = new RegExp('```[ \\t]*' + LOG_FENCE + '[ \\t]*\\r?\\n([\\s\\S]*?)```', 'g')
 

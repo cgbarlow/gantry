@@ -11,7 +11,7 @@
 // Pure and dependency-free, like web/lib/interviewSkills.js.
 
 /** Bumped when a rule changes, so a decisions log can say which rules an interview ran under. */
-export const INTERVIEW_RULES_VERSION = 4
+export const INTERVIEW_RULES_VERSION = 5
 
 export const INTERVIEW_RULES = Object.freeze([
   {
@@ -62,7 +62,9 @@ export const INTERVIEW_RULES = Object.freeze([
     id: 'stage-ready',
     title: 'When a Field is done and a Stage is ready',
     text: [
-      'A Field is done when it has content; it is between about 60% of its word budget and its over-budget threshold; each point its guidance asks for is covered; and no open question feeds it.',
+      // #349 (rules 5): what holds a Field is an open question card, as Gantry checks it, not a question logged as open. How the in-app AI
+      // learns what stands in the way is the session's note (web/lib/interviewSession.js), since an outside agent is told these rules too.
+      'A Field is done when it has content; it is between about 60% of its word budget and its over-budget threshold; each point its guidance asks for is covered; and no question card feeding it is still unanswered or held back. A question logged as open is recorded, and does not hold the Field back.',
       'The Stage is ready when Gantry\'s real Gate check passes for the Artefact aimed for and every Field in scope is done. Only then does the stage-end card appear. You never pass a Gate: a Gate that needs approval or review stops you.',
       'Where more than one Artefact can pass the Gate, ask which one is aimed for, with the lightest pre-selected.',
       'Fields you write stay `draft`; only a person marks a Module `agreed`.',

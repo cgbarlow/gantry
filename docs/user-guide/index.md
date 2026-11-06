@@ -946,9 +946,11 @@ A Field the AI is drafting at that moment shows **drafting…** and can't be edi
 
 #### When a Field is done and a Stage is ready
 
-Gantry works out for itself when a Field is **done**: it has content, it sits between about **60% of its word budget** and the budget, it covers each point its guidance asks for, and no open question feeds it. The preview marks each Field in scope **Done**, or says what is missing. A Field in scope is one the Gate requires for the Artefact you chose, or any other Field with content; an optional Field the documents don't support is simply left empty.
+Gantry works out for itself when a Field is **done**: it has content, it sits between about **60% of its word budget** and the budget, it covers each point its guidance asks for, and no **question card** feeding it is still waiting for your answer or held back. A question the AI logs as an open question is recorded in the decisions log; it doesn't hold the Field back. The preview marks each Field in scope **Done**, or says what is missing. A Field in scope is one the Gate requires for the Artefact you chose, or any other Field with content; an optional Field the documents don't support is simply left empty.
 
 The Stage is **ready** when the Gate check passes for the Artefact you chose **and** every Field in scope is done. Only then does the stage-end card appear (see **Saving the Stage**).
+
+**The AI is told what is outstanding.** The AI can't see the preview or the stage-end card, so when its turn would end with the Stage not ready and no cards waiting for you, Gantry tells it what stands in the way: what the Gate check still needs, and each Field that isn't done with the reason ("Estimates: 142 words, needs about 180 to 300", "Teams required: does not yet cover: escalation contacts"). The AI then carries on in the same turn, and the status line shows it working as usual (**Drafting Estimates…**): it redrafts what it can from the Source documents and your answers, and asks you only for what it can't settle itself. Gantry does this **once a turn**, so if the Stage still isn't ready the turn ends and the AI's last words say what is left. It isn't done while a round of cards is open, or once you have chosen **Finish with your recommendations**.
 
 #### Finish with your recommendations
 

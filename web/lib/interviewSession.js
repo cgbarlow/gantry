@@ -61,6 +61,10 @@
 //     is ever written to the Pull Request. The AI may also **offer to re-open** a signed-off Stage with a card of `kind: "reopen"`: Gantry makes
 //     that card only when it would allow the re-open right then (`context.reopen`), and otherwise logs an open question naming the blocker.
 //
+//   * (#349) tells the AI what keeps the Stage from its stage-end card (`readinessNote`): when a turn would end with the Stage not ready and
+//     nothing open for the architect, Gantry sends the page's own readiness verdict (`context.readiness`, web/lib/interviewReadiness.js) as a
+//     note, and the AI carries on in the same turn, once a turn.
+//
 // Nothing here saves. Drafts are an unsaved preview until the architect confirms the stage-end card.
 import { runTurn, runWithRecovery, ensureTested, isTooLong, EMPTY_USAGE, CUT_OFF_CALL_RESULT } from './aiClient.js'
 import { ASK_TOOL_NAME, FALLBACK_FENCE } from './aiCards.js'
@@ -132,6 +136,31 @@ export const STOPPED_LINE = 'The AI stopped without replying.'
 /** #345: the thread's line when a turn ends because the AI used up its rounds of tool calls (`MAX_ROUNDS`) while still calling tools. */
 export function roundsUsedUpLine(rounds = MAX_ROUNDS) {
   return `The AI used up its ${rounds} rounds of tool calls for this turn and stopped.`
+}
+
+/**
+ * #349: Gantry's note to the AI when its turn would end with the Stage not ready and nothing open for the architect: what keeps the Stage
+ * from its stage-end card, from the page's own readiness (web/lib/interviewReadiness.js `stageReadiness`): the Gate check's outstanding items
+ * for the Artefact aimed for, then each Field in scope that isn't done with Gantry's reasons. `fieldTitle(key)` names a Field
+ * ("Module · Field"); `chat` says the architect is asked in plain chat rather than on cards.
+ */
+export function readinessNote(readiness, { fieldTitle = (key) => key, chat = false } = {}) {
+  const named = (key) => `${fieldTitle(key)} (${key})`
+  const isKey = (item) => /^[^\s.]+\.[^\s.]+$/.test(String(item))
+  const lines = []
+  const gate = readiness?.gate
+  if (gate && !gate.pass) {
+    const outstanding = (gate.outstanding ?? []).map((item) => (isKey(item) ? named(item) : item))
+    if (!gate.artefact) lines.push('- The Gate check: no Artefact is aimed for yet.')
+    else lines.push(`- The Gate check for ${gate.artefact.title ?? gate.artefact.id}: ${outstanding.length ? `outstanding ${outstanding.join(', ')}` : 'does not pass yet'}`)
+  }
+  for (const [key, field] of Object.entries(readiness?.fields ?? {})) if (!field.done) lines.push(`- ${named(key)}: ${field.reasons.join('; ')}`)
+  return [
+    "Gantry's check: the Stage is not ready yet, so the architect has no stage-end card. What stands in the way:",
+    ...lines,
+    `Redraft now what you can from the Source documents and the answers you have. Ask the architect${chat ? ', in short plain chat,' : ', with question cards,'} only for what you cannot settle yourself. ` +
+      'If nothing here is yours to settle, say in a sentence what stands in the way. Gantry sends this note once a turn.',
+  ].join('\n')
 }
 
 /** After this many turns in a row whose question cards were unusable, the rest of the session is asked in plain chat. */
@@ -250,9 +279,11 @@ function sessionNote({ cardMode, textDrafts, reader, repositories = false, handE
     'A Field that already holds saved content is not changed by a draft: Gantry shows the architect a keep / use your version / merge card, and tells you the answer. Do not call draft_field for it again until they have answered; if they chose merge, call it once with the merged version.',
     textDrafts
       ? `${LOG_TEXT_FALLBACK_INSTRUCTIONS}`
-      : `When the architect tells you something in chat that you use in a Field, call the \`${LOG_TOOL_NAME}\` tool (kind "fact") with a quote copied exactly from their message and the Fields it feeds; for a question that stays open (including a select Field where none of the options fits) call it with kind "open-question". Answers to cards are logged by Gantry itself. Never log thanks or "go on".`,
+      : `When the architect tells you something in chat that you use in a Field, call the \`${LOG_TOOL_NAME}\` tool (kind "fact") with a quote copied exactly from their message and the Fields it feeds; for a question that stays open (including a select Field where none of the options fits) call it with kind "open-question", which records it and does not hold the Field back. Answers to cards are logged by Gantry itself. Never log thanks or "go on".`,
     'In draft_field, name what each Field is drafted from in `inputs` (Source document ids with a page range, or a Field of an earlier Stage as module.field): Gantry checks they exist and records them in the decisions log.',
-    'Gantry works out for itself whether a Field is done: it has content, sits between about 60% of its word budget and its budget, covers each point of its guidance (list any it does not in `uncovered`), and no open question feeds it. The Stage is ready only when the Gate check passes and every such Field is done.'
+    'Gantry works out for itself whether a Field is done: it has content, sits between about 60% of its word budget and its budget, covers each point of its guidance (list any it does not in `uncovered`), and no question card feeding it is still unanswered or held back. Logging an open question records it in the decisions log; it does not hold a Field back. The Stage is ready only when the Gate check passes and every such Field is done.',
+    // #349: the AI can't see the page, so it is told how it learns what stands in the way, rather than guessing.
+    "You can't see the stage-end card. When your turn would end with the Stage not ready and no card open, Gantry tells you what stands in the way, once a turn: fix what you can, and ask the architect only for the rest."
   )
   if (reader) {
     lines.push(
@@ -1693,6 +1724,38 @@ export function createInterviewSession(config = {}) {
     say('sys', cutOffAgainLine(getAiProvider(state.providerId)?.name), { cutOff: true })
   }
 
+  /**
+   * #349: at the end of a turn, Gantry's note on what keeps the Stage from its stage-end card, or null when there is nothing to tell. The
+   * verdict is the page's own (`context.readiness`, the rule the live preview shows), never worked out a second way here. No note goes:
+   *   * when the Stage is ready, or the page gives no readiness;
+   *   * while anything is open for the architect: a round of cards, cards held back, a keep / use the AI's version / merge card about to be
+   *     shown, review comments waiting to join, a clash;
+   *   * once the architect has chosen Finish with your recommendations: the AI has been told to ask nothing more;
+   *   * on a session that only brings Fields up to date or works through review comments, which has no stage-end card;
+   *   * when every Field in scope is done and the Gate waits only on Fields this Stage can't draft;
+   *   * when nothing is drafted this session (there is nothing for a stage-end card to Save), or the turn has nothing to show: an empty
+   *     reply is #345's, with Carry on.
+   * `firstId` is the first thread item of this turn.
+   */
+  function readinessCheck(firstId) {
+    const context = getContext()
+    if (typeof context?.readiness !== 'function') return null
+    if (state.finish === 'accepting' || state.finish === 'done') return null
+    if (state.update?.mode === 'only' || state.review?.mode === 'only') return null
+    if (state.round || state.clash || state.held.length || queuedReview.length || [...pendingChanges.values()].some((c) => !c.shown)) return null
+    // A draft the AI was asked to fix and has not sent again reaches the preview once the turn ends, so it is judged as it will stand.
+    const drafts = { ...state.drafts }
+    for (const [key, draft] of held) drafts[key] = draft
+    if (Object.keys(drafts).length === 0) return null
+    if (!state.thread.some((t) => t.id >= firstId && (t.who === 'ai' || t.drafted))) return null
+    const verdict = context.readiness({ drafts, openFields: openFields() })
+    if (!verdict || verdict.ready) return null
+    // Every Field this Stage can draft is done, and what the Gate still needs lies outside it (a Module held until an earlier Stage merges,
+    // #296, which the Waiting card explains): nothing the AI could fix.
+    if (verdict.allDone && verdict.gate?.artefact) return null
+    return readinessNote(verdict, { fieldTitle, chat: state.cardMode === 'chat' })
+  }
+
   async function runLoop() {
     state.phase = 'working'
     const firstId = nextId // #345: the thread items from here on are this turn's
@@ -1710,6 +1773,7 @@ export function createInterviewSession(config = {}) {
     emit()
     let incoming = []
     let textRetried = false
+    let readinessSaid = false // #349: the AI has been told this turn what keeps the Stage from its stage-end card
     try {
       // #329: Compact now, asked for while a round was open or the AI was busy, is done here, before the next request goes.
       if (state.compactPending && canCompact()) await compact()
@@ -1837,6 +1901,15 @@ export function createInterviewSession(config = {}) {
           const check = notes.length ? `Gantry's check of your drafts:\n- ${notes.join('\n- ')}` : ''
           messages.push({ role: 'user', fromGantry: true, ...joinParts([cutOff ? { text: CUT_OFF_NOTE } : null, readsReply, check ? { text: check } : null].filter(Boolean), '\n\n') })
           if (cutOff) askShorter()
+          emit()
+          continue
+        }
+        // #349: the turn would end here. If the Stage is not ready and nothing is open for the architect, the AI is told what stands in the
+        // way and carries on, once a turn, so a Stage only the architect can make ready never loops.
+        const verdict = !readinessSaid && round < MAX_ROUNDS - 1 ? readinessCheck(firstId) : null
+        if (verdict) {
+          readinessSaid = true
+          messages.push({ role: 'user', fromGantry: true, text: verdict })
           emit()
           continue
         }

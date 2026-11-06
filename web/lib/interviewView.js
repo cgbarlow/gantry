@@ -523,10 +523,15 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     () => (setup.status === 'ready' ? approvedPrintedFields({ definition: setup.definition, instance }) : {}),
     [setup, instance.stages, instance.pullRequests, instance.currentStageId, instance.stage.id, instance.changedSinceApproval, instance.workspaceBacked]
   )
+  // #349: the Stage's readiness for these drafts, the one rule both the live preview and the session (which tells the AI what stands in the
+  // way of the stage-end card) read. `openFields` are the Fields an open question card feeds.
+  const readinessOf = ({ drafts: forDrafts = {}, openFields = [] } = {}) =>
+    stageReadiness({ definition: definitionNow, structure: setup.structure, stageId: instance.stage.id, artefactId, size: instance.size, modules: instance.modules, drafts: forDrafts, openFields })
   ctxRef.current =
     setup.status === 'ready'
       ? {
           definition: definitionNow,
+          readiness: readinessOf,
           approvedPrinted,
           stageId: instance.stage.id,
           artefactId,
@@ -688,7 +693,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const readiness = useMemo(
     () =>
       setup.status === 'ready' && snap && snap.phase !== 'kickoff'
-        ? stageReadiness({ definition: definitionNow, structure: setup.structure, stageId: instance.stage.id, artefactId, size: instance.size, modules: instance.modules, drafts, openFields: snap.openFields ?? [] })
+        ? readinessOf({ drafts, openFields: snap.openFields ?? [] })
         : null,
     [setup, heldKey, instance.modules, instance.size, artefactId, snap?.drafts, snap?.openFields?.join('|'), snap?.phase]
   )

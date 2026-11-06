@@ -4,7 +4,7 @@
 //
 //   A Field is **done** when it has content; it is between about 60% of its word budget and the over-budget threshold (its
 //   budget); each point its guidance asks for is covered (the AI says which it has not covered, in `uncovered`); and no open
-//   question feeds it.
+//   question card feeds it (#349: a card still unanswered or held back; a question the AI logged as open does not hold a Field).
 //
 //   The Stage is **ready** when Gantry's real Gate check passes for the Artefact aimed for and every Field in scope is done.
 //
@@ -27,7 +27,7 @@ export const minWords = (budget) => Math.round(budget * MIN_BUDGET_SHARE)
 
 /**
  * Whether one Field is done. `value` is its content (draft over saved), `uncovered` the guidance points the AI said it has
- * not covered, `open` whether an open question feeds it. `handEdited` (#289): the architect wrote it themselves, so it is done when it has
+ * not covered, `open` whether an open question card feeds it. `handEdited` (#289): the architect wrote it themselves, so it is done when it has
  * content: its length and coverage are theirs to judge, and Gantry's per-Field check does not run on their text. Returns `{ done, reasons }`, each reason a short phrase.
  */
 export function fieldDone({ field, value, size, uncovered = [], open = false, handEdited = false }) {
