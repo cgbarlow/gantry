@@ -143,7 +143,7 @@ describe('citing a repository', () => {
     assert.deepEqual(draftCitedSourceIds(text), ['billing-api', 'client-brief'])
     assert.deepEqual(citationSegments(cite), [{ cite: 'Billing API, limits', id: 'billing-api' }])
     assert.deepEqual(citedCommits(`${text} ${cite}`, 'billing-api'), [HEAD])
-    assert.equal(sourceCitationsForWord(text), 'Capped at NZD 5,000 (Billing API, limits), per (Client brief, p. 4).')
+    assert.equal(sourceCitationsForWord(text), `Capped at NZD 5,000^[Billing API, limits, src/orders/limits.ts, at commit ${HEAD.slice(0, 7)}], per^[Client brief, p. 4].`)
     assert.equal(sourceCitationFor({ id: 'billing-api', title: 'Billing API' }, { path: 'src/orders/limits.ts', commit: HEAD }), `[Billing API, src/orders/limits.ts](source:billing-api?path=src/orders/limits.ts&commit=${HEAD})`)
     assert.equal(sourceCitationFor({ id: 'client-brief', title: 'Client brief' }), '[Client brief](source:client-brief)')
     assert.equal(recitedMarkdown(cite, 'billing-api', { id: 'billing-v2', title: 'Billing v2' }), '[Billing v2](source:billing-v2)')

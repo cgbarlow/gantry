@@ -142,10 +142,10 @@ test('the example’s answers are what its content now says: the cited figure, t
   assert.equal(saved['team-and-estimates'].fields.estimates.includes('Reconciliation and Treasury sign-off add elapsed time'), true, 'the kept Field is unchanged')
 })
 
-test('the Full SOAP regenerates with each citation printed as plain text, and the .md keeps the links', () => {
+test('the Full SOAP regenerates with each citation printed as a footnote (#351), and the .md keeps the links', () => {
   const render = renderArtefact(SLUG, 'soap-full', { dryRun: true, instancesDir: WORKSPACE })
   assert.ok(!render.docxMarkdown.includes('source:'), 'no citation address reaches the Word document')
-  assert.match(render.docxMarkdown, /hold mainframe skills \(Client brief, p\. 1\)/)
+  assert.match(render.docxMarkdown, /hold mainframe skills\^\[Client brief, p\. 1\]/)
   assert.match(render.docxMarkdown, /# Sources\n\n\| Document \| File \| Added \|\n\| --- \| --- \| --- \|\n\| Claim registration screen \| Claim registration screen\.png \| 16 Mar 2026 \|/)
   assert.match(render.markdown, /\[Client brief, p\. 1\]\(source:client-brief\)/)
   assert.ok(!/\(\(/.test(render.docxMarkdown.replace(/\n\|.*\|/g, '').replace(/\(\(Reviewer/g, '')), 'no citation is printed inside a second pair of brackets')
