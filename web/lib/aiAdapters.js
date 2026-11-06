@@ -21,9 +21,7 @@
 //                                                 parser adds the cache reads and writes back), so the share read from cache is
 //                                                 `cacheReadTokens / inputTokens` whichever AI Provider answered
 //   { type: 'done', stopReason }
-import { classifyFailure } from './aiProviders.js'
-
-const DEFAULT_MAX_TOKENS = 4096
+import { classifyFailure, DEFAULT_MAX_TOKENS } from './aiProviders.js'
 
 function trimSlash(address) {
   return address.trim().replace(/\/+$/, '')
@@ -271,6 +269,8 @@ export function buildChatRequest(provider, { system = '', cachePrefix = '', mess
   const isOpenAi = provider.type === 'openai'
   // OpenAI's reasoning models only accept their default temperature.
   if (!(isOpenAi && adv.reasoningEffort)) set(body, 'temperature', provider.temperature)
+  // #346: Anthropic needs a number, so an AI Provider with no Max tokens falls back to DEFAULT_MAX_TOKENS there; the OpenAI-style ones
+  // are sent none, and the server's own limit applies (a compatible server may refuse a figure above it).
   set(body, isOpenAi ? 'max_completion_tokens' : 'max_tokens', outputLimit)
   set(body, 'top_p', adv.topP)
   set(body, 'frequency_penalty', adv.frequencyPenalty)

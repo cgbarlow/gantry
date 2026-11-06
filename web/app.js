@@ -25,7 +25,7 @@ import {
 } from './lib/credential.js'
 import { apiFetch, apiFetchForInstance, apiFetchForInstanceRef, cachedScopeForSlug, cachedWorkspaceIdForSlug } from './lib/apiFetch.js'
 import { ensureWriteAccessChecked } from './lib/writeAccess.js'
-import { renderMarkdown } from './lib/markdown.js'
+import { renderMarkdownPreview, citedRef, citationIndex, openCitation } from './lib/markdownPreview.js'
 import { Dropdown } from './lib/dropdown.js'
 import { apply as applyMarkdownCommand, HEADING_LEVELS, findTable, diffRange } from './lib/markdownCommands.js'
 import { NewWorkspaceWizardPage } from './pages/new-workspace-wizard.js'
@@ -49,7 +49,7 @@ import { withInstanceSettings, instanceTargetSize } from './lib/instanceSettings
 import { instanceLogoPath } from './lib/instanceLogo.js'
 import { renderEngine } from './lib/renderEngine.js'
 import { warmLoadPandocWasm, renderDocxWithWasm } from './lib/pandocWasm.js'
-import { hydrateMermaidPreview, prepareMermaidForDocx } from './lib/mermaid.js'
+import { prepareMermaidForDocx } from './lib/mermaid.js'
 // Two call sites want this module's file/permission helpers under different
 // local names: A5's dashboard recovery UI (further down this file) calls
 // them bare; A6's editor wiring (loadLocalInstance and friends, just below)
@@ -75,9 +75,8 @@ import {
   getFileLastModified,
 } from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
-import { SourceDocumentsPanel, openRepository, openSourceDocument } from './lib/sourceDocumentsPanel.js'
+import { SourceDocumentsPanel } from './lib/sourceDocumentsPanel.js'
 import { citedCommits, citedSourceIds } from './lib/sourceCitations.js'
-import { parseSourceAddress, shortCommit } from './lib/sourceRepository.js'
 import { repositoryReaderFor } from './lib/sourceRepositoryClient.js'
 import { InterviewPage, clearInterviewSessions, unsavedDraftModules } from './lib/interviewView.js'
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
@@ -900,8 +899,7 @@ function githubRepoAssetCitationUrl(workspace, slug, filename) {
 // `asset:<id>` references are resolved to the real, fetchable asset-file URL before markdown-it ever sees the text — the *stored* markdown source keeps the portable `asset:<id>` convention (see web/lib/assetRefs.js), only the live preview's rendered HTML points at a real URL.
 // WI260 also resolves `../assets/<name>` / `assets/<name>` for instances using the repo-as-asset-store convention so a bare relative path shows in the preview.
 // WI264: stage-aware — when free-browsing a completed stage, the preview's asset URLs pin to that stage's ref so the server reads both modules and assets from the same ref (main for a completed stage, the stage branch for the current stage).
-function renderPreview(node, text) {
-  if (!node) return
+function resolvePreviewAssets(text) {
   const slug = currentSlug.value
   const stageId = viewedStage.value ?? instanceData.value?.stage?.id ?? null
   const sources = assetSources.value
@@ -926,61 +924,18 @@ function renderPreview(node, text) {
       isGitHubBackedInstance(instance) ? (filename) => githubRepoAssetCitationUrl(instance.workspace, slug, filename) : undefined
     )
   }
-  node.innerHTML = renderMarkdown(withSources)
-  activateSourceCitations(node)
-  // WI #353: ```mermaid fences render as diagrams in place. Async and fire-and-forget — a
-  // re-render before a diagram finishes just leaves the swap with nothing to replace.
-  hydrateMermaidPreview(node).catch(() => {})
-  // Caption-styling hook: the citation renders as <p><em>Source: …</em></p>; mark that paragraph so the stylesheet can make it visually subordinate (caption) rather than body text.
-  node.querySelectorAll('p').forEach((p) => {
-    const em = p.querySelector('em')
-    if (em && em.textContent.startsWith('Source:')) p.classList.add('asset-source')
-  })
+  return withSources
 }
 
-// #281 (map #238): a citation of a Source document, `[Client brief, p. 4](source:client-brief)`, is a link in the editor's preview that opens the document. `sourceIndex` holds what the Instance's Source documents panel last listed, `{ <id>: { title, removed } }`, and `sourceOpener` how to open one (the panel's store knows where the files are); the preview reads them when it draws and redraws when they change. A document that was removed still shows the words the author wrote, marked "(removed)", and is not a link, because its file is gone; so does an id the Instance has no document for.
+// #347: the preview itself (markdown-it and DOMPurify, Source document citations, Mermaid diagrams) is web/lib/markdownPreview.js's; the
+// editor hands it this Instance's assets and Source documents.
+function renderPreview(node, text) {
+  renderMarkdownPreview(node, text, { resolveAssets: resolvePreviewAssets, sources: { index: sourceIndex.value, open: openCitedSource } })
+}
+
+// #281 (map #238): a citation of a Source document, `[Client brief, p. 4](source:client-brief)`, is a link in the editor's preview that opens the document. `sourceIndex` holds what the Instance's Source documents panel last listed, `{ <id>: { title, removed } }` (web/lib/markdownPreview.js's citationIndex), and `sourceOpener` how to open one (the panel's store knows where the files are); the preview reads them when it draws and redraws when they change.
 const sourceIndex = signal(null) // null: this kind of workspace keeps no Source documents (yet), so a citation is left as the words it holds
 const sourceOpener = { open: null }
-
-// #319: what follows `source:` in a citation, taken apart: `{ id, path?, commit? }` (a repository citation names a file and a commit).
-const citedRef = (ref) => parseSourceAddress(`source:${ref}`) ?? { id: ref }
-
-function activateSourceCitations(node) {
-  const index = sourceIndex.value
-  for (const link of node.querySelectorAll('a[href^="source:"]')) {
-    const ref = link.getAttribute('href').slice('source:'.length)
-    const { id, path, commit } = citedRef(ref)
-    if (index === null) {
-      const plain = document.createElement('span')
-      plain.className = 'source-citation unavailable'
-      plain.title = 'Source documents are not kept for this kind of workspace yet'
-      plain.append(...link.childNodes)
-      link.replaceWith(plain)
-      continue
-    }
-    const entry = index[id]
-    if (entry && !entry.removed) {
-      link.classList.add('source-citation')
-      link.dataset.sourceId = ref
-      link.title = entry.repository ? `Open ${path ?? 'the repository'} in "${entry.title}"${commit ? ` as it was at ${shortCommit(commit)}` : ''}` : `Open the Source document "${entry.title}"`
-      link.removeAttribute('target')
-      continue
-    }
-    const gone = document.createElement('span')
-    gone.className = `source-citation ${entry ? 'removed' : 'missing'}`
-    gone.dataset.sourceId = id
-    gone.title = entry ? `The Source document "${entry.title}" was removed` : 'No Source document in this Instance has this id'
-    gone.append(...link.childNodes, entry ? ' (removed)' : ' (not found)')
-    link.replaceWith(gone)
-  }
-  // One handler on the preview itself, replaced each time it is drawn, so redraws never stack them.
-  node.onclick = (event) => {
-    const link = event.target.closest?.('a.source-citation')
-    if (!link || !node.contains(link)) return
-    event.preventDefault()
-    openCitedSource(link.dataset.sourceId)
-  }
-}
 
 // #320: a citation leads into the Source documents panel, so the Sources & decisions toggle switches on (and goes to the panel) before the
 // document opens; a document that cannot be opened says so in that panel.
@@ -5378,6 +5333,10 @@ function OutOfDatePanel({ instance }) {
 // #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
 function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval, onDraftAhead, update = false, review = false, revise = false, onReopenStage, onOpenStage, onReviseStage, onLeaveRevision, onUpdateStage }) {
   const store = useSourceStore(instance)
+  // #347: the thread draws the AI's replies as the editor's preview does, asset images included. A new resolver each time the Instance's
+  // assets are read, so the replies are drawn again with them.
+  const assetsRead = assetSources.value
+  const resolveAssets = useCallback((text) => resolvePreviewAssets(text), [assetsRead, instance])
   const location = useLocation()
   // #303: the kept Reviewed copies, read and placed on Fields, for the review round; read again after one is brought in.
   const reviewVersion = reviewTick.value
@@ -5493,6 +5452,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
     onReRenderEarlier=${onReRenderEarlier}
     onCheckApproval=${onCheckApproval}
     onDraftAhead=${onDraftAhead}
+    resolveAssets=${resolveAssets}
   />`
 }
 
@@ -5504,22 +5464,16 @@ function SourceDocumentsSection({ instance }) {
   const known = useRef({})
   // #281: what the editor's preview needs to show a citation (the panel tells us each time it lists) and how to open one.
   const onList = useCallback((list) => {
-    const index = {}
-    for (const e of list.entries) index[e.id] = { title: e.title, filename: e.filename, removed: Boolean(e.removedAt), ...(e.repository ? { repository: e.repository } : {}) }
+    const index = citationIndex(list.entries)
     known.current = index
     sourceIndex.value = index
   }, [])
   useEffect(() => {
     if (!store) return undefined
     sourceOpener.open = async (ref) => {
-      const { id, path, commit } = citedRef(ref)
-      const entry = known.current[id]
-      if (!entry || entry.removed) return
       try {
         setNotice('')
-        // #319: a repository citation opens the file it names on the Provider, as it was at the commit it names.
-        if (entry.repository) openRepository(entry, { path, commit })
-        else await openSourceDocument(store, { id, ...entry })
+        await openCitation(store, known.current, ref)
       } catch (err) {
         setNotice(err.message)
       }

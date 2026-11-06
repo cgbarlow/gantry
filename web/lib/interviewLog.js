@@ -7,12 +7,14 @@
 //              and the entries that fed it;
 //   * status   this session's line: who, target Stage, state, Artefact, last AI save, each model used with its tokens, the
 //              Interview instructions version, the skill versions and the architect's opening message from the kickoff (#331).
+//              Start this stage over (#348) ends the session and begins a new one with a new id and no tokens yet; the session it
+//              ended keeps its own line, with all it used and the state `started-over`, so the Stage's record loses nothing.
 //
 // A hand edit of a drafted Field (#289) is kept as the text they typed. Only the architect's own words are kept. The AI's replies are never stored, and a message of thanks or "go on" feeds nothing: a
 // fact is logged only when the AI quotes text the architect typed (`findArchitectMessage`), and an acknowledgement never matches.
 //
 // Nothing here writes a file. The entries wait as `pending` until the Save that carries them succeeds (`commit`).
-import { appendEntries, currentLogEntries, emptyDecisionsLog } from './decisionsLog.js'
+import { STARTED_OVER, appendEntries, currentLogEntries, emptyDecisionsLog } from './decisionsLog.js'
 import { interviewSkillVersions } from './interviewSkills.js'
 
 export const LOG_TOOL_NAME = 'log_decision'
@@ -25,7 +27,8 @@ export const LOG_TOOL = {
     'Record something in the Stage’s decisions log. kind "fact": the architect told you something in free chat that you used or will use in a Field. ' +
     'Give a short `quote` copied exactly from their message and the `fields` (module.field) it feeds; Gantry keeps THEIR message word for word, never your wording, and ' +
     'refuses anything they did not type. Do not log thanks, "go on" or anything that feeds no Field. kind "open-question": something that stays unanswered, ' +
-    'including a select Field where none of the options fits; give the `question`, why it matters in `why`, and the `field` it blocks if any. ' +
+    'including a select Field where none of the options fits; give the `question`, why it matters in `why`, and the `fields` it is about if any. ' +
+    'Logging it records it; it does not hold the Field back. ' +
     'Answers to question cards are logged by Gantry itself: never log those.',
   parameters: {
     type: 'object',
@@ -34,7 +37,7 @@ export const LOG_TOOL = {
       quote: { type: 'string', description: 'For a fact: a piece of the architect’s message, copied exactly.' },
       question: { type: 'string', description: 'For an open question: the question, in one sentence.' },
       why: { type: 'string', description: 'For an open question: why it is open or why it matters.' },
-      fields: { type: 'array', items: { type: 'string' }, description: 'The Fields this feeds or blocks, each as module.field.' },
+      fields: { type: 'array', items: { type: 'string' }, description: 'The Fields this feeds or is about, each as module.field.' },
     },
     required: ['kind'],
   },
@@ -44,7 +47,7 @@ export const LOG_TOOL = {
 export const LOG_TEXT_FALLBACK_INSTRUCTIONS =
   `To log a fact the architect told you, or an open question, write a fenced code block tagged ${LOG_FENCE} containing JSON such as ` +
   '{"kind":"fact","quote":"copied exactly from their message","fields":["module.field"]} or {"kind":"open-question","question":"...","why":"...","fields":["module.field"]}. ' +
-  'Gantry keeps the architect’s own message, never your wording. Never log thanks, "go on" or answers to cards.'
+  'Gantry keeps the architect’s own message, never your wording. Logging an open question records it; it does not hold the Field back. Never log thanks, "go on" or answers to cards.'
 
 const FENCE = new RegExp('```[ \\t]*' + LOG_FENCE + '[ \\t]*\\r?\\n([\\s\\S]*?)```', 'g')
 
@@ -91,7 +94,8 @@ const sourceRef = (source) => (source?.document ? `${source.document}${source.lo
  */
 export function createSessionLog(config = {}) {
   const now = config.now ?? (() => new Date().toISOString())
-  let sessionId = (config.newSessionId ?? (() => `s-${Math.random().toString(36).slice(2, 8)}`))()
+  const makeSessionId = config.newSessionId ?? (() => `s-${Math.random().toString(36).slice(2, 8)}`)
+  let sessionId = makeSessionId()
   const who = () => String(config.who?.() ?? '')
   let committed = []
   let pending = []
@@ -99,6 +103,9 @@ export function createSessionLog(config = {}) {
   const usage = new Map() // `type|model` -> { type, model, inputTokens, cachedTokens, outputTokens }
   let lastAiSave = null
   let saves = [] // the time of each AI Save this session has made on the Stage (#296)
+  // #348: the sessions Start this stage over ended: `{ session, models, lastAiSave, saves, opening, status }`, each as it stood when it ended. Every
+  // Save sends their lines again (`earlierSessions`), so one that ended between two Saves still reaches the log with all it used.
+  let ended = []
 
   const all = () => [...committed, ...pending]
 
@@ -252,9 +259,35 @@ export function createSessionLog(config = {}) {
       return add({ kind: 'artefact', ...clean({ artefact, title, candidates }) })
     },
 
-    addRestart() {
-      return add({ kind: 'restart', note: 'Start this stage over' })
+    /**
+     * #348: Start this stage over. The restart marker is the last entry of the session it ends; that session is kept, with its tokens, as
+     * an earlier session of the Stage, and a new session begins with a new id and no tokens. `opening` is the ended session's opening
+     * message (#331), which its line keeps, and `status` (`{ who, target, artefact, instructions }`) what its line says about it: as it was
+     * when it ended, not what the next session picks at its kickoff. Entries not yet sent keep the session they were made in.
+     *
+     * A session that has used nothing (no tokens reported and no AI save, say Start this stage over pressed again before the AI was
+     * called) is not ended: it carries on, with the marker, so the status block never fills with lines that have nothing in them.
+     */
+    startOver({ opening = '', status = {} } = {}) {
+      const marker = add({ kind: 'restart', note: 'Start this stage over' })
+      if (usage.size === 0 && !lastAiSave && saves.length === 0) return marker
+      const was = clean({ who: status.who || who(), target: status.target, artefact: status.artefact, instructions: status.instructions })
+      ended.push({ session: sessionId, models: [...usage.values()].map((u) => ({ ...u })), lastAiSave, saves: [...saves], ...(opening ? { opening } : {}), status: was })
+      // A new id of its own, even when the id maker comes round to one already used (entry ids are `<session>-<n>`).
+      const used = new Set([sessionId, ...ended.map((e) => e.session)])
+      const made = makeSessionId()
+      let next = made
+      for (let n = 2; used.has(next); n++) next = `${made}.${n}`
+      sessionId = next
+      counter = 0
+      usage.clear()
+      lastAiSave = null
+      saves = []
+      return marker
     },
+
+    /** #348: the sessions Start this stage over ended in this session's run, oldest first, each with its id and its tokens per model. */
+    endedSessions: () => ended.map((e) => ({ session: e.session, models: e.models.map((m) => ({ ...m })) })),
 
     /**
      * How the architect settled a Field both they and someone else changed, at a Save (#290, ADR-0068). `choice` is 'mine', 'theirs' or
@@ -360,7 +393,7 @@ export function createSessionLog(config = {}) {
     lastAiSave: () => lastAiSave,
 
     /** What a working copy keeps of the log (#290): the entries not yet committed, the tokens used and the counters. */
-    exportState: () => ({ sessionId, pending: pending.map((e) => ({ ...e })), counter, usage: [...usage.values()].map((u) => ({ ...u })), lastAiSave, saves: [...saves] }),
+    exportState: () => ({ sessionId, pending: pending.map((e) => ({ ...e })), counter, usage: [...usage.values()].map((u) => ({ ...u })), lastAiSave, saves: [...saves], ended: ended.map((e) => ({ ...e })) }),
     importState(saved) {
       if (!saved) return
       sessionId = saved.sessionId ?? sessionId
@@ -370,6 +403,7 @@ export function createSessionLog(config = {}) {
       for (const u of saved.usage ?? []) usage.set(`${u.type}|${u.model}`, { ...u })
       lastAiSave = saved.lastAiSave ?? null
       saves = Array.isArray(saved.saves) ? [...saved.saves] : []
+      ended = Array.isArray(saved.ended) ? saved.ended.map((e) => ({ ...e })) : []
       raiseCounter([...committed, ...pending])
     },
 
@@ -390,6 +424,7 @@ export function createSessionLog(config = {}) {
         }
       }
       const skills = interviewSkillVersions()
+      const skillVersions = Object.fromEntries(skills.skills.map((s) => [s.id, s.version]))
       return {
         status: {
           session: sessionId,
@@ -405,8 +440,27 @@ export function createSessionLog(config = {}) {
           models: [...usage.values()],
           instructions: status.instructions,
           ...(status.opening ? { opening: status.opening } : {}),
-          skills: Object.fromEntries(skills.skills.map((s) => [s.id, s.version])),
+          skills: skillVersions,
         },
+        // #348: the sessions Start this stage over ended, each with all it used. A line already in the log takes only the tokens and the state.
+        ...(ended.length
+          ? {
+              // Its who, target, Artefact and instructions are its own, from when it ended (a copy kept before then has none: the Save's).
+              earlierSessions: ended.map((e) => ({
+                session: e.session,
+                who: e.status?.who ?? status.who ?? who(),
+                target: e.status?.target ?? status.target,
+                state: STARTED_OVER,
+                artefact: e.status?.artefact ?? status.artefact,
+                lastAiSave: e.lastAiSave,
+                saves: e.saves,
+                models: e.models.map((m) => ({ ...m })),
+                instructions: e.status?.instructions ?? status.instructions,
+                ...(e.opening ? { opening: e.opening } : {}),
+                skills: skillVersions,
+              })),
+            }
+          : {}),
         fields,
         entries: pending.map((e) => ({ ...e })),
       }

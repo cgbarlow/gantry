@@ -156,6 +156,20 @@ function addUsage(total, next) {
 
 export const EMPTY_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
 
+// #344: the stop reasons that mean the reply reached the AI Provider's output limit (its Max tokens) rather than ending on its own:
+// Anthropic's `max_tokens`, and `length` from an OpenAI-compatible AI Provider.
+const CUT_OFF_REASONS = new Set(['max_tokens', 'length'])
+
+/**
+ * #344: what a tool call the output limit cut off says back to the AI, in place of "the arguments were not valid JSON": that would leave the
+ * model to send the same oversized reply again.
+ */
+export const CUT_OFF_CALL_RESULT =
+  'Not run: your reply reached the output limit before this call was complete, so it was cut off. Send fewer Fields per reply, or a shorter one, and carry on.'
+/** #344: what the AI is told after a reply the output limit cut off that left no tool call to answer (its text, or calls dropped whole). */
+export const CUT_OFF_NOTE = 'Your last reply reached the output limit and was cut off. Send fewer Fields per reply, or a shorter one, and carry on.'
+const CUT_OFF_CARD_RESULT = 'The question card was not shown: your reply reached the output limit before the call was complete, so it was cut off. Send the ask_architect call again in a shorter reply, with fewer or shorter questions.'
+
 /** How the AI is asked for question cards, from what Test connection found. An untested AI Provider is tried natively. */
 export function questionCardMode(provider) {
   return provider.test?.questionCards === 'text' ? 'text' : 'native'
@@ -184,6 +198,11 @@ export function questionCardMode(provider) {
  * and always `usage`, `retried`, `assistantMessage` (what to append to the history) and `messages` (the history
  * to continue from: it includes the failed attempt and its error result when a card was sent back).
  * A card is shown only when its tool call is complete; an invalid one goes back to the model once.
+ *
+ * #344: `cutOff` is true when the reply reached the AI Provider's output limit. A tool call that limit stopped part-way (its arguments are
+ * not whole JSON, or none arrived) has `cutOff: true` and is for the caller to answer with `CUT_OFF_CALL_RESULT`, never to run; the
+ * complete calls and the text before it are as usual. A question card the limit cut off goes back once like an invalid one, saying so. A `retry` event has
+ * `cutOff: true` when the reply it sends back reached the limit, whether the call it stopped was the card or another.
  */
 export async function runTurn(provider, { system = '', cachePrefix = '', messages = [], tools = [], knownSources, askCards = true } = {}, options = {}) {
   const mode = questionCardMode(provider)
@@ -196,7 +215,8 @@ export async function runTurn(provider, { system = '', cachePrefix = '', message
   for (;;) {
     let text = ''
     let announced = false
-    const toolCalls = []
+    let toolCalls = []
+    let cutOff = false
     for await (const event of streamChat(provider, { system: fullSystem, cachePrefix, messages: history, tools: offered }, options)) {
       if (event.type === 'text') {
         text += event.text
@@ -220,7 +240,16 @@ export async function runTurn(provider, { system = '', cachePrefix = '', message
         if (event.name !== ASK_TOOL_NAME) options.onEvent?.({ type: 'tool-call', call: event })
       } else if (event.type === 'usage') {
         usage = addUsage(usage, event)
+      } else if (event.type === 'done') {
+        cutOff = CUT_OFF_REASONS.has(event.stopReason)
       }
+    }
+    // The stop reason comes after the calls, so a call is known to be cut off (rather than just badly written) only now. The last call
+    // with no arguments at all was cut off before any arrived (a parser reads none as `{}`); every Gantry tool takes some.
+    if (cutOff) {
+      const last = toolCalls.length - 1
+      const stopped = (c, i) => c.input === null || c.input === undefined || (i === last && typeof c.input === 'object' && !Object.keys(c.input).length)
+      toolCalls = toolCalls.map((c, i) => (stopped(c, i) ? { ...c, cutOff: true } : c))
     }
     const turn = interpretTurn({ text, toolCalls }, { knownSources })
     const otherToolCalls = toolCalls.filter((c) => c.name !== ASK_TOOL_NAME)
@@ -230,26 +259,32 @@ export async function runTurn(provider, { system = '', cachePrefix = '', message
       // The error result goes back to the model once, so it can correct itself. Other calls in the same turn
       // still need an answer for the history to stay well formed; the caller's tools are not run on a retry.
       retried = true
-      options.onEvent?.({ type: 'retry', errors: turn.errors })
-      const answered = new Set(turn.results.map((r) => r.toolCallId))
+      // #344: the retry is a cut-off one whenever the reply reached the output limit, whichever call it stopped; a cut-off call of the
+      // caller's own says so, as the caller would answer it, not that the card was invalid.
+      const cutCards = new Set(toolCalls.filter((c) => c.cutOff && c.name === ASK_TOOL_NAME).map((c) => c.id))
+      options.onEvent?.({ type: 'retry', errors: turn.errors, ...(cutOff ? { cutOff: true } : {}) })
+      const results = turn.results.map((r) => (cutCards.has(r.toolCallId) ? { ...r, content: CUT_OFF_CARD_RESULT } : r))
+      const answered = new Set(results.map((r) => r.toolCallId))
       const skipped = otherToolCalls
         .filter((c) => !answered.has(c.id))
-        .map((c) => ({ toolCallId: c.id, name: c.name, isError: true, content: 'Not run: the question card in the same turn was invalid. Call it again with the card.' }))
-      history = [...history, assistantWith(toolCalls), ...[...turn.results, ...skipped].map((r) => ({ role: 'tool', ...r }))]
+        .map((c) => ({ toolCallId: c.id, name: c.name, isError: true, content: c.cutOff ? CUT_OFF_CALL_RESULT : 'Not run: the question card in the same turn was invalid. Call it again with the card.' }))
+      history = [...history, assistantWith(toolCalls), ...[...results, ...skipped].map((r) => ({ role: 'tool', ...r }))]
+      // A reply the limit cut off between calls has no call that says so, so a note goes with them.
+      if (cutOff && !toolCalls.some((c) => c.cutOff)) history.push({ role: 'user', fromGantry: true, text: CUT_OFF_NOTE })
       continue
     }
     if (turn.kind === 'cards') {
       const calls = [...turn.calls, ...otherToolCalls]
-      return { kind: 'cards', via: turn.via, cards: turn.cards, text: turn.text, otherToolCalls, usage, retried, assistantMessage: assistantWith(calls), messages: history }
+      return { kind: 'cards', via: turn.via, cards: turn.cards, text: turn.text, otherToolCalls, cutOff, usage, retried, assistantMessage: assistantWith(calls), messages: history }
     }
     if (turn.kind === 'invalid') {
       // Still invalid after the one retry: the turn shows as chat. The failed card is left out of the history.
-      return { kind: 'chat', text: turn.text, invalidCards: turn.errors, usage, retried, assistantMessage: assistantWith(otherToolCalls), otherToolCalls, messages: history }
+      return { kind: 'chat', text: turn.text, invalidCards: turn.errors, cutOff, usage, retried, assistantMessage: assistantWith(otherToolCalls), otherToolCalls, messages: history }
     }
     if (otherToolCalls.length) {
-      return { kind: 'tools', text: turn.text, otherToolCalls, usage, retried, assistantMessage: assistantWith(otherToolCalls), messages: history }
+      return { kind: 'tools', text: turn.text, otherToolCalls, cutOff, usage, retried, assistantMessage: assistantWith(otherToolCalls), messages: history }
     }
-    return { kind: 'chat', text: turn.text, ...(turn.invalidBlock ? { invalidCards: turn.invalidBlock } : {}), usage, retried, assistantMessage: assistantWith([]), otherToolCalls: [], messages: history }
+    return { kind: 'chat', text: turn.text, ...(turn.invalidBlock ? { invalidCards: turn.invalidBlock } : {}), cutOff, usage, retried, assistantMessage: assistantWith([]), otherToolCalls: [], messages: history }
   }
 }
 

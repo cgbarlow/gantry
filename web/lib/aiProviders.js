@@ -21,20 +21,37 @@ const STORAGE_KEY = 'gantry:ai-providers'
 /** Used when an AI Provider doesn't say how big a model's context window is. */
 export const DEFAULT_CONTEXT_WINDOW = 32000
 
+/**
+ * #346 (parent #343): the output limit a new AI Provider starts with, and the one an Anthropic request falls back to when an AI Provider
+ * has none (web/lib/aiAdapters.js). A reply that drafts several long Fields at once runs past 4,096, the old figure, and is cut off; 16,000
+ * leaves room for several. Anthropic's current models all allow at least this much (Claude 3, whose models allowed 4,096 or 8,192, is
+ * retired), as do OpenAI's from gpt-4o on. Ollama and LM Studio don't refuse a figure above what a model can write; they stop at its
+ * context length instead.
+ */
+export const DEFAULT_MAX_TOKENS = 16000
+
+/** #346: what OpenAI's older chat models allow. Its model list doesn't say, and a request for more is refused. */
+const OLDER_OPENAI_MAX_TOKENS = 4096
+// gpt-3.5-turbo, the gpt-4 family before gpt-4o and gpt-4.1 (gpt-4, gpt-4-turbo, gpt-4-0125-preview and the like), and gpt-4o's first
+// snapshot, gpt-4o-2024-05-13. Later gpt-4o models allow 16,384.
+const OLDER_OPENAI_MODEL = /^gpt-(3\.5|4(?![.o])|4o-2024-05-13)/i
+
 export const REASONING_EFFORTS = ['low', 'medium', 'high']
 
 /**
  * The six types ADR-0061 offers. `local` types say where they run (this computer or the Gantry server);
  * `keyRequired` is false only for those. `contextWindowFrom` says where Gantry can read a model's context
- * window, or null when the type can't say and `defaultContextWindow` applies.
+ * window, or null when the type can't say and `defaultContextWindow` applies. `defaultMaxTokens` (#346) is the Max tokens a new one
+ * starts with. Custom starts blank: an OpenAI-compatible server may refuse a limit above its own (vLLM refuses one that doesn't fit the
+ * model's context window with the prompt), and with none sent it uses its own. Ollama and LM Studio stop at the context length instead.
  */
 export const AI_PROVIDER_TYPES = [
-  { id: 'openai', label: 'OpenAI', defaultAddress: 'https://api.openai.com/v1', keyRequired: true, local: false, contextWindowFrom: null, defaultContextWindow: 128000 },
-  { id: 'anthropic', label: 'Anthropic', defaultAddress: 'https://api.anthropic.com', keyRequired: true, local: false, contextWindowFrom: 'the model list', defaultContextWindow: DEFAULT_CONTEXT_WINDOW },
-  { id: 'ollama', label: 'Ollama', defaultAddress: 'http://localhost:11434', keyRequired: false, local: true, contextWindowFrom: 'the model', defaultContextWindow: DEFAULT_CONTEXT_WINDOW },
-  { id: 'lmstudio', label: 'LM Studio', defaultAddress: 'http://localhost:1234/v1', keyRequired: false, local: true, contextWindowFrom: 'the model list', defaultContextWindow: DEFAULT_CONTEXT_WINDOW },
-  { id: 'openrouter', label: 'OpenRouter', defaultAddress: 'https://openrouter.ai/api/v1', keyRequired: true, local: false, contextWindowFrom: 'the model list', defaultContextWindow: DEFAULT_CONTEXT_WINDOW },
-  { id: 'custom', label: 'Custom (OpenAI-compatible)', defaultAddress: '', keyRequired: true, local: false, contextWindowFrom: null, defaultContextWindow: DEFAULT_CONTEXT_WINDOW },
+  { id: 'openai', label: 'OpenAI', defaultAddress: 'https://api.openai.com/v1', keyRequired: true, local: false, contextWindowFrom: null, defaultContextWindow: 128000, defaultMaxTokens: DEFAULT_MAX_TOKENS },
+  { id: 'anthropic', label: 'Anthropic', defaultAddress: 'https://api.anthropic.com', keyRequired: true, local: false, contextWindowFrom: 'the model list', defaultContextWindow: DEFAULT_CONTEXT_WINDOW, defaultMaxTokens: DEFAULT_MAX_TOKENS },
+  { id: 'ollama', label: 'Ollama', defaultAddress: 'http://localhost:11434', keyRequired: false, local: true, contextWindowFrom: 'the model', defaultContextWindow: DEFAULT_CONTEXT_WINDOW, defaultMaxTokens: DEFAULT_MAX_TOKENS },
+  { id: 'lmstudio', label: 'LM Studio', defaultAddress: 'http://localhost:1234/v1', keyRequired: false, local: true, contextWindowFrom: 'the model list', defaultContextWindow: DEFAULT_CONTEXT_WINDOW, defaultMaxTokens: DEFAULT_MAX_TOKENS },
+  { id: 'openrouter', label: 'OpenRouter', defaultAddress: 'https://openrouter.ai/api/v1', keyRequired: true, local: false, contextWindowFrom: 'the model list', defaultContextWindow: DEFAULT_CONTEXT_WINDOW, defaultMaxTokens: DEFAULT_MAX_TOKENS },
+  { id: 'custom', label: 'Custom (OpenAI-compatible)', defaultAddress: '', keyRequired: true, local: false, contextWindowFrom: null, defaultContextWindow: DEFAULT_CONTEXT_WINDOW, defaultMaxTokens: null },
 ]
 
 export function aiProviderType(typeId) {
@@ -339,16 +356,20 @@ export function modelsRequest(provider) {
 
 const NON_CHAT_MODEL = /embed|whisper|tts|dall-e|moderation|davinci|babbage|transcribe|realtime|image|audio/i
 
-/** Turns a model-list response body into `[{ id, contextWindow }]`, sorted by id. `contextWindow` is null when unsaid. */
+/**
+ * Turns a model-list response body into `[{ id, contextWindow, maxOutput }]`, sorted by id. `contextWindow` is null when unsaid, and so
+ * is `maxOutput` (#346: the most a reply may be), which only Anthropic (`max_tokens`) and OpenRouter (its top endpoint's
+ * `max_completion_tokens`) state.
+ */
 export function parseModels(type, body) {
   const data = Array.isArray(body?.data) ? body.data : []
   let models = []
   if (type === 'ollama') {
     models = (Array.isArray(body?.models) ? body.models : []).map((m) => ({ id: m?.name ?? m?.model, contextWindow: null }))
   } else if (type === 'anthropic') {
-    models = data.map((m) => ({ id: m?.id, contextWindow: numberOrNull(m?.max_input_tokens) }))
+    models = data.map((m) => ({ id: m?.id, contextWindow: numberOrNull(m?.max_input_tokens), maxOutput: numberOrNull(m?.max_tokens) }))
   } else if (type === 'openrouter') {
-    models = data.map((m) => ({ id: m?.id, contextWindow: numberOrNull(m?.context_length) }))
+    models = data.map((m) => ({ id: m?.id, contextWindow: numberOrNull(m?.context_length), maxOutput: numberOrNull(m?.top_provider?.max_completion_tokens) }))
   } else if (type === 'lmstudio') {
     models = data
       .filter((m) => m?.type !== 'embeddings')
@@ -358,7 +379,34 @@ export function parseModels(type, body) {
   } else {
     models = data.map((m) => ({ id: m?.id, contextWindow: numberOrNull(m?.context_length) ?? numberOrNull(m?.context_window) }))
   }
-  return models.filter((m) => typeof m.id === 'string' && m.id).sort((a, b) => a.id.localeCompare(b.id))
+  return models
+    .filter((m) => typeof m.id === 'string' && m.id)
+    .map((m) => ({ id: m.id, contextWindow: m.contextWindow, maxOutput: m.maxOutput ?? null }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+}
+
+/**
+ * #346: the Max tokens a new AI Provider of this type and model starts with, and what held it down: the type's default
+ * (`limitedBy: null`), or less where the model is known to allow less (`'model'`: `listed`, its entry from parseModels, or OpenAI's older
+ * chat models), or where the list gives a context window under twice the default (`'context'`: half of it, leaving the rest for the
+ * conversation; a limit near the whole window can't fit beside a prompt, and an endpoint that refuses it says "maximum context length",
+ * which reads as a conversation too long). Null for a Custom one, which leaves the limit to the server. A saved AI Provider is never
+ * changed by this; the dialog only offers it while the architect hasn't typed their own.
+ */
+export function maxTokensSuggestion({ type, model = '' }, listed = null) {
+  const start = aiProviderType(type)?.defaultMaxTokens ?? null
+  if (start === null) return { maxTokens: null, limitedBy: null }
+  const allowed = listed?.maxOutput ?? (type === 'openai' && OLDER_OPENAI_MODEL.test(model.trim()) ? OLDER_OPENAI_MAX_TOKENS : null)
+  const halfContext = listed?.contextWindow > 0 ? Math.floor(listed.contextWindow / 2) : null
+  let suggestion = { maxTokens: start, limitedBy: null }
+  if (allowed > 0 && allowed < suggestion.maxTokens) suggestion = { maxTokens: allowed, limitedBy: 'model' }
+  if (halfContext > 0 && halfContext < suggestion.maxTokens) suggestion = { maxTokens: halfContext, limitedBy: 'context' }
+  return suggestion
+}
+
+/** #346: the Max tokens alone from maxTokensSuggestion. */
+export function suggestedMaxTokens(provider, listed = null) {
+  return maxTokensSuggestion(provider, listed).maxTokens
 }
 
 /** Ollama's `POST /api/show` request for one model: the only place it states the context length. */

@@ -229,13 +229,26 @@ export function appendEntries(log, entries) {
   return { log: next, added, merged }
 }
 
+/** #348: the state of a session that Start this stage over ended. It is finished: the session that began then carries on the Stage. */
+export const STARTED_OVER = 'started-over'
+
 /**
- * What a Save sends for the log (`delta`): `{ status?, fields?, entries? }`. Applies it to `log`: the session's status entry is
- * replaced in place, each Field's record is overwritten, and the entries are appended. Returns the new log.
+ * What a Save sends for the log (`delta`): `{ status?, earlierSessions?, fields?, entries? }`. Applies it to `log`: the session's status
+ * entry is replaced in place, each Field's record is overwritten, and the entries are appended. Returns the new log.
+ *
+ * #348: `earlierSessions` is the sessions a Start this stage over ended, each with all it used. One already in the log keeps its line as it
+ * was committed and takes only its final tokens and the started-over state; one that never saved is added. They go before `status`, so
+ * the running session's line is always the latest.
  */
 export function applyDecisionsDelta(log, delta, stageId = '') {
   const base = log ?? emptyDecisionsLog(stageId)
   let next = { ...base, version: DECISIONS_LOG_VERSION, stage: base.stage || stageId }
+  for (const raw of asArray(delta?.earlierSessions).filter(isObject)) {
+    const ended = sessionStatus({ ...raw, state: STARTED_OVER })
+    if (!ended.session || ended.session === delta?.status?.session) continue
+    const at = next.status.findIndex((s) => s.session === ended.session)
+    next = { ...next, status: at === -1 ? [...next.status, ended] : next.status.map((s, i) => (i === at ? { ...s, state: STARTED_OVER, models: ended.models } : s)) }
+  }
   if (isObject(delta?.status)) {
     const status = sessionStatus(delta.status)
     if (status.session) {

@@ -150,30 +150,73 @@ test('each type lists its models at its own endpoint, with its own kind of key h
 
 test('model lists are parsed for each type, with context windows where the AI Provider gives them', async () => {
   const { mod } = await fresh()
-  assert.deepEqual(mod.parseModels('anthropic', { data: [{ id: 'claude-b', max_input_tokens: 200000 }, { id: 'claude-a', max_input_tokens: 1000000 }] }), [
-    { id: 'claude-a', contextWindow: 1000000 },
-    { id: 'claude-b', contextWindow: 200000 },
+  assert.deepEqual(mod.parseModels('anthropic', { data: [{ id: 'claude-b', max_input_tokens: 200000, max_tokens: 8192 }, { id: 'claude-a', max_input_tokens: 1000000 }] }), [
+    { id: 'claude-a', contextWindow: 1000000, maxOutput: null },
+    { id: 'claude-b', contextWindow: 200000, maxOutput: 8192 },
   ])
-  assert.deepEqual(mod.parseModels('openrouter', { data: [{ id: 'openai/gpt-5', context_length: 400000 }, { id: 'x/y' }] }), [
-    { id: 'openai/gpt-5', contextWindow: 400000 },
-    { id: 'x/y', contextWindow: null },
+  assert.deepEqual(mod.parseModels('openrouter', { data: [{ id: 'openai/gpt-5', context_length: 400000, top_provider: { max_completion_tokens: 128000 } }, { id: 'x/y' }] }), [
+    { id: 'openai/gpt-5', contextWindow: 400000, maxOutput: 128000 },
+    { id: 'x/y', contextWindow: null, maxOutput: null },
   ])
   assert.deepEqual(mod.parseModels('ollama', { models: [{ name: 'llama3.1:8b' }, { name: 'qwen3:4b' }] }), [
-    { id: 'llama3.1:8b', contextWindow: null },
-    { id: 'qwen3:4b', contextWindow: null },
+    { id: 'llama3.1:8b', contextWindow: null, maxOutput: null },
+    { id: 'qwen3:4b', contextWindow: null, maxOutput: null },
   ])
   assert.deepEqual(
     mod.parseModels('lmstudio', { data: [{ id: 'nomic', type: 'embeddings', max_context_length: 2048 }, { id: 'gemma', type: 'llm', max_context_length: 131072, loaded_context_length: 32768 }, { id: 'qwen', type: 'llm', max_context_length: 40960 }] }),
     [
-      { id: 'gemma', contextWindow: 32768 },
-      { id: 'qwen', contextWindow: 40960 },
+      { id: 'gemma', contextWindow: 32768, maxOutput: null },
+      { id: 'qwen', contextWindow: 40960, maxOutput: null },
     ]
   )
-  assert.deepEqual(mod.parseModels('openai', { data: [{ id: 'gpt-5' }, { id: 'text-embedding-3-large' }, { id: 'whisper-1' }] }), [{ id: 'gpt-5', contextWindow: null }])
-  assert.deepEqual(mod.parseModels('custom', { data: [{ id: 'local-model' }] }), [{ id: 'local-model', contextWindow: null }])
+  assert.deepEqual(mod.parseModels('openai', { data: [{ id: 'gpt-5' }, { id: 'text-embedding-3-large' }, { id: 'whisper-1' }] }), [{ id: 'gpt-5', contextWindow: null, maxOutput: null }])
+  assert.deepEqual(mod.parseModels('custom', { data: [{ id: 'local-model' }] }), [{ id: 'local-model', contextWindow: null, maxOutput: null }])
   assert.deepEqual(mod.parseModels('anthropic', null), [])
   assert.equal(mod.parseOllamaContextWindow({ model_info: { 'general.architecture': 'llama', 'llama.context_length': 131072 } }), 131072)
   assert.equal(mod.parseOllamaContextWindow({ model_info: {} }), null)
+})
+
+// #346 (parent #343): a reply drafting several long Fields runs past 4,096 output tokens, so a new AI Provider starts at 16,000, less where
+// its type or the chosen model is known to allow less. A Custom one starts blank: a compatible server may refuse a limit above its own, and
+// left out, the server's own limit applies. Saved AI Providers keep what they have.
+test('#346: a new AI Provider starts with room to draft several Fields in one reply, and less where its type or model allows less', async () => {
+  const { mod } = await fresh()
+  assert.equal(mod.DEFAULT_MAX_TOKENS, 16000)
+  for (const type of ['anthropic', 'openai', 'openrouter', 'ollama', 'lmstudio']) {
+    assert.equal(mod.aiProviderType(type).defaultMaxTokens, 16000, type)
+    assert.equal(mod.suggestedMaxTokens({ type, model: '' }), 16000, type)
+  }
+  assert.equal(mod.aiProviderType('custom').defaultMaxTokens, null, 'a compatible server may refuse a limit above its own')
+  assert.equal(mod.suggestedMaxTokens({ type: 'custom', model: 'big' }, { id: 'big', maxOutput: 8192 }), null)
+
+  // A model the list says allows less gets what it allows; one that allows more still starts at 16,000.
+  assert.equal(mod.suggestedMaxTokens({ type: 'anthropic', model: 'claude-old' }, { id: 'claude-old', maxOutput: 8192 }), 8192)
+  assert.equal(mod.suggestedMaxTokens({ type: 'anthropic', model: 'claude-new' }, { id: 'claude-new', maxOutput: 128000 }), 16000)
+  assert.equal(mod.suggestedMaxTokens({ type: 'openrouter', model: 'x/y' }, { id: 'x/y', maxOutput: 4096 }), 4096)
+  assert.equal(mod.suggestedMaxTokens({ type: 'openrouter', model: 'x/y' }, { id: 'x/y', maxOutput: null }), 16000)
+
+  // OpenAI's list says nothing about output limits, but its older chat models stop at 4,096 and refuse more.
+  for (const model of ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo', 'gpt-4-0125-preview', 'gpt-4o-2024-05-13']) assert.equal(mod.suggestedMaxTokens({ type: 'openai', model }), 4096, model)
+  for (const model of ['gpt-4o', 'gpt-4o-2024-08-06', 'gpt-4o-mini', 'gpt-4.1', 'gpt-5', 'o3']) assert.equal(mod.suggestedMaxTokens({ type: 'openai', model }), 16000, model)
+
+  // A model whose context window the list gives starts at no more than half of it, leaving the rest for the conversation: a reply
+  // limit as big as the whole window can't fit beside any prompt, and an endpoint that refuses it says "maximum context length", which
+  // reads as a conversation too long (compacting it can't help). OpenRouter often leaves max_completion_tokens null for a small model.
+  assert.equal(mod.suggestedMaxTokens({ type: 'openrouter', model: 'x/small' }, { id: 'x/small', contextWindow: 8192, maxOutput: null }), 4096)
+  assert.equal(mod.suggestedMaxTokens({ type: 'openrouter', model: 'x/same' }, { id: 'x/same', contextWindow: 8192, maxOutput: 8192 }), 4096)
+  assert.equal(mod.suggestedMaxTokens({ type: 'lmstudio', model: 'gemma' }, { id: 'gemma', contextWindow: 4096, maxOutput: null }), 2048)
+  assert.equal(mod.suggestedMaxTokens({ type: 'lmstudio', model: 'qwen' }, { id: 'qwen', contextWindow: 32768, maxOutput: null }), 16000)
+  assert.equal(mod.suggestedMaxTokens({ type: 'anthropic', model: 'claude-old' }, { id: 'claude-old', contextWindow: 200000, maxOutput: 8192 }), 8192)
+  // What limited it, for the dialog's hint.
+  assert.deepEqual(mod.maxTokensSuggestion({ type: 'openrouter', model: 'x/small' }, { id: 'x/small', contextWindow: 8192, maxOutput: null }), { maxTokens: 4096, limitedBy: 'context' })
+  assert.deepEqual(mod.maxTokensSuggestion({ type: 'anthropic', model: 'claude-old' }, { id: 'claude-old', contextWindow: 200000, maxOutput: 8192 }), { maxTokens: 8192, limitedBy: 'model' })
+  assert.deepEqual(mod.maxTokensSuggestion({ type: 'openai', model: 'gpt-4' }), { maxTokens: 4096, limitedBy: 'model' })
+  assert.deepEqual(mod.maxTokensSuggestion({ type: 'openrouter', model: 'x/y' }, { id: 'x/y', contextWindow: 400000, maxOutput: 128000 }), { maxTokens: 16000, limitedBy: null })
+  assert.deepEqual(mod.maxTokensSuggestion({ type: 'custom', model: 'x' }, { id: 'x', contextWindow: 4096, maxOutput: null }), { maxTokens: null, limitedBy: null })
+
+  // Saved AI Providers keep their setting, blank included: nothing rewrites them.
+  assert.equal(mod.normaliseAiProvider({ type: 'anthropic', maxTokens: 4096 }).maxTokens, 4096)
+  assert.equal(mod.normaliseAiProvider({ type: 'anthropic' }).maxTokens, null)
 })
 
 test('the context window is filled in for Anthropic, OpenRouter, Ollama and LM Studio, and a default is used otherwise', async () => {
@@ -205,7 +248,7 @@ test('a local model on this computer is called straight from the browser; everyt
   assert.equal(ollama.runsOn, 'browser')
   assert.equal(mod.callsFromBrowser(ollama), true)
   const direct = fakeFetch(() => json(200, { models: [{ name: 'llama3.1:8b' }] }))
-  assert.deepEqual(await mod.fetchModels(ollama, { fetchImpl: direct.fetchImpl }), [{ id: 'llama3.1:8b', contextWindow: null }])
+  assert.deepEqual(await mod.fetchModels(ollama, { fetchImpl: direct.fetchImpl }), [{ id: 'llama3.1:8b', contextWindow: null, maxOutput: null }])
   assert.deepEqual(direct.calls.map((c) => c.url), ['http://localhost:11434/api/tags'])
 
   const onServer = { ...ollama, runsOn: 'server' }
@@ -218,7 +261,7 @@ test('a local model on this computer is called straight from the browser; everyt
   const anthropic = mod.normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'sk-ant-9', name: 'A' })
   assert.equal(mod.callsFromBrowser(anthropic), false)
   const viaRelay = fakeFetch(() => json(200, { data: [{ id: 'claude-x', max_input_tokens: 200000 }] }))
-  assert.deepEqual(await mod.fetchModels(anthropic, { fetchImpl: viaRelay.fetchImpl }), [{ id: 'claude-x', contextWindow: 200000 }])
+  assert.deepEqual(await mod.fetchModels(anthropic, { fetchImpl: viaRelay.fetchImpl }), [{ id: 'claude-x', contextWindow: 200000, maxOutput: null }])
   const envelope = JSON.parse(viaRelay.calls[0].init.body)
   assert.equal(viaRelay.calls[0].url, '/api/ai/relay')
   assert.equal(envelope.headers['x-api-key'], 'sk-ant-9')

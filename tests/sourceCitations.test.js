@@ -20,7 +20,7 @@ import { findDefinitionProblemsInStructure, loadDefinition, buildDefinitionYamlO
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { removeCitations } from './helpers/uncite.js'
 
-// #281 (map #238, decided in #245): Source documents cited from module content as `[text](source:<id>)`, printed as plain "(text)" in Word, and an optional Sources appendix an Artefact's Definition opts into with `source-appendix: true`.
+// #281 (map #238, decided in #245): Source documents cited from module content as `[text](source:<id>)`, printed in Word as a real footnote (#351), and an optional Sources appendix an Artefact's Definition opts into with `source-appendix: true`.
 
 describe('the citation syntax', () => {
   test('a citation is a link to source:<id>, whatever its text', () => {
@@ -51,6 +51,14 @@ describe('the citation syntax', () => {
     assert.deepEqual(findSourceCitations('[broken\ntext](source:plan)'), [])
   })
 
+  test('link text may hold closed brackets, and a bracket of the writer\'s before a citation is not part of it (#351)', () => {
+    assert.deepEqual(findSourceCitations('[see [x], p. 3](source:plan)'), [{ id: 'plan', text: 'see [x], p. 3' }])
+    assert.deepEqual(findSourceCitations('[[a](source:a); [b](source:b)]'), [
+      { id: 'a', text: 'a' },
+      { id: 'b', text: 'b' },
+    ])
+  })
+
   test('the ids cited are listed once each, in the order they are first cited', () => {
     assert.deepEqual(citedSourceIds('[b](source:b) [a](source:a) [b again](source:b)'), ['b', 'a'])
   })
@@ -62,12 +70,122 @@ describe('the citation syntax', () => {
 })
 
 describe('what Word prints', () => {
-  test('a citation is its text in parentheses with no link', () => {
-    assert.equal(sourceCitationsForWord('Median time is 12.4 days [Client brief, p. 4](source:client-brief).'), 'Median time is 12.4 days (Client brief, p. 4).')
+  // #351: a citation in running text is a real Word footnote. The compile step writes it as a Pandoc inline note, `^[words]`, which
+  // Pandoc turns into a native footnote; the brackets around it go, and the mark sits against the word before it.
+  test('a citation in running text is an inline note holding its words, against the word before it', () => {
+    assert.equal(sourceCitationsForWord('Median time is 12.4 days [Client brief, p. 4](source:client-brief).'), 'Median time is 12.4 days^[Client brief, p. 4].')
+    assert.equal(sourceCitationsForWord('see [Client brief, p. 4](source:client-brief) for the figures'), 'see^[Client brief, p. 4] for the figures')
+  })
+
+  test('brackets that hold nothing but citations go, so no empty "()" is left', () => {
+    assert.equal(sourceCitationsForWord('…built from it ([operating model](source:operating-model)).'), '…built from it^[operating model].')
+    // Two notes side by side keep a space between them: Pandoc would read `^[a]^[b]` as a superscript "[a]".
+    assert.equal(sourceCitationsForWord('x ([a](source:a); [b](source:b)) y'), 'x^[a] ^[b] y')
+    assert.equal(sourceCitationsForWord('x [[a](source:a), [b](source:b)] y'), 'x^[a] ^[b] y')
+    assert.equal(sourceCitationsForWord('x ( [a](source:a) ) y'), 'x^[a] y')
+  })
+
+  test('brackets that hold anything else stay, and two citations side by side are two notes', () => {
+    assert.equal(sourceCitationsForWord('x (see [a](source:a)) y'), 'x (see^[a]) y')
+    assert.equal(sourceCitationsForWord('x ([a](source:a) and more) y'), 'x (^[a] and more) y')
+    assert.equal(sourceCitationsForWord('x [a](source:a) [b](source:b) y'), 'x^[a] ^[b] y')
+    assert.equal(sourceCitationsForWord('x [a](source:a)[b](source:b) y'), 'x^[a] ^[b] y')
+    assert.equal(sourceCitationsForWord('E = mc[a](source:a)^2^'), 'E = mc^[a] ^2^', "and so does a note before the writer's own superscript")
+    assert.equal(sourceCitationsForWord('x \\([a](source:a)) y'), 'x \\(^[a]) y', 'an escaped bracket is the text\'s own')
   })
 
   test('an empty text falls back on the document title, then the id', () => {
-    assert.equal(sourceCitationsForWord('x [](source:a) y [](source:b)', (id) => (id === 'a' ? 'Client brief' : undefined)), 'x (Client brief) y (b)')
+    assert.equal(sourceCitationsForWord('x [](source:a) y [](source:b)', (id) => (id === 'a' ? 'Client brief' : undefined)), 'x^[Client brief] y^[b]')
+  })
+
+  test('nothing in the words can break the note, and the author\'s own Markdown in them is kept', () => {
+    // The link text was already Markdown, and stays so, as it does where a citation labels a list item: only a `^`, which
+    // Pandoc could read as the end of a superscript begun by the note's own, is escaped. Its brackets are closed or escaped.
+    assert.equal(sourceCitationsForWord('x [Plan \\[v2\\]^2 *draft*](source:plan) y'), 'x^[Plan \\[v2\\]\\^2 *draft*] y')
+    assert.equal(sourceCitationsForWord('x [*Client brief*, p. 4](source:a) y'), 'x^[*Client brief*, p. 4] y')
+    // A document's title, a repository's file and its commit are not Markdown, so they are taken literally.
+    assert.equal(sourceCitationsForWord('x [](source:plan) y', () => 'A_b <c> @d $e'), 'x^[A\\_b \\<c\\> \\@d \\$e] y')
+    assert.equal(sourceCitationsForWord('x [*a*](source:r?path=src/my_file.ts) y'), 'x^[*a*, src/my\\_file.ts] y')
+  })
+
+  test("a repository citation's note names the file and the short commit it was read at", () => {
+    const HEAD = 'de62a9e1234567890abcdef1234567890abcdef1'
+    assert.equal(sourceCitationsForWord(`as the [gantry](source:gantry?path=README.md&commit=${HEAD}) says`), 'as the^[gantry, README.md, at commit de62a9e] says')
+    // The words Copy citation writes already name the file, so it isn't said twice.
+    assert.equal(sourceCitationsForWord(`x [Gantry, README.md](source:gantry?path=README.md&commit=${HEAD}) y`), 'x^[Gantry, README.md, at commit de62a9e] y')
+    assert.equal(sourceCitationsForWord('x [Gantry](source:gantry) y'), 'x^[Gantry] y', 'a citation of the repository as a whole is its words')
+  })
+
+  test('a citation that labels a list item or a table cell prints its words, with no brackets and no note', () => {
+    assert.equal(sourceCitationsForWord('- [Gantry_Two_pager](source:gantry-two-pager): scope, costing'), '- Gantry_Two_pager: scope, costing')
+    assert.equal(sourceCitationsForWord('1. [](source:a) and more [b](source:b)', () => 'Client brief'), '1. Client brief and more^[b]')
+    assert.equal(sourceCitationsForWord('> * **[Brief](source:a)**: x'), '> * **Brief**: x')
+    const table = '| Document | Note |\n| --- | --- |\n| [Brief](source:a) | as said [Notes](source:b) |'
+    assert.equal(sourceCitationsForWord(table), '| Document | Note |\n| --- | --- |\n| Brief | as said^[Notes] |')
+    const bare = 'Document | Note\n--- | ---\n[Brief](source:a) | x'
+    assert.equal(sourceCitationsForWord(bare), 'Document | Note\n--- | ---\nBrief | x', 'a table without the outer pipes too')
+    // An item that opens with bracketed citations is not labelled by them; the list marker stays where it was.
+    assert.equal(sourceCitationsForWord('- ([a](source:a)) x'), '- ^[a] x')
+    // A Word Field tag (#301) in front of the citation is not something in the item.
+    const tagged = '- `<w:bookmarkStart w:id="2000000" w:name="gf_m_f"/>`{=openxml}[Brief](source:a): x'
+    assert.equal(sourceCitationsForWord(tagged), '- `<w:bookmarkStart w:id="2000000" w:name="gf_m_f"/>`{=openxml}Brief: x')
+  })
+
+  test('a paragraph that is not a list or a table, and a heading, are not mistaken for one', () => {
+    assert.equal(sourceCitationsForWord('[Brief](source:a) says so.'), '^[Brief] says so.')
+    assert.equal(sourceCitationsForWord('a | b [Brief](source:a)'), 'a | b^[Brief]')
+    assert.equal(sourceCitationsForWord('## Background ([Brief](source:a))'), '## Background (Brief)', 'a heading prints the words as before, since a note there would also land in the table of contents')
+  })
+
+  test('a Field tag Span (#301) around a citation is not taken for square brackets', () => {
+    // Pandoc 2 reads `[^` as the start of a footnote reference, so a note straight after a `[` has a space before it; a Span
+    // drops it, so Word prints nothing extra.
+    assert.equal(sourceCitationsForWord('x [[a](source:a)]{#gf_m_f} y'), 'x [ ^[a]]{#gf_m_f} y')
+    assert.equal(sourceCitationsForWord('Owner: [[Brief](source:a) says so.]{#gf_m_f}'), 'Owner: [ ^[Brief] says so.]{#gf_m_f}')
+  })
+
+  test('two marks with only punctuation between them, and a mark beside the writer\'s own ^, are never read as a superscript', () => {
+    // Pandoc 2 reads `^[a],^[b]` as a superscript "[a]," followed by "[b]", so whatever sits between a note and the next `^`
+    // keeps a space in it.
+    assert.equal(sourceCitationsForWord('two places [Client brief, p. 4](source:a), [Notes](source:b).'), 'two places^[Client brief, p. 4], ^[Notes].')
+    assert.equal(sourceCitationsForWord('(see [Brief](source:a); [Notes](source:b))'), '(see^[Brief]; ^[Notes])')
+    assert.equal(sourceCitationsForWord('x [a](source:a),[b](source:b) y'), 'x^[a], ^[b] y')
+    assert.equal(sourceCitationsForWord('x [a](source:a)x^2^ y'), 'x^[a]x ^2^ y')
+    // A word before the mark that holds a `^` of the writer's keeps its space, or `^2)^[a]` would be a superscript "2)".
+    assert.equal(sourceCitationsForWord('it is O(n^2) [a](source:a).'), 'it is O(n^2) ^[a].')
+    assert.equal(sourceCitationsForWord('it is O(n\\^2) [a](source:a).'), 'it is O(n\\^2)^[a].', 'an escaped ^ is plain text')
+  })
+
+  test('a definition list keeps the space after its marker', () => {
+    assert.equal(sourceCitationsForWord('Term\n: [a](source:a) definition'), 'Term\n: ^[a] definition')
+    assert.equal(sourceCitationsForWord('Term\n\n:   [a](source:a) definition'), 'Term\n\n:   ^[a] definition')
+    assert.equal(sourceCitationsForWord('Term\n~ [a](source:a) definition'), 'Term\n~ ^[a] definition')
+    assert.equal(sourceCitationsForWord('Owner: [a](source:a) x'), 'Owner:^[a] x', 'a colon after a word is not a marker')
+  })
+
+  test('the Pandoc this server converts with reads every one of them as notes, with nothing left as a superscript or literal', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const cases = [
+      ['two places [Client brief, p. 4](source:a), [Notes](source:b).', 2],
+      ['(see [Brief](source:a); [Notes](source:b))', 2],
+      ['x [a](source:a),[b](source:b) y', 2],
+      ['x ([a](source:a); [b](source:b)) y', 2],
+      ['E = mc[a](source:a)^2^', 1],
+      ['it is O(n^2) [a](source:a).', 1],
+      ['x [[a](source:a)]{#gf_m_f} y', 1],
+      ['Owner: [[Brief](source:a) says so.]{#gf_m_f}', 1],
+      ['x [Plan \\[v2\\]^2 *draft*](source:plan) y', 1],
+      ['Term\n: [a](source:a) definition', 1],
+    ]
+    for (const [markdown, notes] of cases) {
+      const ast = JSON.stringify(JSON.parse(execFileSync('pandoc', ['-f', 'markdown', '-t', 'json'], { input: sourceCitationsForWord(markdown), encoding: 'utf8' })).blocks)
+      assert.equal(ast.match(/"t":"Note"/g)?.length ?? 0, notes, `${markdown} → ${sourceCitationsForWord(markdown)}`)
+      assert.doesNotMatch(ast, /"t":"Superscript","c":\[\{"t":"Str","c":"\[/, markdown)
+      assert.doesNotMatch(ast, /"\^\[|"\[\^/, `${markdown}: no note left as literal text`)
+      if (markdown.includes('{#gf_m_f}')) assert.match(ast, /"t":"Span","c":\[\["gf_m_f"/, `${markdown}: the Field's bookmark is still there`)
+      if (markdown.startsWith('Term')) assert.match(ast, /"t":"DefinitionList"/, markdown)
+      if (markdown.includes('*draft*')) assert.match(ast, /"t":"Emph"/, markdown)
+    }
   })
 
   test('code, fenced blocks, images and other links are left exactly as they were', () => {
@@ -254,12 +372,25 @@ async function withCitingExample({ appendix, manifest = MANIFEST, citing = CITED
   }
 }
 
+// A rendered .docx's body text, with each footnote mark written "[<id>]" where it sits, and its footnotes in the order they are
+// cited: `{ id, text, xml }` each, leaving out Word's separator notes.
+async function wordParts(docxPath) {
+  const { execFileSync } = await import('node:child_process')
+  const xml = execFileSync('unzip', ['-p', docxPath, 'word/document.xml'], { encoding: 'utf8' })
+  const textOf = (part) => [...part.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>|<w:footnoteReference w:id="(\d+)" ?\/>/g)].map((m) => m[1] ?? `[${m[2]}]`).join('')
+  const notesXml = execFileSync('unzip', ['-p', docxPath, 'word/footnotes.xml'], { encoding: 'utf8' })
+  const byId = new Map([...notesXml.matchAll(/<w:footnote(?: [^>]*)? w:id="(\d+)"(?: [^>]*)?>([\s\S]*?)<\/w:footnote>/g)].filter((m) => !/w:type="(?:continuation)?[sS]eparator"/.test(m[0].slice(0, m[0].indexOf('>')))).map((m) => [m[1], m[2]]))
+  // Pandoc keeps "p. 4" together with a no-break space; read as an ordinary one.
+  const footnotes = [...xml.matchAll(/<w:footnoteReference w:id="(\d+)"/g)].map((m) => ({ id: m[1], xml: byId.get(m[1]), text: textOf(byId.get(m[1]) ?? '').replace(/ /g, ' ').trim() }))
+  return { xml, text: textOf(xml), footnotes }
+}
+
 describe('rendering', () => {
-  test('Word prints a citation as plain text with no link, and the exported .md keeps it as written', async () => {
+  test('Word prints a citation as a footnote with no link, and the exported .md keeps it as written', async () => {
     await withCitingExample({ appendix: false }, ({ instancesDir, definitionsDir }) => {
       const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir, dryRun: true, wordTags: false })
       assert.match(result.markdown, /\[Client brief, p\. 4\]\(source:client-brief\)/)
-      assert.match(result.docxMarkdown, /12\.4 working days \(Client brief, p\. 4\), confirmed in the \(notes\)\./)
+      assert.match(result.docxMarkdown, /12\.4 working days\^\[Client brief, p\. 4\], confirmed in the\^\[notes\]\./)
       assert.doesNotMatch(result.docxMarkdown, /source:/)
     })
   })
@@ -267,21 +398,51 @@ describe('rendering', () => {
   test('the same holds when the Word text carries its Field tags', async () => {
     await withCitingExample({ appendix: false }, ({ instancesDir, definitionsDir }) => {
       const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir, dryRun: true })
-      assert.match(result.docxMarkdown, /\(Client brief, p\. 4\)/)
+      assert.match(result.docxMarkdown, /\^\[Client brief, p\. 4\]/)
       assert.doesNotMatch(result.docxMarkdown, /\]\(source:/)
     })
   })
 
-  test('the real .docx has the words and no hyperlink to the document', async () => {
+  test('the real .docx has the words as footnotes and no hyperlink to the document', async () => {
     await withCitingExample({ appendix: false }, async ({ instancesDir, definitionsDir }) => {
       const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
-      const { execFileSync } = await import('node:child_process')
-      const xml = execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], { encoding: 'utf8' })
-      const text = [...xml.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1]).join('')
-      assert.match(text, /12\.4 working days \(Client brief, p\.\s4\), confirmed in the \(notes\)\./)
+      const { xml, text, footnotes } = await wordParts(result.docxPath)
+      const ours = /12\.4 working days\[(\d+)\], confirmed in the\[(\d+)\]\./.exec(text)
+      assert.ok(ours, 'a footnote mark where each citation was')
+      assert.deepEqual(ours.slice(1).map((id) => footnotes.find((f) => f.id === id)?.text), ['Client brief, p. 4', 'notes'])
       assert.doesNotMatch(xml, /source:/)
+      const { execFileSync } = await import('node:child_process')
       const rels = execFileSync('unzip', ['-p', result.docxPath, 'word/_rels/document.xml.rels'], { encoding: 'utf8' })
       assert.doesNotMatch(rels, /source:/)
+    })
+  })
+
+  // #351: the acceptance examples, through the compile step and a real Pandoc conversion, with the Field tags on as they are in use.
+  test('the .docx carries one real Word footnote per citation in running text, in the Footnote styles, and plain words where a citation labels a list item', async () => {
+    const citing = [
+      'It was built from it ([operating model](source:client-brief)). See [Client brief, p. 4](source:client-brief) for the figures ([a](source:old-notes); [b](source:client-brief)).',
+      '',
+      '- [Client brief](source:client-brief): scope, costing',
+    ].join('\n')
+    await withCitingExample({ appendix: true, citing }, async ({ instancesDir, definitionsDir }) => {
+      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
+      const { xml, text, footnotes } = await wordParts(result.docxPath)
+      const ours = /It was built from it\[(\d+)\]\. See\[(\d+)\] for the figures\[(\d+)\] \[(\d+)\]\./.exec(text)
+      assert.ok(ours, `a mark where each citation was, and no brackets or semicolon left: ${text.slice(text.indexOf('It was built'), text.indexOf('It was built') + 80)}`)
+      const notes = ours.slice(1).map((id) => footnotes.find((f) => f.id === id))
+      assert.deepEqual(notes.map((f) => f?.text), ['operating model', 'Client brief, p. 4', 'a', 'b'])
+      // One footnote in word/footnotes.xml for each mark in the text (the example's own citations among them).
+      assert.equal((xml.match(/<w:footnoteReference /g) ?? []).length, footnotes.length)
+      assert.equal(new Set(footnotes.map((f) => f.id)).size, footnotes.length)
+      assert.ok(footnotes.every((f) => f.xml))
+      for (const f of notes) {
+        assert.match(f.xml, /<w:pStyle w:val="FootnoteText" ?\/>/, 'the reference document\'s Footnote Text style')
+        assert.match(f.xml, /<w:rStyle w:val="FootnoteReference" ?\/>/, 'and its Footnote Reference style for the number')
+      }
+      assert.match(text, /Client brief: scope, costing/, 'the References-style item prints its words')
+      assert.doesNotMatch(text, /\(Client brief\)|\(operating model\)/)
+      // The Sources appendix is unchanged: the cited documents, once each.
+      assert.match(text, /Client brief\s*Client brief v3\.docx\s*4 Mar 2026\s*Old notes \(removed\)\s*notes\.txt\s*15 Jan 2026/)
     })
   })
 
@@ -321,7 +482,7 @@ describe('rendering', () => {
     await withCitingExample({ appendix: true, manifest: null }, ({ instancesDir, definitionsDir }) => {
       const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir, dryRun: true, wordTags: false })
       assert.doesNotMatch(result.docxMarkdown, /^# Sources$/m)
-      assert.match(result.docxMarkdown, /\(Client brief, p\. 4\)/)
+      assert.match(result.docxMarkdown, /\^\[Client brief, p\. 4\]/)
     })
   })
 
@@ -360,13 +521,13 @@ describe('a Local Workspace render request', () => {
 
   test('the manifest entries of the cited documents give Word the titles, and nothing else of a document travels', async () => {
     const result = await runLocalWorkspaceCompute('compile', payload({ sources: [entry('client-brief'), entry('old-notes')] }), { definitionsDir: 'definitions' })
-    assert.match(result.docxMarkdown, /12\.4 working days \(Client brief, p\. 4\), confirmed in the \(notes\)\./)
+    assert.match(result.docxMarkdown, /12\.4 working days\^\[Client brief, p\. 4\], confirmed in the\^\[notes\]\./)
     assert.match(result.markdown, /\(source:client-brief\)/)
   })
 
   test('without them a citation still prints its words', async () => {
     const result = await runLocalWorkspaceCompute('compile', payload(), { definitionsDir: 'definitions' })
-    assert.match(result.docxMarkdown, /\(Client brief, p\. 4\)/)
+    assert.match(result.docxMarkdown, /\^\[Client brief, p\. 4\]/)
   })
 
   test('a request that names an unsafe id, or too many entries, is refused before anything is written', async () => {
@@ -379,7 +540,7 @@ describe('a Local Workspace render request', () => {
 })
 
 // --- #319: a code repository in the render -------------------------------------------------------------------------
-// A repository is cited by a file at a commit. Word prints the words only; the Sources appendix gives its title, address, branch and the
+// A repository is cited by a file at a commit. Word prints a footnote of the words, the file and the short commit (#351); the Sources appendix gives its title, address, branch and the
 // commits cited, through the real render (lib/render.js) on a server workspace and through a Local Workspace's compute request.
 
 describe('a code repository in the render (#319)', () => {
@@ -399,25 +560,25 @@ describe('a code repository in the render (#319)', () => {
   ].join('\n')
   const appendixOf = (text) => text.slice(text.lastIndexOf('# Sources')).trim()
 
-  test('Word prints a repository citation as its words, and the Sources appendix (Word and .md) gives its title, address, branch and commits cited', async () => {
+  test('Word prints a repository citation as a footnote naming the file and commit, and the Sources appendix (Word and .md) gives its title, address, branch and commits cited', async () => {
     await withCitingExample({ appendix: true, manifest: REPO_MANIFEST, citing: REPO_CITED }, ({ instancesDir, definitionsDir }) => {
       for (const options of [{ wordTags: false }, {}]) {
         const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir, dryRun: true, ...options })
         assert.match(result.markdown, new RegExp(`\\[Billing API, limits\\]\\(source:billing-api\\?path=src/orders/limits\\.ts&commit=${HEAD}\\)`), 'the .md keeps the citation as written')
-        assert.match(result.docxMarkdown, /Orders are capped \(Billing API, limits\) as the \(readme\) says\./)
+        assert.match(result.docxMarkdown, /Orders are capped\^\[Billing API, limits, src\/orders\/limits\.ts, at commit c0ffee1\] as the\^\[readme, README\.md, at commit 0ld0ld1\] says\./)
         assert.doesNotMatch(result.docxMarkdown, /\]\(source:/)
         for (const text of [result.markdown, result.docxMarkdown]) assert.equal(appendixOf(text), APPENDIX)
       }
     })
   })
 
-  test('the real .docx carries the appendix row and no link to the repository citation', async () => {
+  test('the real .docx carries the appendix row, a footnote naming the file and short commit, and no link to the repository citation', async () => {
     await withCitingExample({ appendix: true, manifest: REPO_MANIFEST, citing: REPO_CITED }, async ({ instancesDir, definitionsDir }) => {
       const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
-      const { execFileSync } = await import('node:child_process')
-      const xml = execFileSync('unzip', ['-p', result.docxPath, 'word/document.xml'], { encoding: 'utf8' })
-      const text = [...xml.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1]).join('')
-      assert.match(text, /Orders are capped \(Billing API, limits\) as the \(readme\) says\./)
+      const { xml, text, footnotes } = await wordParts(result.docxPath)
+      const ours = /Orders are capped\[(\d+)\] as the\[(\d+)\] says\./.exec(text)
+      assert.ok(ours, 'a footnote mark where each citation was')
+      assert.deepEqual(ours.slice(1).map((id) => footnotes.find((f) => f.id === id)?.text), ['Billing API, limits, src/orders/limits.ts, at commit c0ffee1', 'readme, README.md, at commit 0ld0ld1'])
       assert.match(text, /Billing API.*https:\/\/github\.com\/acme\/billing-api\/tree\/main.*branch main, commits c0ffee1, 0ld0ld1/)
       assert.doesNotMatch(xml, /source:/)
     })
@@ -436,7 +597,7 @@ describe('a code repository in the render (#319)', () => {
     assert.equal(sources.find((s) => s.id === 'billing-api').filename, undefined)
     const request = (list) => ({ definitionId: 'design', definitionVersion: 3, instanceYaml, moduleFiles, assets, artefact: 'soap', sources: list })
     const result = await runLocalWorkspaceCompute('compile', request(sources), { definitionsDir: 'definitions' })
-    assert.match(result.docxMarkdown, /Orders are capped \(Billing API, limits\) as the \(readme\) says\./)
+    assert.match(result.docxMarkdown, /Orders are capped\^\[Billing API, limits, src\/orders\/limits\.ts, at commit c0ffee1\] as the\^\[readme, README\.md, at commit 0ld0ld1\] says\./)
     for (const text of [result.markdown, result.docxMarkdown]) assert.equal(appendixOf(text), APPENDIX)
     // An entry with neither a filename nor a pointer is still refused.
     await assert.rejects(runLocalWorkspaceCompute('compile', request([{ id: 'billing-api', title: 'Billing API' }]), { definitionsDir: 'definitions' }), /must carry a filename/)

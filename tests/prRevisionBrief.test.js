@@ -12,7 +12,7 @@ const SKILLS_DIR = new URL('../web/interview-skills/', import.meta.url)
 const skills = await loadInterviewSkills((path) => readFileSync(new URL(path, SKILLS_DIR), 'utf8'))
 
 test('Gantry\'s rules say the AI never writes to the Pull Request, and when it may offer to re-open', () => {
-  assert.equal(INTERVIEW_RULES_VERSION, 4)
+  assert.equal(INTERVIEW_RULES_VERSION, 5)
   const byId = Object.fromEntries(INTERVIEW_RULES.map((r) => [r.id, r]))
   assert.match(byId['sent-back'].text, /You never write to the Pull Request: no comments, no replies, no resolved threads/)
   assert.match(byId['sent-back'].text, /keep or redraft each of those Fields/)

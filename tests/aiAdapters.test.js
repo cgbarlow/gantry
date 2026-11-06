@@ -205,7 +205,20 @@ test('Anthropic request: an error result is marked as one, and no tools means no
   assert.equal(req.body.tool_choice, undefined)
   assert.equal(req.body.tools, undefined)
   assert.equal(req.body.messages[2].content[0].is_error, true)
-  assert.equal(req.body.max_tokens, 4096, 'Anthropic needs a max_tokens, so a default applies')
+  assert.equal(req.body.max_tokens, 16000, 'Anthropic needs a max_tokens, so a default applies (#346: room for several Fields in one reply)')
+})
+
+test('#346: an AI Provider saved with a Max tokens sends it; one saved without leaves an OpenAI-style server to its own limit', () => {
+  const saved = normaliseAiProvider({ type: 'anthropic', address: 'https://api.anthropic.com', key: 'k', model: 'm', maxTokens: 4096 })
+  assert.equal(buildChatRequest(saved, { messages: [{ role: 'user', text: 'x' }] }).body.max_tokens, 4096, 'a saved 4,096 is still 4,096')
+  // A small fixed-size call sets its own limit, whatever the AI Provider's.
+  assert.equal(buildChatRequest(saved, { messages: [{ role: 'user', text: 'x' }], maxTokens: 2048 }).body.max_tokens, 2048)
+  for (const type of ['openai', 'openrouter', 'ollama', 'lmstudio', 'custom']) {
+    const blank = normaliseAiProvider({ type, address: 'http://localhost:1/v1', key: 'k', model: 'm' })
+    const body = buildChatRequest(blank, { messages: [{ role: 'user', text: 'x' }] }).body
+    assert.equal(body.max_tokens, undefined, type)
+    assert.equal(body.max_completion_tokens, undefined, type)
+  }
 })
 
 test('OpenAI request: Chat Completions with tool_choice auto, streamed usage and tool results as tool messages', () => {

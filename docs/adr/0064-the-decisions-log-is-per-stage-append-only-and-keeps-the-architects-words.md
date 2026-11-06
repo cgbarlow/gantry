@@ -40,7 +40,10 @@ The file has three parts:
   `replaces` the old one, and an open question is closed by an entry that
   `resolves` it. Nothing in Gantry edits or deletes an entry. "Start this
   stage over" appends a restart marker, and the AI ignores earlier answers
-  from then on.
+  from then on. Since #348 it also begins a new session: the one it ended
+  keeps its status entry, in the state `started-over` and with every token
+  it used, and the next Save writes both. So a session's tokens count from
+  its start or its last start over, and the Stage's total loses nothing.
 
 **The architect's words are kept, and the AI's are not.** Free-chat messages
 that fed something are stored word for word on the entry they fed. The AI's

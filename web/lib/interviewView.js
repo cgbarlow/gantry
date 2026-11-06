@@ -9,14 +9,15 @@
 // given is web/lib/interviewBrief.js. A drafted Field can be hand-edited in the preview (#289): click it, type, Done. Saving is the editor's own stage Save (the Save check of ADR-0068 and all), handed in as
 // `onSaveDrafts`, so a Save from here is the same Save, one commit, with the Modules left `draft`.
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { isMultiValuedField } from './fieldShape.js'
 import { aiProviders, defaultAiProvider, updateAiProvider } from './aiProviders.js'
 import { AiProviderDialog, AiRecoveryPrompt } from './aiProvidersView.js'
 import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
 import { repositoryReaderFor } from './sourceRepositoryClient.js'
-import { createInterviewSession, statusLine } from './interviewSession.js'
-import { stageReadiness } from './interviewReadiness.js'
+import { citationIndex, citedRef, openCitation, renderMarkdownPreview } from './markdownPreview.js'
+import { createInterviewSession, statusLine, CARRY_ON_MESSAGE } from './interviewSession.js'
+import { finishTheseMessage, onlyOutsideTheStage, outstandingItems, stageReadiness } from './interviewReadiness.js'
 import { PAGE_SIZE, isAnswered, pageCards, pageCount } from './interviewRounds.js'
 import { loadInterviewSkillsInBrowser } from './interviewSkills.js'
 import { modulesWithStandard } from './standardModules.js'
@@ -30,7 +31,7 @@ import { answeredCounts, assignChoices, planReview, reviewerLabels } from './rev
 import { ReviewContext, ReviewInputs, ReviewSection } from './reviewView.js'
 import { downloadReviewResponseList, hasReviewResponses, reviewResponseRows } from './reviewResponse.js'
 import { artefactRows, beginRun, chosenArtefacts, clearRun, interviewRuns, nextStage, planRows, resumableRun, resumedArtefacts, runArtefacts, runOpening, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
-import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
+import { EMPTY_TOKENS, formatContext, formatTokens, hasTokens, stageTokenFigures, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
 import { isRemoteInstance, lastSavedBy, openApproval, pullRequestLink, remoteRecord } from './interviewApproval.js'
 import { SENT_BACK_CHOICES, reopenOffer, staleLaterFields } from './prRevision.js'
@@ -72,6 +73,87 @@ const loadSkills = () => (skillsPromise ??= loadInterviewSkillsInBrowser().catch
 }))
 
 const PROGRESS_LABELS = { key: 'Checking the key…', model: 'Checking the model…', cards: 'Checking question cards…', images: 'Checking whether it reads images…' }
+
+/**
+ * #347: what an AI reply was drawn from, as a string to compare: its text (asset references resolved), whether its diagrams were drawn, and
+ * what the index says of each Source document it cites (`cited`, the ids the last drawing found; an index of null keeps no documents). A
+ * document uploaded since, which the reply does not cite, changes nothing, so the reply and its diagrams are not drawn again for it.
+ */
+export function replyDrawing(text, { index = null, mermaid = true, cited = [] } = {}) {
+  return JSON.stringify([text, mermaid, index === null ? null : cited.map((id) => index[id] ?? null)])
+}
+
+// #347: the blocks a reply's last words can sit in, and the ones that hold other blocks, for caretBlock.
+const CARET_BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE', 'LI', 'TD', 'TH'])
+const CARET_CONTAINERS = new Set(['UL', 'OL', 'LI', 'BLOCKQUOTE', 'TABLE', 'THEAD', 'TBODY', 'TR'])
+
+/**
+ * #347: where the caret goes while a reply arrives: the innermost block its last words are in, following the last element down through
+ * lists, quotes and tables, so it sits in a table's last cell and in a nested list's last item. Null when the last thing is a rule or a
+ * diagram, or nothing has arrived.
+ */
+export function caretBlock(node) {
+  let found = null
+  for (let at = node?.lastElementChild ?? null; at; at = at.lastElementChild) {
+    if (CARET_BLOCKS.has(at.tagName)) found = at
+    if (!CARET_CONTAINERS.has(at.tagName)) break
+  }
+  return found
+}
+
+/**
+ * #347: an AI reply in the thread, drawn as Markdown by the module editor's preview (web/lib/markdownPreview.js): the same renderer and
+ * sanitising, asset images, and Source document citations that open the document. `preview` is `{ resolveAssets, sources, onDrawn }` for
+ * it. A reply is drawn again as each piece arrives, so half-finished Markdown (an unclosed fence or table) may show raw until it closes; its
+ * Mermaid diagrams are drawn once, when it is finished, and `onDrawn` is told when they are, as they make the reply taller. A finished reply
+ * is drawn again only when that changes what it shows (replyDrawing), not each time the page lists its Source documents again.
+ */
+export function AiReply({ m, preview }) {
+  const ref = useRef(null)
+  const drawn = useRef(null)
+  useLayoutEffect(() => {
+    const node = ref.current
+    if (!node) return
+    const text = preview?.resolveAssets ? preview.resolveAssets(m.text ?? '') : (m.text ?? '')
+    const sources = preview?.sources ?? {}
+    const index = sources.index ?? null
+    const mermaid = !m.streaming
+    if (drawn.current && drawn.current.key === replyDrawing(text, { index, mermaid, cited: drawn.current.cited })) return
+    const diagrams = renderMarkdownPreview(node, text, { sources, mermaid })
+    const cited = [...new Set([...node.querySelectorAll('[data-source-id]')].map((el) => citedRef(el.dataset.sourceId).id))]
+    drawn.current = { key: replyDrawing(text, { index, mermaid, cited }), cited }
+    if (m.streaming) caretBlock(node)?.classList.add('caret-at')
+    else diagrams.then(() => node.isConnected && preview?.onDrawn?.())
+  }, [m.text, m.streaming, preview])
+  return html`<div class=${`msg ai md${m.streaming ? ' streaming caret' : ''}`} data-testid="interview-msg" data-who="ai" ref=${ref}></div>`
+}
+
+/**
+ * #345: the line Carry on answers, or null: the one the latest turn left because it ended with nothing to show (`snap.carryOnAt`), while
+ * it is still the last word: between turns, with no round of cards or clash open, and with nothing from the architect or the AI after it.
+ * An earlier turn's line stays in the thread as a record and is never offered again, even when the turns since added only system lines.
+ */
+export function carryOnLine(snap) {
+  if (snap?.carryOnAt == null || snap.phase !== 'waiting' || snap.round || snap.clash) return null
+  const list = snap.thread ?? []
+  const at = list.findIndex((t) => t.id === snap.carryOnAt)
+  if (at === -1 || list.slice(at + 1).some((t) => t.who !== 'sys')) return null
+  return list[at]
+}
+
+/**
+ * One message of the thread. #347: only the AI's replies are Markdown; the architect's messages and Gantry's system lines are plain text, as
+ * typed. #345: `carryOn` marks the system line a quiet turn left while Carry on still answers it, and `onCarryOn` sends "go on".
+ */
+export function ThreadMessage({ m, preview, carryOn = false, onCarryOn }) {
+  if (carryOn) {
+    return html`<div class="msg sys carry-on" data-testid="interview-msg" data-who="sys" data-carry-on=${m.carryOn}>
+      ${m.text} <button type="button" class="btn small" data-testid="interview-carry-on" title=${`Send "${CARRY_ON_MESSAGE}" to the AI, so it picks up where it stopped.`} onClick=${onCarryOn}>Carry on</button>
+    </div>`
+  }
+  if (m.who === 'ai') return html`<${AiReply} m=${m} preview=${preview} />`
+  return html`<div class=${`msg ${m.who}${m.streaming ? ' streaming caret' : ''}`} data-testid="interview-msg" data-who=${m.who} data-carry-on=${m.carryOn}>${m.text}</div>`
+}
 
 function ValueView({ value }) {
   if (Array.isArray(value)) return html`<ul class="interview-value-list">${value.map((item, i) => html`<li key=${i}><${ValueView} value=${item} /></li>`)}</ul>`
@@ -293,9 +375,10 @@ function providerLabel(p) {
  *   onBringInReview    () => void  opens the dialog that brings review comments in
  *   onOpenReview       () => void  shows the Interview page as a focused review round
  *   onReviewAnswered   ({ [reviewId]: n }) => Promise  raises the manifest's answered counts once answers are saved
+ *   resolveAssets      (text) => text  rewrites asset references to images, as the editor's preview does, for the AI's replies in the thread (#347); none when left out
  */
 // #297: `outOfDate` is the Fields flagged Out of date (web/lib/outOfDate.js) and `newSince` the documents marked New since last interview; the run plan marks each Stage that has flagged Fields and the Source documents rail marks the new documents.
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, onDraftAhead, outOfDate = [], newSince = [], flagsReady = true, stageStarted, update = false, onReopenStage, onOpenStage, review = false, reviewCopies = null, onBringInReview, onOpenReview, onReviewAnswered, revise = false, loadPrComments = null, onReviseStage = null, onLeaveRevision = null, onUpdateStage = null }) {
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, onDraftAhead, outOfDate = [], newSince = [], flagsReady = true, stageStarted, update = false, onReopenStage, onOpenStage, review = false, reviewCopies = null, onBringInReview, onOpenReview, onReviewAnswered, revise = false, loadPrComments = null, onReviseStage = null, onLeaveRevision = null, onUpdateStage = null, resolveAssets = null }) {
   const key = `${instance.slug}|${instance.stage.id}`
   // #298: Bring up to date has its own session and working copy, so it never takes over an interview that is part-way.
   // #299: a revision of a Stage the Owner sent back has its own session too.
@@ -345,6 +428,21 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const sessionRef = useRef(null)
   const ctxRef = useRef(null)
   const threadRef = useRef(null)
+  // #347: whether the thread is at its foot, so a reply that grows once it is drawn (its diagrams) keeps it there, and the architect who
+  // scrolled up to read is left where they are. `autoTop` is where the thread last put itself, so the scroll that causes isn't taken for theirs.
+  const threadFoot = useRef({ at: true, autoTop: null })
+  const scrollThreadToFoot = useCallback(() => {
+    const el = threadRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    threadFoot.current = { at: true, autoTop: el.scrollTop }
+  }, [])
+  const keepThreadAtFoot = useCallback(() => threadFoot.current.at && scrollThreadToFoot(), [])
+  const onThreadScroll = useCallback((e) => {
+    const el = e.currentTarget
+    threadFoot.current.at = el.scrollTop === threadFoot.current.autoTop || el.scrollHeight - el.scrollTop - el.clientHeight < 24
+  }, [])
+  const chatRef = useRef(null)
   const providers = aiProviders.value
 
   const providerId = (providers.find((p) => p.id === pickedProvider) ?? defaultAiProvider())?.id ?? null
@@ -435,6 +533,18 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     setSources(entries)
   }, [])
 
+  // #347: what the thread's AI replies are drawn with: this Instance's asset images (`resolveAssets`, the editor's) and its Source documents,
+  // so a citation opens the document from here as it does from the editor's preview. A document that can't be opened says so in the header.
+  const [citeMessage, setCiteMessage] = useState('')
+  const replyPreview = useMemo(() => {
+    const index = citationIndex(sources ?? [])
+    const open = (ref) => {
+      setCiteMessage('')
+      openCitation(storeRef.current, index, ref).catch((err) => setCiteMessage(err.message))
+    }
+    return { resolveAssets, sources: { index, open }, onDrawn: keepThreadAtFoot }
+  }, [sources, resolveAssets])
+
   // #293: the run's target Stage ("Run until"). The current Stage when no other is picked, which is a run of one Stage.
   const stagesList = instance.stages ?? []
   const targets = runTargets(stagesList, instance.stage.id)
@@ -481,10 +591,15 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     () => (setup.status === 'ready' ? approvedPrintedFields({ definition: setup.definition, instance }) : {}),
     [setup, instance.stages, instance.pullRequests, instance.currentStageId, instance.stage.id, instance.changedSinceApproval, instance.workspaceBacked]
   )
+  // #349: the Stage's readiness for these drafts, the one rule both the live preview and the session (which tells the AI what stands in the
+  // way of the stage-end card) read. `openFields` are the Fields an open question card feeds.
+  const readinessOf = ({ drafts: forDrafts = {}, openFields = [] } = {}) =>
+    stageReadiness({ definition: definitionNow, structure: setup.structure, stageId: instance.stage.id, artefactId, size: instance.size, modules: instance.modules, drafts: forDrafts, openFields })
   ctxRef.current =
     setup.status === 'ready'
       ? {
           definition: definitionNow,
+          readiness: readinessOf,
           approvedPrinted,
           stageId: instance.stage.id,
           artefactId,
@@ -585,7 +700,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       if (copy) {
         const standing = copyStanding(copy, setup.logs?.[instance.stage.id] ?? null)
         if (standing === 'fresh') session.loadDecisions(setup.logs?.[instance.stage.id] ?? null)
-        if (standing === 'fresh' && session.importState(copy.state)) setCopyRestored(true)
+        // #348: a copy of the kickoff a Start this stage over left picks up only the start over, so it says nothing about a working copy.
+        if (standing === 'fresh' && session.importState(copy.state)) setCopyRestored(copy.state?.state?.phase !== 'kickoff')
         else {
           workingCopies.setAside(sessionKey, copy, standing)
           setAsideNotice({ savedAt: copy.savedAt })
@@ -625,10 +741,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     if (session && providerId && session.providerId !== providerId && snap?.phase === 'kickoff') session.setProvider(providerId)
   }, [providerId, snap?.phase])
 
-  useEffect(() => {
-    const el = threadRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [snap?.thread?.length, snap?.thread?.[snap.thread.length - 1]?.text])
+  useEffect(scrollThreadToFoot, [snap?.thread?.length, snap?.thread?.[snap.thread.length - 1]?.text])
 
   const drafts = snap?.drafts ?? {}
   const draftKeys = Object.keys(drafts)
@@ -646,7 +759,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const readiness = useMemo(
     () =>
       setup.status === 'ready' && snap && snap.phase !== 'kickoff'
-        ? stageReadiness({ definition: definitionNow, structure: setup.structure, stageId: instance.stage.id, artefactId, size: instance.size, modules: instance.modules, drafts, openFields: snap.openFields ?? [] })
+        ? readinessOf({ drafts, openFields: snap.openFields ?? [] })
         : null,
     [setup, heldKey, instance.modules, instance.size, artefactId, snap?.drafts, snap?.openFields?.join('|'), snap?.phase]
   )
@@ -697,6 +810,30 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     !stageEndReady &&
     saving?.phase !== 'drafting-ahead' &&
     ((phase === 'waiting' && !snap?.round && !finishing && Boolean(readiness) && readiness.allDone && !readiness.ready) || (phase === 'kickoff' && nothingDraftable))
+  // #345: the line a turn that ended with nothing to show left, while Carry on still answers it.
+  const carryOnNow = carryOnLine(snap)
+  // #350: the AI's turn has ended with something drafted, nothing open for the architect (no round of cards, none held back, no clash, and
+  // Finish with your recommendations not waiting on its last round) and the Stage not ready: the Not ready yet card takes the stage-end
+  // card's place, and goes as soon as the Stage is ready. A card this page shows first (the Waiting card, a Stage sent back, a Save made) wins.
+  // A turn cut short (its rounds of tool calls used up, or no reply at all, #345) has Carry on as its one next step, so the card waits for a
+  // turn that ends of itself.
+  const notReadyNow =
+    !update &&
+    !review &&
+    !revise &&
+    phase === 'waiting' &&
+    draftKeys.length > 0 &&
+    Boolean(readiness) &&
+    !readiness.ready &&
+    !snap?.round &&
+    !snap?.held &&
+    !snap?.clash &&
+    !finishing &&
+    !carryOnNow &&
+    !waitingNow &&
+    !(sentBack && sentBack.stageId === instance.currentStageId) &&
+    !(remote && awaiting) &&
+    !['saved', 'advancing', 'drafting-ahead'].includes(saving?.phase)
   // Where the current Stage stands in the run plan.
   const settled = run && run.at === instance.stage.id && (run.phase === 'paused' || run.phase === 'done') ? run.phase : null
   let planCurrent = 'idle'
@@ -785,21 +922,18 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     stageTitle: stageTitleOf,
     pageStageTitle: instance.stage.title,
   })
-  // #294: tokens, from what each AI Provider reported. A Stage's total is every session's status line in its committed log, except this
-  // session's own (it is counted in full from memory, so its older committed line is not added twice). The session total is this run:
-  // the Stages it went through before this one (from their logs) and what this session has used on this one.
-  const mineHere = snap?.tokens ?? EMPTY_TOKENS
-  const stageTokens = (id) => (id === instance.stage.id ? addTokens(tokensOfLog(stageLogs[id], { exceptSession: snap?.decisions?.session }), mineHere) : tokensOfLog(stageLogs[id]))
+  // #294: tokens, from what each AI Provider reported. A Stage's total is every session's status line in its committed log. On this Stage
+  // (#348) it is split in two: This session, the running session alone since it began or was last started over (counted from memory), and
+  // Earlier sessions, the log's other sessions plus those a start over ended here (also from memory: their committed lines may be older).
+  const figures = stageTokenFigures(stageLogs[instance.stage.id], { session: snap?.decisions?.session, tokens: snap?.tokens ?? EMPTY_TOKENS, ended: snap?.endedSessions ?? [] })
+  const stageTokens = (id) => (id === instance.stage.id ? figures.stage : tokensOfLog(stageLogs[id]))
   const currentAt = stagesList.findIndex((st) => st.id === instance.stage.id)
-  const runStartAt = Math.max(0, Math.min(currentAt, stagesList.findIndex((st) => st.id === runStart)))
-  const sessionTokens = stagesList.slice(runStartAt, currentAt).reduce((sum, st) => addTokens(sum, tokensOfLog(stageLogs[st.id])), mineHere)
-  const thisStageTokens = stageTokens(instance.stage.id)
   const resume = resumeLogs && !carryingOn && !update && !review && phase === 'kickoff' ? resumableRun({ stages: stagesList, currentStageId: instance.stage.id, logs: resumeLogs, openPullRequests: remoteRows?.pullRequests ?? {} }) : null
   const stageTitleOf = (id) => stagesList.find((s) => s.id === id)?.title ?? id
 
   async function startInterview(options) {
     // #331: the opening message is what the architect typed; else, on a Stage of a run, the run's; else, resuming the session they paused, that session's.
-    const words = opening.trim() || ((carryingOn || sameRun) && run.opening) || (startedOver.current ? '' : ctxRef.current?.resume?.adopt?.opening ?? '')
+    const words = opening.trim() || ((carryingOn || sameRun) && run.opening) || (startedOver.current || snap?.startedOver ? '' : ctxRef.current?.resume?.adopt?.opening ?? '')
     // Bring up to date, a review round and a revision are not runs: they have no target Stage and never move the Instance on (#298, #303, #299).
     // A revision has no box: its round is the Owner's comments.
     if (update || review || revise) {
@@ -953,9 +1087,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   // "stop" (Save and stop here, #293); both make the one stage Save, and "advance" then moves the Instance on so the next Stage's interview
   // starts by itself. `pause` is Pause (#290): the same Save, asked for by the architect mid-Stage, which leaves the session to be resumed.
   // The status block of the decisions log, written in the same Save, records the run's target and each Stage's state. Resolves true when
-  // the Save worked.
-  async function runSave({ action = 'stop', pause = false } = {}) {
-    setSaving({ phase: 'saving', pause })
+  // the Save worked. `notReady` (#350) is the Not ready yet card's Save and stop here: Pause's Save, so the run is left paused on this Stage
+  // with nothing advanced or sent for approval, but asked for from the card, which says how it went.
+  async function runSave({ action = 'stop', pause = false, notReady = false } = {}) {
+    setSaving({ phase: 'saving', pause: pause && !notReady, notReady })
     const keys = Object.keys(drafts)
     // #300: what the card said the Save would re-render; once the drafts are saved the page can no longer work it out from them.
     const willReRender = action === 'approval' && !pause && earlierToRender.length > 0
@@ -991,7 +1126,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       if (pause) {
         sessionRef.current?.markPaused()
         updateRun(instance.slug, { phase: 'paused', at: instance.stage.id })
-        setSaving({ phase: 'paused', fields: keys.length, returned })
+        setSaving({ phase: 'paused', fields: keys.length, returned, notReady })
         return true
       }
       if (action === 'head-start') {
@@ -1017,11 +1152,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     // The Save did not happen, so the choices made on clash cards for it are taken back.
     if (result.settledIds?.length) sessionRef.current?.discardEntries(result.settledIds)
-    setSaving({ phase: 'error', message: result.message || 'The Save did not go through.', pause: runState === 'paused' })
+    setSaving({ phase: 'error', message: result.message || 'The Save did not go through.', pause: runState === 'paused' && !notReady, notReady })
     return false
   }
   const saveStage = (action = 'stop') => runSave({ action })
   const pauseInterview = () => runSave({ pause: true })
+  const saveNotReady = () => runSave({ pause: true, notReady: true })
 
   // Saves what Bring up to date settled (#298): the answers in the decisions log, with any re-cited or redrafted Fields, as one stage Save through
   // the Save check. It is not the end of a Stage: no run, no advance, no request for approval. The session's status line is written only when the
@@ -1612,10 +1748,21 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     `
   }
 
-  const thread = () =>
-    (snap?.thread ?? []).map(
-      (m) => html`<div key=${m.id} class=${`msg ${m.who}${m.streaming ? ' streaming caret' : ''}`} data-testid="interview-msg" data-who=${m.who}>${m.text}</div>`
-    )
+  // Carry on goes as the turn it starts begins, so the focus would fall to the page: it moves to the thread, where the status line and the
+  // reply appear, and on to the chat box once the turn is over, unless the architect has put it somewhere else meanwhile.
+  const carryOnFocus = useRef(false)
+  const sendCarryOn = () => {
+    carryOnFocus.current = true
+    threadRef.current?.focus({ preventScroll: true })
+    sessionRef.current?.send(CARRY_ON_MESSAGE)
+  }
+  useEffect(() => {
+    if (busy || !carryOnFocus.current) return
+    carryOnFocus.current = false
+    const at = document.activeElement
+    if (!at || at === document.body || at === threadRef.current) chatRef.current?.focus()
+  }, [busy])
+  const thread = () => (snap?.thread ?? []).map((m) => html`<${ThreadMessage} key=${m.id} m=${m} preview=${replyPreview} carryOn=${m === carryOnNow} onCarryOn=${sendCarryOn} />`)
 
   // The `fields` part of the decisions log (ADR-0064): what each drafted Field was drafted from, including every read the AI made (#292).
   const inputsLog = () => {
@@ -1642,15 +1789,25 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     if (!used || !hasTokens(used)) return null
     return html`<span class="rp-tokens" data-testid="run-plan-tokens" title=${tokenBreakdown(used)} tabindex="0">${formatTokens(totalTokens(used))}</span>`
   }
+  // #348: three figures. This session and Earlier sessions add up every call's input and output, so they grow with each call (each call
+  // resends the conversation); Context is how full the conversation is now, the input of the last call, which is what the model's limit
+  // counts. Earlier sessions shows only when there are some, Context only once the AI has been called.
   const tokensRail = () => {
-    if (!hasTokens(sessionTokens) && !hasTokens(thisStageTokens)) return null
+    const context = snap?.context ?? null
+    if (!hasTokens(figures.thisSession) && !hasTokens(figures.earlier) && !context) return null
     return html`<div class="rail-tokens" data-testid="interview-tokens">
       <h3 class="side">Tokens</h3>
       <dl>
         <dt>This session</dt>
-        <dd data-testid="interview-tokens-session" title=${tokenBreakdown(sessionTokens)} tabindex="0">${formatTokens(totalTokens(sessionTokens))}</dd>
-        <dt>This stage</dt>
-        <dd data-testid="interview-tokens-stage" title=${tokenBreakdown(thisStageTokens)} tabindex="0">${formatTokens(totalTokens(thisStageTokens))}</dd>
+        <dd data-testid="interview-tokens-session" title=${tokenBreakdown(figures.thisSession)} tabindex="0">${formatTokens(totalTokens(figures.thisSession))}</dd>
+        ${hasTokens(figures.earlier)
+          ? html`<dt>Earlier sessions</dt>
+              <dd data-testid="interview-tokens-earlier" title=${tokenBreakdown(figures.earlier)} tabindex="0">${formatTokens(totalTokens(figures.earlier))}</dd>`
+          : null}
+        ${context
+          ? html`<dt>Context</dt>
+              <dd data-testid="interview-tokens-context" title="How full the AI's conversation is now: the input of its last call, which is what counts against the model's limit. The token totals above add up every call, so they grow faster." tabindex="0">${formatContext(context)}</dd>`
+          : null}
       </dl>
       ${started && snap?.canCompact && phase !== 'paused'
         ? snap.compactPending
@@ -1766,9 +1923,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const pausedView = () => {
     if (phase !== 'paused') return null
     return html`<div class="qcard stage-end saved" data-testid="interview-paused" role="status">
-      <p class="qhead">Paused</p>
+      <p class="qhead">${saving?.notReady ? 'Saved and paused here' : 'Paused'}</p>
       <p>
         ${saving?.fields ? `${saving.fields} Field${saving.fields === 1 ? '' : 's'} and the decisions log are saved as one Save. ` : 'The decisions log is saved. '}The Modules stay <strong>draft</strong>.
+        ${saving?.notReady ? html`${stage?.title ?? instance.stage.title} is saved, not finished: it isn't ready, so nothing was advanced or sent for approval.` : null}
         Open the Interview page on this Instance again, in this browser or any other, and the AI recaps from the log and carries on. The earlier conversation is not kept.
       </p>
       ${returnedList(saving?.returned)}
@@ -2066,6 +2224,61 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     </div>`
   }
 
+  // #350: the Not ready yet card, in the stage-end card's place while the Stage isn't ready and nothing is open for the architect. What's
+  // outstanding is web/lib/interviewReadiness.js `outstandingItems`, the list the AI is told (#349); each Field's name takes the live draft
+  // preview to that Field, where it can be edited by hand. Ask the AI to finish these sends the list as the architect's message. Save and
+  // stop here is Pause's Save: one stage Save, the run paused on this Stage, nothing advanced or sent for approval (a remote Stage asks for
+  // none), so Advance to next stage and Request Sign-off still check the Gate in the editor. The status region says once that it is up.
+  // When every Field the Stage drafts is done and the Gate waits only on Fields outside it (`onlyOutsideTheStage`), the AI is told nothing
+  // (#349) and has nothing to finish: the card says so, and Save and stop here is its one button.
+  const showField = (key) => {
+    const el = [...document.querySelectorAll('[data-testid="interview-field"]')].find((node) => node.getAttribute('data-field-key') === key)
+    if (!el) return
+    el.scrollIntoView({ block: 'center' })
+    el.focus({ preventScroll: true })
+  }
+  const notReadyCard = () => {
+    const outstanding = outstandingItems(readiness, { name: fieldTitle })
+    const outside = onlyOutsideTheStage(readiness)
+    const busySaving = saving?.phase === 'saving' || Boolean(blockedReason) || handEditing !== null
+    return html`<div class="qcard stage-end not-ready" data-testid="interview-not-ready" role="group" aria-labelledby="interview-not-ready-head">
+      <div class="qchip">Stage</div>
+      <p class="qhead" id="interview-not-ready-head">Not ready yet</p>
+      <p>${stage?.title ?? instance.stage.title} isn't ready for its stage-end card. What's outstanding:</p>
+      <ul class="not-ready-list">
+        ${outstanding.map((item, i) =>
+          item.kind === 'field'
+            ? html`<li key=${item.key} data-testid="interview-not-ready-item" data-kind="field">
+                <button type="button" class="btn-link" data-testid="interview-not-ready-field" data-field-key=${item.key} onClick=${() => showField(item.key)}>${item.name}</button>: ${item.text}
+              </li>`
+            : html`<li key=${`gate-${i}`} data-testid="interview-not-ready-item" data-kind="gate">${item.text}</li>`
+        )}
+      </ul>
+      ${outside
+        ? html`<p data-testid="interview-not-ready-outside">
+            Every Field ${stage?.title ?? instance.stage.title} drafts is done. What the Gate check still needs lies outside them, so the AI can't finish it here: it is
+            filled in where its Module is edited.
+          </p>`
+        : null}
+      ${saving?.phase === 'error' && saving.notReady ? html`<p class="inline-error" role="alert" data-testid="interview-save-error">${saving.message}</p>` : null}
+      <p class="kick-note" data-testid="interview-not-ready-stop-note">
+        <strong>Save and stop here</strong> makes one Save of the drafts and the decisions log and pauses the run on this Stage: it is saved, not finished. Nothing is advanced
+        or sent for approval, and the Modules stay <strong>draft</strong>.
+      </p>
+      <div class="round-actions">
+        ${outside
+          ? null
+          : html`<button type="button" class="btn primary" data-testid="interview-not-ready-ask" disabled=${busySaving} onClick=${() => sessionRef.current?.send(finishTheseMessage(outstanding))}>
+              Ask the AI to finish these
+              <span class="rec">RECOMMENDED</span>
+            </button>`}
+        <button type="button" class=${`btn ${outside ? 'primary' : 'ghost'}`} data-testid="interview-not-ready-save" disabled=${busySaving} onClick=${saveNotReady}>
+          ${saving?.phase === 'saving' && saving.notReady ? 'Saving…' : 'Save and stop here'}
+        </button>
+      </div>
+    </div>`
+  }
+
   const stageEnd = () => {
     if (review) return reviewEnd()
     if (update) return updateEnd()
@@ -2123,6 +2336,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         <p class="qhead">Saved. Moving on to ${followingStage?.title ?? 'the next Stage'}…</p>
       </div>`
     }
+    if (notReadyNow) return notReadyCard()
     // Only when the Gate check passes for the Artefact aimed for and every Field in scope is done; and, after "Finish with your recommendations", once the last round has been answered.
     if (!stageEndReady) return null
     const more = target !== instance.stage.id && Boolean(followingStage)
@@ -2179,7 +2393,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             const drafting = (snap?.draftingFields ?? []).includes(fieldKey)
             const open = handEditing?.key === fieldKey && Boolean(draft)
             const editable = Boolean(draft) && !drafting && !open && !blockedReason
-            return html`<div key=${fieldKey} class="field-proto" data-testid="interview-field" data-field-key=${fieldKey} data-state=${draft ? 'draft' : isBlankValue(savedValue) ? 'empty' : 'saved'} data-drafting=${drafting ? 'true' : 'false'} data-hand-edited=${draft?.handEdited ? 'true' : 'false'}>
+            // tabindex -1: the Not ready yet card's link to a Field moves the focus here (#350).
+            return html`<div key=${fieldKey} class="field-proto" tabindex="-1" data-testid="interview-field" data-field-key=${fieldKey} data-state=${draft ? 'draft' : isBlankValue(savedValue) ? 'empty' : 'saved'} data-drafting=${drafting ? 'true' : 'false'} data-hand-edited=${draft?.handEdited ? 'true' : 'false'}>
               <span class="field-label">${field.title ?? field.id}
                 ${draft && !draft.handEdited ? html`<span class="ai-mark" data-testid="interview-ai-mark">AI draft · unsaved</span>` : null}
                 ${draft?.handEdited ? html`<span class="ai-mark hand-mark" data-testid="interview-hand-mark">Your edit · unsaved</span>` : null}
@@ -2280,8 +2495,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             : null}
           ${started ? html`<span class="mode-chip" data-testid="interview-mode" data-mode=${snap?.cardMode} title="How the AI asks its questions: a native tool call, then text, then plain chat.">Cards: ${MODE_LABELS[snap?.cardMode] ?? 'native'}</span>` : null}
           ${switchMessage ? html`<span class="inline-error" role="alert" data-testid="interview-switch-error">${switchMessage}</span>` : null}
+          ${citeMessage ? html`<span class="inline-error" role="alert" data-testid="interview-cite-error">${citeMessage}</span>` : null}
         </div>
-        <div class="interview-thread" data-testid="interview-thread" ref=${threadRef}>
+        <div class="interview-thread" data-testid="interview-thread" ref=${threadRef} onScroll=${onThreadScroll} role="region" aria-label="Interview" tabindex="-1">
           <div class="inner">
             ${setup.status === 'loading' ? html`<p class="loading">Loading…</p>` : null}
             ${setup.status === 'error' ? html`<p class="inline-error" role="alert">${setup.message}</p>` : null}
@@ -2325,7 +2541,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                     ? html`<p class="msg sys" data-testid="interview-status" data-activity=${status.kind}>
                         <span data-testid="interview-status-text">${status.text}</span>${status.detail ? html` <span class="status-detail" data-testid="interview-status-detail" aria-hidden="true">${status.detail}</span>` : null}<span class="caret"></span>
                       </p>`
-                    : null}
+                    : carryOnNow
+                      ? html`<span class="visually-hidden" data-testid="interview-carry-on-announce">${carryOnNow.text} Choose Carry on to let it continue.</span>`
+                      : notReadyNow
+                        ? html`<span class="visually-hidden" data-testid="interview-not-ready-announce">${stage?.title ?? instance.stage.title} isn't ready yet. The Not ready yet card says what's outstanding.</span>`
+                        : null}
                 </div>`
               : null}
             ${reopening.message && !update ? html`<p class="inline-error" role="alert" data-testid="interview-reopen-error">${reopening.message}</p>` : null}
@@ -2346,6 +2566,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             : null}
           <div class="inner chatbox">
             <textarea
+              ref=${chatRef}
               data-testid="interview-chat"
               aria-label="Tell the AI anything"
               placeholder=${started ? 'Tell the AI anything — "the budget is capped at $1.2M", "leave out Finance"…' : 'Start the interview to chat with the AI.'}

@@ -61,13 +61,18 @@
 //     is ever written to the Pull Request. The AI may also **offer to re-open** a signed-off Stage with a card of `kind: "reopen"`: Gantry makes
 //     that card only when it would allow the re-open right then (`context.reopen`), and otherwise logs an open question naming the blocker.
 //
+//   * (#349) tells the AI what keeps the Stage from its stage-end card (`readinessNote`): when a turn would end with the Stage not ready and
+//     nothing open for the architect, Gantry sends the page's own readiness verdict (`context.readiness`, web/lib/interviewReadiness.js) as a
+//     note, and the AI carries on in the same turn, once a turn.
+//
 // Nothing here saves. Drafts are an unsaved preview until the architect confirms the stage-end card.
-import { runTurn, runWithRecovery, ensureTested, isTooLong, EMPTY_USAGE } from './aiClient.js'
+import { runTurn, runWithRecovery, ensureTested, isTooLong, EMPTY_USAGE, CUT_OFF_CALL_RESULT, CUT_OFF_NOTE } from './aiClient.js'
 import { ASK_TOOL_NAME, FALLBACK_FENCE } from './aiCards.js'
 import { AiProviderError, getAiProvider } from './aiProviders.js'
 import { artefactChoices, buildInterviewBrief, estimateTokens, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
 import { DRAFT_TOOL, DRAFT_TOOL_NAME, DRAFT_FENCE, DRAFT_TEXT_FALLBACK_INSTRUCTIONS, checkDraft, extractDraftBlocks, isBlankValue, normaliseDraftValue, citedSourceIds, stripDraftBlocks } from './interviewDraft.js'
 import { countWords } from './targetSize.js'
+import { onlyOutsideTheStage, outstandingItems, outstandingLine } from './interviewReadiness.js'
 import {
   READ_TOOL,
   READ_TOOL_NAME,
@@ -114,6 +119,53 @@ export const MAX_ROUNDS = 24
 
 // What the architect sees of the AI's text: neither the draft blocks nor the read requests a text-only model writes.
 const shownText = (text) => stripLogBlocks(stripReadBlocks(stripDraftBlocks(text)))
+
+/** #344: the thread's line when the AI's reply is cut off at the output limit twice in a row, said once a turn. */
+export function cutOffAgainLine(providerName) {
+  return `The AI's reply was cut off at the output limit again. To give it more room, raise Max tokens for ${providerName || 'this AI Provider'} under AI Providers on Global Settings.`
+}
+
+/** #345: what Carry on sends, as the architect's own message, after a turn that ended with nothing to show. */
+export const CARRY_ON_MESSAGE = 'go on'
+
+/** #345: the thread's line when a turn ends with nothing new to show: no text, no question card and no draft. */
+export const STOPPED_LINE = 'The AI stopped without replying.'
+
+/** #345: the thread's line when a turn ends because the AI used up its rounds of tool calls (`MAX_ROUNDS`) while still calling tools. */
+export function roundsUsedUpLine(rounds = MAX_ROUNDS) {
+  return `The AI used up its ${rounds} rounds of tool calls for this turn and stopped.`
+}
+
+/**
+ * #349: Gantry's note to the AI when its turn would end with the Stage not ready and nothing open for the architect: what keeps the Stage
+ * from its stage-end card, from the page's own readiness (web/lib/interviewReadiness.js `stageReadiness`): the Gate check's outstanding items
+ * for the Artefact aimed for, then each Field in scope that isn't done with Gantry's reasons. `fieldTitle(key)` names a Field
+ * ("Module · Field"); `chat` says the architect is asked in plain chat rather than on cards. #350: the list is `outstandingItems`, the one
+ * the architect's Not ready yet card shows, with each Field's key after its name so the AI can draft it. `finished`: the architect chose Finish
+ * with your recommendations and has had its last round, so cards are no longer shown.
+ */
+export function readinessNote(readiness, { fieldTitle = (key) => key, chat = false, finished = false } = {}) {
+  const named = (key) => `${fieldTitle(key)} (${key})`
+  return [
+    "Gantry's check: the Stage is not ready yet, so the architect has no stage-end card. What stands in the way:",
+    ...outstandingItems(readiness, { name: named }).map((item) => `- ${outstandingLine(item)}`),
+    `Redraft now what you can from the Source documents and the answers you have. ${
+      finished
+        ? 'The architect chose Finish with your recommendations, so question cards are no longer shown: ask them, in short plain chat,'
+        : `Ask the architect${chat ? ', in short plain chat,' : ', with question cards,'}`
+    } only for what you cannot settle yourself. ` +
+      'If nothing here is yours to settle, say in a sentence what stands in the way. Gantry sends this note once a turn.',
+  ].join('\n')
+}
+
+/**
+ * #349: whether a reply asks the architect something in plain chat: its last paragraph holds a question. Where questions are asked in
+ * chat (plain-chat mode, or after Finish with your recommendations), that is what a round of cards is elsewhere: something open for them.
+ */
+export function asksInChat(text) {
+  const paragraphs = String(text ?? '').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
+  return /\?/.test(paragraphs.at(-1) ?? '')
+}
 
 /** After this many turns in a row whose question cards were unusable, the rest of the session is asked in plain chat. */
 export const CARD_FAILURES_BEFORE_CHAT = 2
@@ -185,6 +237,8 @@ export function statusLine(snap, now = Date.now()) {
     return line('drafting', titles.length ? `Drafting ${listOf(titles)}…` : 'Drafting…')
   }
   if (snap.preparing) return line('preparing', 'Preparing questions…')
+  // #344: the reply before reached the output limit, and the request now under way asks for a shorter one.
+  if (snap.waiting?.cutOff) return line('cut-off', 'Reply cut off at the output limit. Asking for a shorter one…', seconds(snap.waiting.since), true)
   if (snap.waiting?.without) {
     const plural = / and /.test(snap.waiting.without) ? 'settings' : 'setting'
     return line('retrying', `Trying again without the ${snap.waiting.without} ${plural}…`, seconds(snap.waiting.since), true)
@@ -229,9 +283,11 @@ function sessionNote({ cardMode, textDrafts, reader, repositories = false, handE
     'A Field that already holds saved content is not changed by a draft: Gantry shows the architect a keep / use your version / merge card, and tells you the answer. Do not call draft_field for it again until they have answered; if they chose merge, call it once with the merged version.',
     textDrafts
       ? `${LOG_TEXT_FALLBACK_INSTRUCTIONS}`
-      : `When the architect tells you something in chat that you use in a Field, call the \`${LOG_TOOL_NAME}\` tool (kind "fact") with a quote copied exactly from their message and the Fields it feeds; for a question that stays open (including a select Field where none of the options fits) call it with kind "open-question". Answers to cards are logged by Gantry itself. Never log thanks or "go on".`,
+      : `When the architect tells you something in chat that you use in a Field, call the \`${LOG_TOOL_NAME}\` tool (kind "fact") with a quote copied exactly from their message and the Fields it feeds; for a question that stays open (including a select Field where none of the options fits) call it with kind "open-question", which records it and does not hold the Field back. Answers to cards are logged by Gantry itself. Never log thanks or "go on".`,
     'In draft_field, name what each Field is drafted from in `inputs` (Source document ids with a page range, or a Field of an earlier Stage as module.field): Gantry checks they exist and records them in the decisions log.',
-    'Gantry works out for itself whether a Field is done: it has content, sits between about 60% of its word budget and its budget, covers each point of its guidance (list any it does not in `uncovered`), and no open question feeds it. The Stage is ready only when the Gate check passes and every such Field is done.'
+    'Gantry works out for itself whether a Field is done: it has content, sits between about 60% of its word budget and its budget, covers each point of its guidance (list any it does not in `uncovered`), and no question card feeding it is still unanswered or held back. Logging an open question records it in the decisions log; it does not hold a Field back. The Stage is ready only when the Gate check passes and every such Field is done.',
+    // #349: the AI can't see the page, so it is told how it learns what stands in the way, rather than guessing.
+    "You can't see the stage-end card. When your turn would end with the Stage not ready and no card open, Gantry tells you what stands in the way, once a turn: fix what you can, and ask the architect only for the rest."
   )
   if (reader) {
     lines.push(
@@ -504,6 +560,9 @@ export function createInterviewSession(config = {}) {
     compactOffer: null, // #329: { before, after, window }: the card offering to compact, shown at the end of a turn past about 60% of the window
     compactPending: false, // #329: Compact now was asked for while a round was open or the AI was busy: it is done before the next request
     compacting: false, // #329: the AI is writing its summary and the conversation is being started afresh
+    // #345: the id of the line the latest turn left because it ended with nothing to show (the line Carry on answers), or null. Each turn
+    // clears it as it starts, so an earlier turn's line stays in the thread as a record but is never offered again.
+    carryOnAt: null,
     // #338: { source, title, receivedBytes } while a repository tool call waits for the Gantry server to download its copy of that
     // repository ("Preparing <title>… N MB" in the thread); null otherwise.
     preparingRepository: null,
@@ -523,6 +582,9 @@ export function createInterviewSession(config = {}) {
   let clashWaiter = null // { resolve, conflicts, entryIds }: the Save waiting on the clash cards
   let messages = []
   let lastInput = 0 // #329: the input tokens the AI Provider reported for the last call, which the card measures against the context window
+  // #348: how full the conversation is now, for the Tokens block's Context: the last call's input, or, once Compact now has started the
+  // conversation afresh, the size of the compacted one (the figure the thread line gives) until the next call reports. 0 before any call.
+  let contextTokens = 0
   let askAgainAt = 0 // #329: after "Not now", the card waits until the reported input reaches this
   let lastSystem = '' // #329: the system text of the last request, for the card's estimate of the size after compacting
   let nextId = 1
@@ -539,7 +601,10 @@ export function createInterviewSession(config = {}) {
   let textDraftFields = [] // the Fields named in the draft blocks a text-only model has written so far this turn
   const otherTexts = [] // what the architect typed as "Other" on cards: their own words, so plain fact
   let pendingAsk = null // { callIds }: the native ask_architect call the open round answers
+  let lastRoundAnswered = false // #349: the next turn is the AI's redraft from the answers to Finish with your recommendations' last round
   let cardFailures = 0
+  let cutOffs = 0 // #344: the replies in a row the output limit cut off, this turn
+  let cutOffSaid = false // #344: the thread has named Max tokens this turn
   let controller = null
   let readsSinceDraft = [] // the reads made since the last drafts landed (#292)
   const repositoryBlocks = new Set() // #319: the repositories (and why) the architect has been told this session they can't be read
@@ -578,8 +643,12 @@ export function createInterviewSession(config = {}) {
     update: state.update ? { ...state.update, reopen: [...state.update.reopen], deferred: state.update.deferred.map((d) => ({ ...d })), elsewhere: state.update.elsewhere.map((d) => ({ ...d })) } : null,
     openFields: openFields(),
     decisions: { ...logSummary(log.entries()), pending: log.pending().length, session: log.sessionId },
-    // #294: this session's tokens on this Stage, as the status block of the log will record them (all the AI Providers it used).
+    // #294: this session's tokens on this Stage, as the status block of the log will record them (all the AI Providers it used). Since
+    // #348 that is since the session began or was last started over; `endedSessions` is the sessions a start over ended, with theirs.
     tokens: tokensOfModels(log.usage()),
+    endedSessions: log.endedSessions().map((e) => ({ session: e.session, tokens: tokensOfModels(e.models) })),
+    // #348: how full the AI's conversation is, against the model's context window (null where the AI Provider doesn't know it).
+    context: contextTokens ? { tokens: contextTokens, window: getAiProvider(state.providerId)?.contextWindow || null } : null,
     compactOffer: state.compactOffer ? { ...state.compactOffer } : null,
     canCompact: canCompact(),
   })
@@ -890,6 +959,7 @@ export function createInterviewSession(config = {}) {
     let result
     const repositoryTool = REPOSITORY_TOOL_NAMES.includes(call.name)
     if (call.name !== DRAFT_TOOL_NAME && call.name !== READ_TOOL_NAME && call.name !== LOG_TOOL_NAME && !repositoryTool) result = { ok: false, content: `There is no tool called ${call.name}.` }
+    else if (call.cutOff) result = { ok: false, content: CUT_OFF_CALL_RESULT } // #344: the output limit cut it short, so it is not run
     else if (call.invalid || call.input === null || call.input === undefined) {
       result = { ok: false, content: `The arguments were not valid JSON: ${call.invalid ?? (call.name === READ_TOOL_NAME ? 'send {"id": "document-id", "range": "pages 3-5"}' : repositoryTool ? 'send {"id": "repository-id", "path": "src/file.ts"}' : 'send {"field": "module.field", "value": ...}')}.` }
     } else if (repositoryTool) result = runRepository(call.name, call.input) // #319: a promise, settled before the result goes back to the AI
@@ -1429,8 +1499,9 @@ export function createInterviewSession(config = {}) {
       return
     }
     if (event.type === 'retry') {
-      // An invalid card went back to the model: a new request, waiting again.
-      state.waiting = { since: clock(), without: null }
+      // An invalid card went back to the model: a new request, waiting again. #344: a card the output limit cut off says so on the line.
+      if (event.cutOff) cutOffAgain()
+      state.waiting = { since: clock(), without: null, ...(event.cutOff ? { cutOff: true } : {}) }
       state.writing = false
       emit()
       return
@@ -1475,7 +1546,10 @@ export function createInterviewSession(config = {}) {
         emit()
       }
     } else if (event.type === 'tool-call') {
-      resultFor(event.call)
+      // #344: a call whose arguments are not whole JSON, or that has none, is answered once the turn is over, when the stop reason says
+      // whether the output limit cut it off; answering it now would tell the AI only that the JSON was invalid, or that no Field was named.
+      const input = event.call.input
+      if (input !== null && input !== undefined && !(typeof input === 'object' && !Object.keys(input).length)) resultFor(event.call)
       draftingByCall.delete(event.call.id)
       state.drafting = draftingByCall.size > 0
       setDraftingFields()
@@ -1612,6 +1686,7 @@ export function createInterviewSession(config = {}) {
       messages = compactConversation(messages, { summary, drafts: draftList() })
       const after = conversationTokens(system, messages)
       lastInput = 0
+      contextTokens = after
       askAgainAt = 0
       state.compactPending = false
       const without = failure ? `. The AI couldn't write its summary (${failure.replace(/\.$/, '')}), so it carries on from the drafts, the decisions log and your own messages` : ''
@@ -1651,8 +1726,57 @@ export function createInterviewSession(config = {}) {
     state.compactOffer = { before: lastInput, after: Math.min(after, lastInput), window }
   }
 
+  // #344: one more reply in a row the output limit cut off. The second says in the thread, once a turn, that Max tokens is the fix.
+  function cutOffAgain() {
+    if (++cutOffs < 2 || cutOffSaid) return
+    cutOffSaid = true
+    say('sys', cutOffAgainLine(getAiProvider(state.providerId)?.name), { cutOff: true })
+  }
+
+  /**
+   * #349: at the end of a turn, Gantry's note on what keeps the Stage from its stage-end card, or null when there is nothing to tell. The
+   * verdict is the page's own (`context.readiness`, the rule the live preview shows), never worked out a second way here. No note goes:
+   *   * when the Stage is ready, or the page gives no readiness;
+   *   * while anything is open for the architect: a round of cards, cards held back, a keep / use the AI's version / merge card about to be
+   *     shown, review comments waiting to join, a clash;
+   *   * in Finish with your recommendations' last round: the turn the AI asks it (`accepting`), and its redraft once the architect has
+   *     answered it (`lastRound`), since the AI has been told to ask nothing more. A later turn the architect starts gets the note, told
+   *     that cards are no longer shown, so "so now what?" is answered with the real blockers;
+   *   * when the AI's reply asks the architect something in plain chat (`askedInChat`), where questions go in chat: that is open for them;
+   *   * on a session that only brings Fields up to date or works through review comments, which has no stage-end card;
+   *   * when every Field in scope is done and the Gate waits only on Fields this Stage can't draft;
+   *   * when nothing is drafted this session (there is nothing for a stage-end card to Save), or the turn has nothing to show: an empty
+   *     reply is #345's, with Carry on.
+   * `firstId` is the first thread item of this turn.
+   */
+  function readinessCheck(firstId, { lastRound = false, askedInChat = false } = {}) {
+    const context = getContext()
+    if (typeof context?.readiness !== 'function') return null
+    if (state.finish === 'accepting' || state.finish === 'final' || lastRound || askedInChat) return null
+    if (state.update?.mode === 'only' || state.review?.mode === 'only') return null
+    if (state.round || state.clash || state.held.length || queuedReview.length || [...pendingChanges.values()].some((c) => !c.shown)) return null
+    // A draft the AI was asked to fix and has not sent again reaches the preview once the turn ends, so it is judged as it will stand.
+    const drafts = { ...state.drafts }
+    for (const [key, draft] of held) drafts[key] = draft
+    if (Object.keys(drafts).length === 0) return null
+    if (!state.thread.some((t) => t.id >= firstId && (t.who === 'ai' || t.drafted))) return null
+    const verdict = context.readiness({ drafts, openFields: openFields() })
+    if (!verdict || verdict.ready) return null
+    // Every Field this Stage can draft is done, and what the Gate still needs lies outside it (a Module held until an earlier Stage merges,
+    // #296, which the Waiting card explains, or one this Stage mounts read-only, #152): nothing the AI could fix.
+    if (onlyOutsideTheStage(verdict)) return null
+    return readinessNote(verdict, { fieldTitle, chat: state.cardMode === 'chat', finished: state.finish === 'done' })
+  }
+
   async function runLoop() {
     state.phase = 'working'
+    const firstId = nextId // #345: the thread items from here on are this turn's
+    const lastRound = lastRoundAnswered // #349: this turn is the redraft from the last round's answers
+    lastRoundAnswered = false
+    state.carryOnAt = null
+    let ended = false // #345: the turn ended of itself, not because its rounds ran out
+    cutOffs = 0
+    cutOffSaid = false
     state.error = null
     state.preparing = false
     state.compactOffer = null
@@ -1664,13 +1788,15 @@ export function createInterviewSession(config = {}) {
     emit()
     let incoming = []
     let textRetried = false
+    let readinessSaid = false // #349: the AI has been told this turn what keeps the Stage from its stage-end card
     try {
       // #329: Compact now, asked for while a round was open or the AI was busy, is done here, before the next request goes.
       if (state.compactPending && canCompact()) await compact()
       for (let round = 0; round < MAX_ROUNDS; round++) {
         live = null
-        textDraftFields = []
-        setDraftingFields()
+        // #344: nothing is being drafted as a request goes, so a draft the parser dropped (a cut-off block that never closed) can't hold the
+        // line at Drafting over the cut-off line.
+        stopDrafting()
         messages = shortenOldReads(messages)
         const result = await compactingIfTooLong(() =>
           runWithRecovery(async () => {
@@ -1690,9 +1816,17 @@ export function createInterviewSession(config = {}) {
           }, handlers)
         )
         state.waiting = null // a reply that sent nothing at all has still ended
+        if (result.cutOff) cutOffAgain()
+        else cutOffs = 0
+        // #344: after a reply the output limit cut off, the next request asks for a shorter one, and the line says so until it answers.
+        const askShorter = () => {
+          carried = { since: clock(), without: null, cutOff: true }
+          state.waiting = carried
+        }
         const provider = getAiProvider(state.providerId)
         countUsage(provider, result.usage)
         lastInput = result.usage.inputTokens
+        contextTokens = lastInput
         const textDrafts = provider ? capabilities(provider).textDrafts : false
         // The attachments go on the first message of each request and are not kept in the history, so a switch of AI Provider can decide them afresh.
         const base = (result.messages ?? messages).map((m, i) => (i === 0 ? messages[0] : m))
@@ -1724,6 +1858,7 @@ export function createInterviewSession(config = {}) {
           }
           pendingAsk = callIds.length ? { callIds } : null
           incoming = result.cards
+          ended = true
           break
         }
 
@@ -1733,6 +1868,11 @@ export function createInterviewSession(config = {}) {
           for (const call of result.otherToolCalls) messages.push(toolMessage(call, await resultFor(call)))
           // Once a round of drafts has landed, the reads before it are spent: they are inputs of those drafts, not of later ones.
           if (result.otherToolCalls.some((c) => c.name === DRAFT_TOOL_NAME)) readsSinceDraft = []
+          if (result.cutOff) {
+            // #344: a cut-off call's result says so; a reply the limit cut off between calls has nothing that does, so a note goes with them.
+            if (!result.otherToolCalls.some((c) => c.cutOff)) messages.push({ role: 'user', fromGantry: true, text: CUT_OFF_NOTE })
+            askShorter()
+          }
           stopDrafting()
           emit()
           continue
@@ -1755,10 +1895,8 @@ export function createInterviewSession(config = {}) {
           const logOutcomes = logged.requests.map((request) => runLog(request))
           if (drafts.length) readsSinceDraft = []
           notes.push(...errors, ...requested.errors, ...logged.errors, ...outcomes.filter((o) => !o.ok).map((o) => o.content), ...logOutcomes.filter((o) => !o.ok).map((o) => o.content))
-          if (round < MAX_ROUNDS - 1 && (answers.length || (notes.length && outcomes.some((o) => !o.ok) && held.size))) {
-            retry = true
-            readsReply = answers.length ? joinParts([{ text: "Gantry's reply to your read requests:" }, ...answers.map((a) => ({ text: a.content, ...readsOf(a) }))], '\n\n') : null
-          }
+          readsReply = answers.length ? joinParts([{ text: "Gantry's reply to your read requests:" }, ...answers.map((a) => ({ text: a.content, ...readsOf(a) }))], '\n\n') : null
+          if (round < MAX_ROUNDS - 1 && (answers.length || (notes.length && outcomes.some((o) => !o.ok) && held.size))) retry = true
         }
         // Question cards the model wrote that were unusable: a text-fallback model is told once; a model that keeps failing is asked in plain chat.
         if (result.invalidCards?.length && state.cardMode !== 'chat') {
@@ -1771,12 +1909,32 @@ export function createInterviewSession(config = {}) {
             say('sys', 'This model could not produce valid question cards, so Gantry will ask in plain chat from here on. That works, but is less reliable.')
           }
         }
-        if (retry) {
-          const check = notes.length ? `Gantry's check of your drafts:\n- ${notes.join('\n- ')}` : ''
-          messages.push({ role: 'user', fromGantry: true, ...joinParts([readsReply, check ? { text: check } : null].filter(Boolean), '\n\n') })
+        // #344: a reply the output limit cut off is answered, so the AI sends a shorter one rather than stopping part-way.
+        const cutOff = result.cutOff && round < MAX_ROUNDS - 1
+        const check = notes.length ? `Gantry's check of your drafts:\n- ${notes.join('\n- ')}` : ''
+        if (retry || cutOff) {
+          messages.push({ role: 'user', fromGantry: true, ...joinParts([cutOff ? { text: CUT_OFF_NOTE } : null, readsReply, check ? { text: check } : null].filter(Boolean), '\n\n') })
+          if (cutOff) askShorter()
           emit()
           continue
         }
+        // #345: reads asked for in the last round, as a native model's read calls would be: the rounds ran out, the turn did not end of
+        // itself. Gantry's answers are kept in the history, so "go on" picks up with them, and the thread says the rounds were used up.
+        if (readsReply) {
+          messages.push({ role: 'user', fromGantry: true, ...joinParts([readsReply, check ? { text: check } : null].filter(Boolean), '\n\n') })
+          break
+        }
+        // #349: the turn would end here. If the Stage is not ready and nothing is open for the architect, the AI is told what stands in the
+        // way and carries on, once a turn, so a Stage only the architect can make ready never loops.
+        const askedInChat = (state.cardMode === 'chat' || state.finish === 'done') && asksInChat(shown)
+        const verdict = !readinessSaid && round < MAX_ROUNDS - 1 ? readinessCheck(firstId, { lastRound, askedInChat }) : null
+        if (verdict) {
+          readinessSaid = true
+          messages.push({ role: 'user', fromGantry: true, text: verdict })
+          emit()
+          continue
+        }
+        ended = true
         break
       }
       promoteHeld()
@@ -1784,6 +1942,10 @@ export function createInterviewSession(config = {}) {
       if (state.finish === 'accepting') state.finish = 'done'
       // #329: Compact now, asked for while the AI was busy, is done as soon as the turn ends with no round of cards open.
       if (state.compactPending && !state.round && !state.clash) await compact()
+      // #345: a turn that ends with nothing new to show says why, with Carry on, rather than just stopping: the AI used up its rounds while
+      // still calling tools, or its last reply was empty. Reads are not something to show (they were what the turn was spent on).
+      if (!ended) state.carryOnAt = say('sys', roundsUsedUpLine(), { carryOn: 'rounds' }).id
+      else if (!state.round && !state.clash && !state.thread.some((t) => t.id >= firstId && (t.who === 'ai' || t.drafted))) state.carryOnAt = say('sys', STOPPED_LINE, { carryOn: 'empty' }).id
       state.phase = state.round ? 'asking' : 'waiting'
       offerCompaction()
     } catch (err) {
@@ -1926,7 +2088,10 @@ ${reviewAnswers.text}`
       state.finish = 'accepting'
       state.held = []
     }
-    if (last) state.finish = 'done'
+    if (last) {
+      state.finish = 'done'
+      lastRoundAnswered = true
+    }
     const heldIds = state.held.map((h) => h.id)
     const body = [
       `The architect answered ${cards.length === 1 ? 'the card' : `all ${cards.length} cards`} of round ${round.id}:`,
@@ -1967,8 +2132,11 @@ ${reviewAnswers.text}` : '',
       // #290 (ADR-0068): another session on this Stage that is not Done gets a card naming when it last saved. Carry on alongside
       // starts anyway (the Field-by-Field Save check keeps both safe); Cancel leaves the kickoff as it was.
       const resume = getContext?.()?.resume ?? null
-      if (!alongside && resume?.others?.length) {
-        state.sessionWarning = { others: resume.others }
+      // #348: a session Start this stage over ended is this one's own past, whatever its committed line still says.
+      const own = new Set([log.sessionId, ...log.endedSessions().map((e) => e.session)])
+      const others = (resume?.others ?? []).filter((o) => !own.has(o.session))
+      if (!alongside && others.length) {
+        state.sessionWarning = { others }
         emit()
         return
       }
@@ -2370,9 +2538,13 @@ ${reviewAnswers.text}` : '',
      * True when the session is somewhere a copy can be taken: not mid-turn, under way, and holding something a Save has not taken: a draft
      * not yet saved, an answer not yet in the committed log, or a round of cards waiting. Straight after a Save there is nothing to keep, so
      * a reload shows the Interview page afresh (and, for a run paused by Save and stop, its Resume) rather than a copy of a finished Stage.
+     *
+     * #348: the kickoff a Start this stage over left is kept too, while its restart marker waits for a Save: the new session, the one it
+     * ended and the marker. Otherwise the copy from before the start over would stay, and a reload would bring the old session back.
      */
     get canKeepCopy() {
-      if (['kickoff', 'testing', 'working', 'paused'].includes(state.phase)) return false
+      if (state.phase === 'kickoff') return state.startedOver && log.pending().length > 0
+      if (['testing', 'working', 'paused'].includes(state.phase)) return false
       return Object.keys(state.drafts).length > 0 || log.pending().length > 0 || Boolean(state.round)
     },
 
@@ -2410,8 +2582,10 @@ ${reviewAnswers.text}` : '',
           opening: state.opening,
           compactOffer: state.compactOffer,
           compactPending: state.compactPending,
+          carryOnAt: state.carryOnAt,
+          startedOver: state.startedOver,
         },
-        compaction: { lastInput, askAgainAt },
+        compaction: { lastInput, askAgainAt, contextTokens },
         pendingChanges: [...pendingChanges],
         queuedReview,
         updateOpening,
@@ -2433,6 +2607,17 @@ ${reviewAnswers.text}` : '',
     importState(saved) {
       if (!saved || state.phase !== 'kickoff' || !saved.state) return false
       const s = saved.state
+      // #348: a copy taken at the kickoff a Start this stage over left. Only the log has anything in it (the new session, the one ended
+      // and the restart marker); the page stays at the kickoff, and its next start is a fresh interview.
+      if (s.phase === 'kickoff') {
+        if (!s.startedOver) return false
+        state.providerId = s.providerId ?? state.providerId
+        state.startedOver = true
+        nextId = saved.nextId ?? nextId
+        log.importState(saved.log)
+        emit()
+        return true
+      }
       Object.assign(state, {
         providerId: s.providerId ?? state.providerId,
         thread: s.thread ?? [],
@@ -2454,6 +2639,8 @@ ${reviewAnswers.text}` : '',
         opening: s.opening ?? '',
         compactOffer: s.compactOffer ?? null,
         compactPending: s.compactPending === true,
+        carryOnAt: s.carryOnAt ?? null,
+        startedOver: s.startedOver === true,
         compacting: false,
         kickoffError: null,
         drafting: null,
@@ -2465,6 +2652,7 @@ ${reviewAnswers.text}` : '',
       })
       messages = saved.messages ?? []
       lastInput = saved.compaction?.lastInput ?? 0
+      contextTokens = saved.compaction?.contextTokens ?? lastInput
       askAgainAt = saved.compaction?.askAgainAt ?? 0
       nextId = saved.nextId ?? nextId
       pendingChanges.clear()
@@ -2539,20 +2727,29 @@ ${reviewAnswers.text}` : '',
 
     /**
      * "Start this stage over": appends a restart marker (the AI ignores every earlier answer from then on) and puts the session
-     * back at the kickoff. Unsaved drafts are dropped; saved content is untouched.
+     * back at the kickoff. Unsaved drafts are dropped; saved content is untouched. The log begins a new session (#348): its tokens start
+     * at nothing, and what the ended one used is kept as an earlier session of the Stage.
      */
     startOver() {
       if (state.phase === 'working' || state.phase === 'testing') return { ok: false, message: 'Wait for the AI to finish its turn first.' }
       controller?.abort()
-      log.addRestart()
+      // #348: a new session begins in the log, so This session counts from nothing; the one ended keeps its line and its tokens, and
+      // says who ran it, its target, Artefact and instructions as they are now, before the next kickoff picks again.
+      const context = getContext?.() ?? {}
+      log.startOver({
+        opening: state.opening,
+        status: { who: context.actor, target: context.targetStageId ?? context.stageId, artefact: context.artefactId, instructions: context.instructionsVersion },
+      })
       state.resumed = null
       state.startedOver = true
       messages = []
       lastInput = 0
+      contextTokens = 0
       askAgainAt = 0
       state.compactOffer = null
       state.compactPending = false
       state.thread = []
+      state.carryOnAt = null
       state.drafts = {}
       state.fieldInputs = {}
       state.savedKeys = []

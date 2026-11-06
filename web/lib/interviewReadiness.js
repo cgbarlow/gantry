@@ -4,7 +4,7 @@
 //
 //   A Field is **done** when it has content; it is between about 60% of its word budget and the over-budget threshold (its
 //   budget); each point its guidance asks for is covered (the AI says which it has not covered, in `uncovered`); and no open
-//   question feeds it.
+//   question card feeds it (#349: a card still unanswered or held back; a question the AI logged as open does not hold a Field).
 //
 //   The Stage is **ready** when Gantry's real Gate check passes for the Artefact aimed for and every Field in scope is done.
 //
@@ -27,7 +27,7 @@ export const minWords = (budget) => Math.round(budget * MIN_BUDGET_SHARE)
 
 /**
  * Whether one Field is done. `value` is its content (draft over saved), `uncovered` the guidance points the AI said it has
- * not covered, `open` whether an open question feeds it. `handEdited` (#289): the architect wrote it themselves, so it is done when it has
+ * not covered, `open` whether an open question card feeds it. `handEdited` (#289): the architect wrote it themselves, so it is done when it has
  * content: its length and coverage are theirs to judge, and Gantry's per-Field check does not run on their text. Returns `{ done, reasons }`, each reason a short phrase.
  */
 export function fieldDone({ field, value, size, uncovered = [], open = false, handEdited = false }) {
@@ -71,3 +71,38 @@ export function stageReadiness({ definition, structure, stageId, artefactId, siz
   const allDone = entries.every((f) => f.done)
   return { gate, fields, allDone, ready: gate.pass && allDone, doneCount: entries.filter((f) => f.done).length, total: entries.length }
 }
+
+// A Gate check's outstanding item that is a Field, as `module.field`, rather than words of its own.
+const isFieldKey = (item) => /^[^\s.]+\.[^\s.]+$/.test(String(item))
+
+/**
+ * #350: what keeps the Stage from its stage-end card, in Gantry's words, from a `stageReadiness` verdict: the Gate check's outstanding
+ * items for the Artefact aimed for, then each Field in scope that isn't done with its reasons. It is the one list both the architect (the
+ * Not ready yet card, web/lib/interviewView.js) and the AI (the session's note, web/lib/interviewSession.js `readinessNote`, #349) are
+ * given, so the two never word it differently. `name(key)` names a Field, in the Gate's items as in the Fields'. Returns
+ * `[{ kind: 'gate', text } | { kind: 'field', key, name, text }]`, empty when the Stage is ready; `outstandingLine` writes one as a line.
+ */
+export function outstandingItems(readiness, { name = (key) => key } = {}) {
+  const items = []
+  const gate = readiness?.gate
+  if (gate && !gate.pass) {
+    const outstanding = (gate.outstanding ?? []).map((item) => (isFieldKey(item) ? name(item) : item))
+    if (!gate.artefact) items.push({ kind: 'gate', text: 'The Gate check: no Artefact is aimed for yet.' })
+    else items.push({ kind: 'gate', text: `The Gate check for ${gate.artefact.title ?? gate.artefact.id}: ${outstanding.length ? `outstanding ${outstanding.join(', ')}` : 'does not pass yet'}` })
+  }
+  for (const [key, field] of Object.entries(readiness?.fields ?? {})) if (!field.done) items.push({ kind: 'field', key, name: name(key), text: field.reasons.join('; ') })
+  return items
+}
+
+/**
+ * #350: whether what keeps the Stage lies only outside the Fields it drafts: every Field in scope is done and the Gate check for the
+ * Artefact aimed for waits on Fields this Stage can't draft (a Module it mounts read-only, #152, or one held until an earlier Stage merges,
+ * #296). Then there is nothing for the AI to finish: the session sends it no note (#349) and the Not ready yet card doesn't offer to ask it.
+ */
+export const onlyOutsideTheStage = (readiness) => Boolean(readiness && !readiness.ready && readiness.allDone && readiness.gate?.artefact)
+
+/** One item of `outstandingItems` as a line: a Field is "its name: its reasons". */
+export const outstandingLine = (item) => (item.kind === 'field' ? `${item.name}: ${item.text}` : item.text)
+
+/** #350: the architect's message that the Not ready yet card's Ask the AI to finish these sends: the card's own list. */
+export const finishTheseMessage = (items) => ['Please finish these, so the Stage is ready:', ...items.map((item) => `- ${outstandingLine(item)}`)].join('\n')
