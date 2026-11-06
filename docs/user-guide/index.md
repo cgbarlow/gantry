@@ -808,6 +808,16 @@ The AI opens with a short summary of what it found in the Source documents, then
 - **Where a fact comes from.** A figure from a Source document is cited as `[title, p. 4](source:id)`, shown as a small 📄 mark. A fact you told the AI in the chat is written as plain fact. Something the AI proposed that you accepted is marked **(target assumption)**. The AI is told never to invent a figure, a date or a name.
 - **Nothing the example shows is sent.** The example Instance a Definition may offer (the "Populate example text" source) is for people to fill a form from; it is never given to the AI.
 
+#### How the AI's replies look
+
+The AI's replies in the conversation are **formatted**, the way the editor's preview shows a Field: bold, lists, headings, tables and code show as they read, not as the symbols the AI typed. A wide table or block of code scrolls sideways inside the reply, so the conversation itself never does, even on a phone.
+
+- **A citation opens the document.** A Source document the AI cites, such as *Client brief, p. 4*, is a link: choose it to open the document, as you would from the editor's preview. A PDF, a picture or a text file opens in a new tab; a Word, PowerPoint or spreadsheet file is saved to your computer; a code repository's file opens on its Provider, as it was at the commit the AI read. A document that has been removed keeps the AI's words, marked *(removed)*, and isn't a link.
+- **Diagrams.** A Mermaid diagram in a reply is drawn once the reply has finished arriving.
+- **While a reply arrives** it is formatted as it goes. A table or block of code the AI hasn't finished yet can show as plain text for a moment, until the rest of it arrives.
+- **Your own messages, and Gantry's lines** (such as *The AI stopped without replying.*), are shown exactly as typed, without formatting.
+- **Nothing in a reply can run.** Scripts and unsafe links are removed, as they are everywhere Gantry shows formatted text, and every other link opens in a new tab.
+
 #### What the AI is doing right now
 
 While the AI is busy, one **status line** at the bottom of the conversation says what is happening, and it stays there until the AI hands the turn back to you. It is never hidden while anything is still going on, including when the AI has finished a sentence and is writing a long draft behind the scenes. It says, for example:

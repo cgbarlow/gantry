@@ -5333,6 +5333,10 @@ function OutOfDatePanel({ instance }) {
 // #286 (map #238): the Interview page for a local or server workspace Instance, handed what only this file can reach: the Instance's Source document store, the Definition it follows, the other Stages' saved content (the AI is told what is already settled) and the stage Save.
 function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequestApproval, onReRenderEarlier, onCheckApproval, onDraftAhead, update = false, review = false, revise = false, onReopenStage, onOpenStage, onReviseStage, onLeaveRevision, onUpdateStage }) {
   const store = useSourceStore(instance)
+  // #347: the thread draws the AI's replies as the editor's preview does, asset images included. A new resolver each time the Instance's
+  // assets are read, so the replies are drawn again with them.
+  const assetsRead = assetSources.value
+  const resolveAssets = useCallback((text) => resolvePreviewAssets(text), [assetsRead, instance])
   const location = useLocation()
   // #303: the kept Reviewed copies, read and placed on Fields, for the review round; read again after one is brought in.
   const reviewVersion = reviewTick.value
@@ -5448,6 +5452,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
     onReRenderEarlier=${onReRenderEarlier}
     onCheckApproval=${onCheckApproval}
     onDraftAhead=${onDraftAhead}
+    resolveAssets=${resolveAssets}
   />`
 }
 

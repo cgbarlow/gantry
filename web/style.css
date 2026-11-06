@@ -690,8 +690,10 @@ main[data-view-mode='split'] .field-markdown .split:focus-within .editor-host:no
 }
 /* WI #353: a ```mermaid fence rendered in place (web/lib/mermaid.js). The
  * figure is a plain block so the diagram sizes to the field's width; a
- * diagram that failed to parse keeps its <pre> and gains a muted note. */
-.field-markdown .md-rendered figure.mermaid-diagram {
+ * diagram that failed to parse keeps its <pre> and gains a muted note.
+ * #347: an AI reply in the interview's thread draws its diagrams the same way. */
+.field-markdown .md-rendered figure.mermaid-diagram,
+.interview-page .msg.md figure.mermaid-diagram {
   margin: 12px 0;
   overflow-x: auto;
   background: #fff;
@@ -699,12 +701,13 @@ main[data-view-mode='split'] .field-markdown .split:focus-within .editor-host:no
   border-radius: var(--radius);
   padding: 8px;
 }
-.field-markdown .md-rendered figure.mermaid-diagram svg { max-width: 100%; height: auto; }
-.field-markdown .md-rendered pre.mermaid-error { border-left: 3px solid var(--danger, #b00020); }
-.field-markdown .md-rendered .mermaid-error-note { color: var(--text-muted, #666); font-size: 12px; margin: -6px 0 12px; }
+.field-markdown .md-rendered figure.mermaid-diagram svg, .interview-page .msg.md figure.mermaid-diagram svg { max-width: 100%; height: auto; }
+.field-markdown .md-rendered pre.mermaid-error, .interview-page .msg.md pre.mermaid-error { border-left: 3px solid var(--danger, #b00020); }
+.field-markdown .md-rendered .mermaid-error-note, .interview-page .msg.md .mermaid-error-note { color: var(--text-muted, #666); font-size: 12px; margin: -6px 0 12px; }
 /* #195: a fence's caption under its drawing, italic and centred as in the Word
  * document. The figure is always white, so the text colour is fixed too. */
-.field-markdown .md-rendered figure.mermaid-diagram figcaption.diagram-caption {
+.field-markdown .md-rendered figure.mermaid-diagram figcaption.diagram-caption,
+.interview-page .msg.md figure.mermaid-diagram figcaption.diagram-caption {
   margin: 6px 0 0;
   font-style: italic;
   font-size: 13px;
@@ -2226,6 +2229,33 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 /* #345: a turn that ended with nothing to show, and the button that sends "go on". */
 .interview-page .msg.sys.carry-on { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text); }
 .interview-page .caret::after { content: '▍'; animation: interview-blink 1s steps(1) infinite; }
+/* #347: an AI reply drawn as Markdown (web/lib/markdownPreview.js), sized for a chat bubble. The bubble keeps to the thread's width at any
+ * size: a wide table or code block scrolls within itself. While the reply arrives the caret sits at the end of its last line. */
+.interview-page .msg.md { white-space: normal; }
+.interview-page .msg.md > :first-child { margin-top: 0; }
+.interview-page .msg.md > :last-child { margin-bottom: 0; }
+.interview-page .msg.md :is(p, ul, ol, blockquote, pre, table, figure) { margin: 0 0 8px; }
+.interview-page .msg.md :is(h1, h2, h3, h4, h5, h6) { font-family: var(--font-display); font-weight: 600; line-height: 1.3; margin: 12px 0 4px; }
+.interview-page .msg.md h1 { font-size: 16px; }
+.interview-page .msg.md h2 { font-size: 15px; }
+.interview-page .msg.md h3 { font-size: 14px; }
+.interview-page .msg.md :is(h4, h5, h6) { font-size: 13px; }
+.interview-page .msg.md :is(ul, ol) { padding-left: 20px; }
+.interview-page .msg.md li + li { margin-top: 2px; }
+.interview-page .msg.md li > :is(ul, ol) { margin: 2px 0 0; }
+.interview-page .msg.md blockquote { padding-left: 10px; border-left: 3px solid var(--line-strong); color: var(--text-muted); }
+.interview-page .msg.md code { font-family: var(--font-mono); font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: var(--radius); }
+.interview-page .msg.md pre { overflow-x: auto; max-width: 100%; padding: 8px 10px; background: var(--bg); border: var(--hairline) solid var(--line); border-radius: var(--radius); white-space: pre; overflow-wrap: normal; }
+.interview-page .msg.md pre code { padding: 0; background: none; font-size: 12px; }
+.interview-page .msg.md table { display: block; overflow-x: auto; max-width: 100%; border-collapse: collapse; font-size: 12px; }
+.interview-page .msg.md :is(th, td) { padding: 4px 8px; border: var(--hairline) solid var(--line); text-align: left; vertical-align: top; overflow-wrap: normal; }
+.interview-page .msg.md th { background: var(--bg); font-weight: 600; }
+.interview-page .msg.md hr { border: 0; border-top: var(--hairline) solid var(--line); margin: 10px 0; }
+.interview-page .msg.md img { max-width: 100%; height: auto; }
+.interview-page .msg.md a.source-citation { cursor: pointer; }
+.interview-page .msg.md.caret:not(:empty)::after { content: none; }
+.interview-page .msg.md.caret > :is(p, h1, h2, h3, h4, h5, h6, pre, blockquote):last-child::after,
+.interview-page .msg.md.caret > :is(ul, ol):last-child > li:last-child::after { content: '▍'; animation: interview-blink 1s steps(1) infinite; }
 .interview-page .status-detail { font-variant-numeric: tabular-nums; }
 @keyframes interview-blink { 50% { opacity: 0; } }
 .interview-page .kick { max-width: 460px; }

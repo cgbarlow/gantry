@@ -9,12 +9,13 @@
 // given is web/lib/interviewBrief.js. A drafted Field can be hand-edited in the preview (#289): click it, type, Done. Saving is the editor's own stage Save (the Save check of ADR-0068 and all), handed in as
 // `onSaveDrafts`, so a Save from here is the same Save, one commit, with the Modules left `draft`.
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { isMultiValuedField } from './fieldShape.js'
 import { aiProviders, defaultAiProvider, updateAiProvider } from './aiProviders.js'
 import { AiProviderDialog, AiRecoveryPrompt } from './aiProvidersView.js'
 import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
 import { repositoryReaderFor } from './sourceRepositoryClient.js'
+import { citationIndex, openCitation, renderMarkdownPreview } from './markdownPreview.js'
 import { createInterviewSession, statusLine, CARRY_ON_MESSAGE } from './interviewSession.js'
 import { stageReadiness } from './interviewReadiness.js'
 import { PAGE_SIZE, isAnswered, pageCards, pageCount } from './interviewRounds.js'
@@ -72,6 +73,34 @@ const loadSkills = () => (skillsPromise ??= loadInterviewSkillsInBrowser().catch
 }))
 
 const PROGRESS_LABELS = { key: 'Checking the key…', model: 'Checking the model…', cards: 'Checking question cards…', images: 'Checking whether it reads images…' }
+
+/**
+ * #347: an AI reply in the thread, drawn as Markdown by the module editor's preview (web/lib/markdownPreview.js): the same renderer and
+ * sanitising, asset images, and Source document citations that open the document. `preview` is `{ resolveAssets, sources }` for it. A reply
+ * is drawn again as each piece arrives, so half-finished Markdown (an unclosed fence or table) may show raw until it closes; its Mermaid
+ * diagrams are drawn once, when it is finished.
+ */
+export function AiReply({ m, preview }) {
+  const ref = useRef(null)
+  useLayoutEffect(() => {
+    renderMarkdownPreview(ref.current, m.text, { ...preview, mermaid: !m.streaming })
+  }, [m.text, m.streaming, preview])
+  return html`<div class=${`msg ai md${m.streaming ? ' streaming caret' : ''}`} data-testid="interview-msg" data-who="ai" ref=${ref}></div>`
+}
+
+/**
+ * One message of the thread. #347: only the AI's replies are Markdown; the architect's messages and Gantry's system lines are plain text, as
+ * typed. #345: `carryOn` marks the system line a quiet turn left while Carry on still answers it, and `onCarryOn` sends "go on".
+ */
+export function ThreadMessage({ m, preview, carryOn = false, onCarryOn }) {
+  if (carryOn) {
+    return html`<div class="msg sys carry-on" data-testid="interview-msg" data-who="sys" data-carry-on=${m.carryOn}>
+      ${m.text} <button type="button" class="btn small" data-testid="interview-carry-on" title=${`Send "${CARRY_ON_MESSAGE}" to the AI, so it picks up where it stopped.`} onClick=${onCarryOn}>Carry on</button>
+    </div>`
+  }
+  if (m.who === 'ai') return html`<${AiReply} m=${m} preview=${preview} />`
+  return html`<div class=${`msg ${m.who}${m.streaming ? ' streaming caret' : ''}`} data-testid="interview-msg" data-who=${m.who} data-carry-on=${m.carryOn}>${m.text}</div>`
+}
 
 function ValueView({ value }) {
   if (Array.isArray(value)) return html`<ul class="interview-value-list">${value.map((item, i) => html`<li key=${i}><${ValueView} value=${item} /></li>`)}</ul>`
@@ -293,9 +322,10 @@ function providerLabel(p) {
  *   onBringInReview    () => void  opens the dialog that brings review comments in
  *   onOpenReview       () => void  shows the Interview page as a focused review round
  *   onReviewAnswered   ({ [reviewId]: n }) => Promise  raises the manifest's answered counts once answers are saved
+ *   resolveAssets      (text) => text  rewrites asset references to images, as the editor's preview does, for the AI's replies in the thread (#347); none when left out
  */
 // #297: `outOfDate` is the Fields flagged Out of date (web/lib/outOfDate.js) and `newSince` the documents marked New since last interview; the run plan marks each Stage that has flagged Fields and the Source documents rail marks the new documents.
-export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, onDraftAhead, outOfDate = [], newSince = [], flagsReady = true, stageStarted, update = false, onReopenStage, onOpenStage, review = false, reviewCopies = null, onBringInReview, onOpenReview, onReviewAnswered, revise = false, loadPrComments = null, onReviseStage = null, onLeaveRevision = null, onUpdateStage = null }) {
+export function InterviewPage({ instance, store, actor = '', editorHref, blockedReason = '', loadStructure, loadOtherSaved, decisionsStore, onSaveDrafts, onAdvance, checkStatus = null, onRequestApproval, onReRenderEarlier = null, onCheckApproval, onDraftAhead, outOfDate = [], newSince = [], flagsReady = true, stageStarted, update = false, onReopenStage, onOpenStage, review = false, reviewCopies = null, onBringInReview, onOpenReview, onReviewAnswered, revise = false, loadPrComments = null, onReviseStage = null, onLeaveRevision = null, onUpdateStage = null, resolveAssets = null }) {
   const key = `${instance.slug}|${instance.stage.id}`
   // #298: Bring up to date has its own session and working copy, so it never takes over an interview that is part-way.
   // #299: a revision of a Stage the Owner sent back has its own session too.
@@ -434,6 +464,18 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     setSources(entries)
   }, [])
+
+  // #347: what the thread's AI replies are drawn with: this Instance's asset images (`resolveAssets`, the editor's) and its Source documents,
+  // so a citation opens the document from here as it does from the editor's preview. A document that can't be opened says so in the header.
+  const [citeMessage, setCiteMessage] = useState('')
+  const replyPreview = useMemo(() => {
+    const index = citationIndex(sources ?? [])
+    const open = (ref) => {
+      setCiteMessage('')
+      openCitation(storeRef.current, index, ref).catch((err) => setCiteMessage(err.message))
+    }
+    return { resolveAssets, sources: { index, open } }
+  }, [sources, resolveAssets])
 
   // #293: the run's target Stage ("Run until"). The current Stage when no other is picked, which is a run of one Stage.
   const stagesList = instance.stages ?? []
@@ -1623,14 +1665,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     return null
   })()
-  const thread = () =>
-    (snap?.thread ?? []).map((m) =>
-      m.id === carryOnAt
-        ? html`<div key=${m.id} class="msg sys carry-on" data-testid="interview-msg" data-who="sys" data-carry-on=${m.carryOn}>
-            ${m.text} <button type="button" class="btn small" data-testid="interview-carry-on" title=${`Send "${CARRY_ON_MESSAGE}" to the AI, so it picks up where it stopped.`} onClick=${() => sessionRef.current?.send(CARRY_ON_MESSAGE)}>Carry on</button>
-          </div>`
-        : html`<div key=${m.id} class=${`msg ${m.who}${m.streaming ? ' streaming caret' : ''}`} data-testid="interview-msg" data-who=${m.who} data-carry-on=${m.carryOn}>${m.text}</div>`
-    )
+  const sendCarryOn = () => sessionRef.current?.send(CARRY_ON_MESSAGE)
+  const thread = () => (snap?.thread ?? []).map((m) => html`<${ThreadMessage} key=${m.id} m=${m} preview=${replyPreview} carryOn=${m.id === carryOnAt} onCarryOn=${sendCarryOn} />`)
 
   // The `fields` part of the decisions log (ADR-0064): what each drafted Field was drafted from, including every read the AI made (#292).
   const inputsLog = () => {
@@ -2295,6 +2331,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             : null}
           ${started ? html`<span class="mode-chip" data-testid="interview-mode" data-mode=${snap?.cardMode} title="How the AI asks its questions: a native tool call, then text, then plain chat.">Cards: ${MODE_LABELS[snap?.cardMode] ?? 'native'}</span>` : null}
           ${switchMessage ? html`<span class="inline-error" role="alert" data-testid="interview-switch-error">${switchMessage}</span>` : null}
+          ${citeMessage ? html`<span class="inline-error" role="alert" data-testid="interview-cite-error">${citeMessage}</span>` : null}
         </div>
         <div class="interview-thread" data-testid="interview-thread" ref=${threadRef}>
           <div class="inner">

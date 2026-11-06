@@ -93,3 +93,60 @@ test('with no asset resolver the text is rendered as it is, and with no node not
   assert.match(node.innerHTML, /<img src="asset:a1" alt="chart">/)
   assert.doesNotThrow(() => renderMarkdownPreview(null, '# Heading'))
 })
+
+// #347: the AI interview's thread draws the AI's replies through this preview. The issue's example reply, from a SOAP stage on 0.16.0, which
+// showed its Markdown raw.
+const SOAP_REPLY = `Every Field the sources support is now drafted in the preview, and nothing is saved yet.
+
+- **Your answers:** the Fields they feed are redrafted. The storage answer was "Whichever of the two that gantry now supports is in scope".
+- **Open questions:** the table has Q1 to Q10.
+- **Warning:** Gantry flagged the year "2027" in Sequencing as unsourced.
+
+Five things in the drafts are worth a check:
+- **Azure Files:** the Azure Files and Azure Blob question stays open (Q1).
+- **Registry connection:** the release pipeline still has a \`<set-me>\` registry connection placeholder, which I didn't draft into any Field.
+
+Is there anything you want to change before the stage-end card?`
+
+test('an AI reply shaped like the SOAP example: two bulleted lists with bold labels, separate paragraphs, and <set-me> as inline code', () => {
+  const node = standInNode()
+  renderMarkdownPreview(node, SOAP_REPLY, { sources: { index: {} } })
+  const html = node.innerHTML
+  assert.equal(html.match(/<ul>/g)?.length, 2, 'two lists, the second straight after a paragraph line')
+  assert.equal(html.match(/<li>/g)?.length, 5)
+  assert.equal(html.match(/<p>/g)?.length, 3, 'three paragraphs')
+  for (const label of ['Your answers:', 'Open questions:', 'Warning:', 'Azure Files:', 'Registry connection:']) assert.ok(html.includes(`<strong>${label}</strong>`), label)
+  assert.ok(html.includes('<code>&lt;set-me&gt;</code>'), 'the placeholder is code, shown as typed')
+  assert.ok(!html.includes('**') && !/^- /m.test(html), 'no raw Markdown is left')
+})
+
+test('a heading, a table and a fenced code block render; the HTML has no trailing blank line, so a one-line reply reads as its words', () => {
+  const node = standInNode()
+  renderMarkdownPreview(node, '### Next steps\n\n| Q | Answer |\n| - | - |\n| Q1 | Open |\n\n```yaml\nregistry: <set-me>\n```')
+  assert.match(node.innerHTML, /<h3 id="next-steps">Next steps<\/h3>/)
+  assert.match(node.innerHTML, /<table>[\s\S]*<td>Q1<\/td>[\s\S]*<\/table>/)
+  assert.match(node.innerHTML, /<pre><code class="language-yaml">registry: &lt;set-me&gt;\n<\/code><\/pre>$/)
+  renderMarkdownPreview(node, 'Picking up where I stopped.')
+  assert.equal(node.innerHTML, '<p>Picking up where I stopped.</p>')
+})
+
+test('mermaid: false leaves the diagrams undrawn (a reply still arriving), and the default draws them', () => {
+  const streaming = standInNode()
+  renderMarkdownPreview(streaming, '```mermaid\ngraph TD\n  A --> B\n```', { mermaid: false })
+  assert.ok(!streaming.asked.includes('pre > code.language-mermaid'))
+  assert.match(streaming.innerHTML, /<code class="language-mermaid">/)
+  const finished = standInNode()
+  renderMarkdownPreview(finished, '```mermaid\ngraph TD\n  A --> B\n```')
+  assert.ok(finished.asked.includes('pre > code.language-mermaid'))
+})
+
+test('a reply drawn piece by piece renders at every point, part-way through a fence or a table included', () => {
+  const reply = `${SOAP_REPLY}\n\n| Q | Answer |\n| - | - |\n| Q1 | Open |\n\n\`\`\`js\nconst registry = '<set-me>'\n\`\`\`\n\nDone.`
+  const node = standInNode()
+  for (let end = 0; end <= reply.length; end += 7) assert.doesNotThrow(() => renderMarkdownPreview(node, reply.slice(0, end), { mermaid: false }), `at ${end}`)
+  // An unclosed fence is code to the end of what has arrived.
+  renderMarkdownPreview(node, 'Here it is:\n\n```js\nconst a = 1', { mermaid: false })
+  assert.match(node.innerHTML, /<pre><code class="language-js">const a = 1<\/code><\/pre>$/)
+  renderMarkdownPreview(node, reply)
+  assert.match(node.innerHTML, /<p>Done\.<\/p>$/)
+})

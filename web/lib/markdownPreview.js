@@ -1,6 +1,6 @@
 // #347: the preview of Markdown that the module editor draws, in one place so anything else that shows Markdown the way the editor's preview
 // does draws it through the same steps. It was the app shell's (web/app.js) alone; the AI interview's thread now draws the AI's replies with
-// it as well. The steps, in order:
+// it as well (web/lib/interviewView.js's AiReply). The steps, in order:
 //
 //   1. asset references are resolved to images (the caller's `resolveAssets`: the stored text keeps `asset:<id>` and `assets/<name>`, see
 //      web/lib/assetRefs.js, and only the caller knows the Instance, the Stage and the asset files);
@@ -83,16 +83,18 @@ export function activateSourceCitations(node, { index = null, open = null } = {}
 
 /**
  * Draws `text` into `node` as the module editor's preview does (the steps at the top of this file). `resolveAssets(text)` rewrites the
- * asset references (none when left out); `sources` is `{ index, open }` for activateSourceCitations.
+ * asset references (none when left out); `sources` is `{ index, open }` for activateSourceCitations. #347: `mermaid: false` leaves the
+ * ```mermaid fences as code, for an AI reply that is still arriving: a diagram is drawn once, when the reply is finished.
  */
-export function renderMarkdownPreview(node, text, { resolveAssets = null, sources = {} } = {}) {
+export function renderMarkdownPreview(node, text, { resolveAssets = null, sources = {}, mermaid = true } = {}) {
   if (!node) return
   const withSources = resolveAssets ? resolveAssets(text ?? '') : (text ?? '')
-  node.innerHTML = renderMarkdown(withSources)
+  // #347: without the newline markdown-it ends on, a one-line reply's text is its words alone.
+  node.innerHTML = renderMarkdown(withSources).trimEnd()
   activateSourceCitations(node, sources)
   // WI #353: ```mermaid fences render as diagrams in place. Async and fire-and-forget — a
   // re-render before a diagram finishes just leaves the swap with nothing to replace.
-  hydrateMermaidPreview(node).catch(() => {})
+  if (mermaid) hydrateMermaidPreview(node).catch(() => {})
   // Caption-styling hook: the citation renders as <p><em>Source: …</em></p>; mark that paragraph so the stylesheet can make it visually subordinate (caption) rather than body text.
   node.querySelectorAll('p').forEach((p) => {
     const em = p.querySelector('em')
