@@ -66,7 +66,7 @@
 //     note, and the AI carries on in the same turn, once a turn.
 //
 // Nothing here saves. Drafts are an unsaved preview until the architect confirms the stage-end card.
-import { runTurn, runWithRecovery, ensureTested, isTooLong, EMPTY_USAGE, CUT_OFF_CALL_RESULT } from './aiClient.js'
+import { runTurn, runWithRecovery, ensureTested, isTooLong, EMPTY_USAGE, CUT_OFF_CALL_RESULT, CUT_OFF_NOTE } from './aiClient.js'
 import { ASK_TOOL_NAME, FALLBACK_FENCE } from './aiCards.js'
 import { AiProviderError, getAiProvider } from './aiProviders.js'
 import { artefactChoices, buildInterviewBrief, estimateTokens, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
@@ -119,9 +119,6 @@ export const MAX_ROUNDS = 24
 
 // What the architect sees of the AI's text: neither the draft blocks nor the read requests a text-only model writes.
 const shownText = (text) => stripLogBlocks(stripReadBlocks(stripDraftBlocks(text)))
-
-/** #344: what the AI is told after a reply the output limit cut off that left no tool call to answer (its text, or calls dropped whole). */
-const CUT_OFF_NOTE = 'Your last reply reached the output limit and was cut off. Send fewer Fields per reply, or a shorter one, and carry on.'
 
 /** #344: the thread's line when the AI's reply is cut off at the output limit twice in a row, said once a turn. */
 export function cutOffAgainLine(providerName) {
@@ -1531,9 +1528,10 @@ export function createInterviewSession(config = {}) {
         emit()
       }
     } else if (event.type === 'tool-call') {
-      // #344: a call whose arguments are not whole JSON is answered once the turn is over, when the stop reason says whether the output
-      // limit cut it off; answering it now would tell the AI only that the JSON was invalid.
-      if (event.call.input !== null && event.call.input !== undefined) resultFor(event.call)
+      // #344: a call whose arguments are not whole JSON, or that has none, is answered once the turn is over, when the stop reason says
+      // whether the output limit cut it off; answering it now would tell the AI only that the JSON was invalid, or that no Field was named.
+      const input = event.call.input
+      if (input !== null && input !== undefined && !(typeof input === 'object' && !Object.keys(input).length)) resultFor(event.call)
       draftingByCall.delete(event.call.id)
       state.drafting = draftingByCall.size > 0
       setDraftingFields()
@@ -1772,8 +1770,9 @@ export function createInterviewSession(config = {}) {
       if (state.compactPending && canCompact()) await compact()
       for (let round = 0; round < MAX_ROUNDS; round++) {
         live = null
-        textDraftFields = []
-        setDraftingFields()
+        // #344: nothing is being drafted as a request goes, so a draft the parser dropped (a cut-off block that never closed) can't hold the
+        // line at Drafting over the cut-off line.
+        stopDrafting()
         messages = shortenOldReads(messages)
         const result = await compactingIfTooLong(() =>
           runWithRecovery(async () => {

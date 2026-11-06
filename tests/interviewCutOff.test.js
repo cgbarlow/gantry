@@ -211,3 +211,45 @@ test('a chat reply cut off with no tool call: what arrived stays in the thread, 
   const said = session.snapshot().thread.filter((t) => t.who === 'ai').map((t) => t.text)
   assert.deepEqual(said, ['The deck says the platform moves to', 'In short: managed hosting.'])
 })
+
+test('a draft the output limit cut off before any of its arguments arrived is answered as cut off, not as a Field it cannot draft', async () => {
+  const event = (name, data) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`
+  const ai = fakeAi((_req, n) =>
+    n > 0
+      ? anthropicReply({ text: 'Shorter now.' })
+      : sse(
+          event('message_start', { type: 'message_start', message: { id: 'm', role: 'assistant', content: [], usage: { input_tokens: 10, output_tokens: 1 } } }) +
+            event('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'd1', name: 'draft_field', input: {} } }) +
+            event('content_block_stop', { type: 'content_block_stop', index: 0 }) +
+            event('message_delta', { type: 'message_delta', delta: { stop_reason: 'max_tokens' }, usage: { output_tokens: 4096 } }) +
+            event('message_stop', { type: 'message_stop' })
+        )
+  )
+  const { session } = sessionWith(ai, anthropic())
+  await session.start()
+  const told = toolResults(ai.calls[1].body)
+  assert.match(told.d1, /output limit/)
+  assert.doesNotMatch(told.d1, /undefined|not a Field/)
+})
+
+test('a cut-off draft whose block never closed: the next request still shows the cut-off line, not the dropped draft', async () => {
+  let release
+  const event = (name, data) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`
+  // A stream that does not close the partial block before it stops: the parser drops the call, so the reply is chat.
+  const unclosed = sse(
+    event('message_start', { type: 'message_start', message: { id: 'm', role: 'assistant', content: [], usage: { input_tokens: 10, output_tokens: 1 } } }) +
+      event('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'd1', name: 'draft_field', input: {} } }) +
+      event('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"field": "details.summary", "value": "A long dra' } }) +
+      event('message_delta', { type: 'message_delta', delta: { stop_reason: 'max_tokens' }, usage: { output_tokens: 4096 } }) +
+      event('message_stop', { type: 'message_stop' })
+  )
+  const ai = fakeAi((_req, n) => (n === 0 ? unclosed : n === 1 ? new Promise((r) => (release = () => r(anthropicReply({ text: 'Shorter now.' })))) : anthropicReply({ text: 'x' })))
+  const { session } = sessionWith(ai, anthropic())
+  const going = session.start()
+  for (let i = 0; !release && i < 2000; i++) await new Promise((r) => setTimeout(r, 1))
+  assert.ok(release, 'the second request went')
+  assert.equal(statusLine(session.snapshot()).text, CUT_OFF_LINE)
+  assert.deepEqual(session.snapshot().draftingFields, [], 'nothing is being drafted')
+  release()
+  await going
+})
