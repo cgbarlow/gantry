@@ -35,7 +35,7 @@ function seedFiles() {
   }
 }
 
-test('a render against a GitHub-backed Instance prints a citation as plain text, with the title of a document from the committed manifest', async () => {
+test('a render against a GitHub-backed Instance prints a citation as a footnote, with the title of a document from the committed manifest', async () => {
   await withScratchInstances((instancesDir) =>
     withRunningServerForProvider('github', { options: { instancesDir }, fakeServerOptions: { files: seedFiles() } }, async (ctx) => {
       registerInstance(SLUG, { kind: 'github', owner: GITHUB_OWNER, repository: GITHUB_REPOSITORY, baseUrl: ctx.providerBaseUrl }, { instancesDir })
@@ -48,9 +48,14 @@ test('a render against a GitHub-backed Instance prints a citation as plain text,
       try {
         const docx = join(dir, 'rendered.docx')
         writeFileSync(docx, await client.getFileBytes(body.githubPath))
+        // #351: each citation is a real Word footnote.
         const xml = execFileSync('unzip', ['-p', docx, 'word/document.xml'], { encoding: 'utf8' })
-        const text = [...xml.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1]).join('')
-        assert.match(text, /12\.4 days \(Client brief\) and 12\.5 \(Notes, p\.\s2\)/, 'the empty citation took the title from the manifest; the other kept its words')
+        const text = [...xml.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>|<w:footnoteReference w:id="(\d+)" ?\/>/g)].map((m) => m[1] ?? `[${m[2]}]`).join('')
+        const marks = /12\.4 days\[(\d+)\] and 12\.5\[(\d+)\]/.exec(text)
+        assert.ok(marks, 'a footnote mark where each citation was')
+        const notes = execFileSync('unzip', ['-p', docx, 'word/footnotes.xml'], { encoding: 'utf8' })
+        const noteText = (id) => [...(new RegExp(`<w:footnote(?: [^>]*)? w:id="${id}"[^>]*>([\\s\\S]*?)</w:footnote>`).exec(notes)?.[1] ?? '').matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((m) => m[1]).join('').replace(/ /g, ' ').trim()
+        assert.deepEqual(marks.slice(1).map(noteText), ['Client brief', 'Notes, p. 2'], 'the empty citation took the title from the manifest; the other kept its words')
         assert.doesNotMatch(xml, /source:/)
       } finally {
         rmSync(dir, { recursive: true, force: true })
