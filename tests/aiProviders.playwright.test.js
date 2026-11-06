@@ -40,7 +40,7 @@ function withFakeAiProvider({ cors = false } = {}, fn) {
     }
     res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders })
     if (req.url.startsWith('/v1/models')) {
-      res.end(JSON.stringify({ data: [{ id: 'claude-big', max_input_tokens: 1000000 }, { id: 'claude-small', max_input_tokens: 200000 }] }))
+      res.end(JSON.stringify({ data: [{ id: 'claude-big', max_input_tokens: 1000000, max_tokens: 128000 }, { id: 'claude-small', max_input_tokens: 200000, max_tokens: 8192 }] }))
     } else if (req.url.startsWith('/api/tags')) {
       res.end(JSON.stringify({ models: [{ name: 'llama3.1:8b' }, { name: 'qwen3:4b' }] }))
     } else if (req.url.startsWith('/api/show')) {
@@ -139,6 +139,58 @@ test('AI Providers are added, shown in the table, marked Default, edited and del
       const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('gantry:ai-providers')))
       assert.equal(stored.length, 1)
       assert.equal(stored[0].key, 'sk-ant-secret-1')
+    }))
+  })
+})
+
+// #346 (parent #343): a new AI Provider starts with room to draft several Fields in one reply; a model that allows less gets what it allows,
+// a number the architect typed is left alone, and a saved AI Provider keeps its setting.
+test('a new AI Provider of each type opens with the higher Max tokens, lowered for a model that allows less, and a saved one keeps its own', async () => {
+  await withFakeAiProvider({}, async (aiBase) => {
+    await withRunningServer({ allowPrivateAiUrls: true }, withPage(async (page, base) => {
+      await openSettings(page, base)
+      await page.click('text=Add AI Provider')
+      for (const type of ['openai', 'anthropic', 'openrouter', 'ollama', 'lmstudio']) {
+        await page.selectOption('#ai-provider-type', type)
+        assert.equal(await page.inputValue('#ai-provider-max-tokens'), '16000', type)
+      }
+      await page.selectOption('#ai-provider-type', 'custom')
+      assert.equal(await page.inputValue('#ai-provider-max-tokens'), '', 'a Custom one leaves the limit to the service')
+      assert.match(await page.textContent('#ai-provider-max-tokens-hint'), /service's own limit/)
+
+      // Anthropic's list says what each model allows.
+      await page.fill('#ai-provider-name', 'Work Anthropic')
+      await page.selectOption('#ai-provider-type', 'anthropic')
+      await page.fill('#ai-provider-address', aiBase)
+      await page.fill('#ai-provider-key', 'sk-ant-1')
+      await page.waitForFunction(() => document.querySelectorAll('#ai-provider-model-options option').length === 2)
+      await page.fill('#ai-provider-model', 'claude-small')
+      await page.waitForFunction(() => document.querySelector('#ai-provider-max-tokens').value === '8192')
+      assert.match(await page.textContent('#ai-provider-max-tokens-hint'), /most this model allows/)
+      await page.fill('#ai-provider-model', 'claude-big')
+      await page.waitForFunction(() => document.querySelector('#ai-provider-max-tokens').value === '16000')
+      assert.equal(await page.locator('#ai-provider-max-tokens-hint').count(), 0)
+
+      // Once the architect types a number, choosing a model leaves it alone.
+      await page.fill('#ai-provider-max-tokens', '4096')
+      await page.fill('#ai-provider-model', 'claude-small')
+      await page.fill('#ai-provider-model', 'claude-big')
+      await page.waitForTimeout(700) // past the model list's debounce
+      assert.equal(await page.inputValue('#ai-provider-max-tokens'), '4096')
+      await page.click('.ai-provider-dialog .btn.primary')
+      let stored = await page.evaluate(() => JSON.parse(localStorage.getItem('gantry:ai-providers')))
+      assert.equal(stored[0].maxTokens, 4096)
+
+      // A saved AI Provider keeps its setting when edited, whatever model is chosen.
+      await page.click('tr[data-ai-provider="Work Anthropic"] >> text=Edit')
+      assert.equal(await page.inputValue('#ai-provider-max-tokens'), '4096')
+      await page.waitForFunction(() => document.querySelectorAll('#ai-provider-model-options option').length === 2)
+      await page.fill('#ai-provider-model', 'claude-small')
+      await page.waitForTimeout(700)
+      assert.equal(await page.inputValue('#ai-provider-max-tokens'), '4096')
+      await page.click('.ai-provider-dialog .btn.primary')
+      stored = await page.evaluate(() => JSON.parse(localStorage.getItem('gantry:ai-providers')))
+      assert.equal(stored[0].maxTokens, 4096)
     }))
   })
 })
