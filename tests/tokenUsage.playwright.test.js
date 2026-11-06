@@ -12,7 +12,8 @@ import { systemText } from './helpers/aiRequest.js'
 
 // #294 (parent #238): the architect sees token usage, and prompt caching is always on. A real server and relay, a real Chromium page,
 // and a stand-in for Anthropic that reports its tokens (most of the input read from the cache) while it drafts the one Field each
-// Stage of a small three-Stage Definition needs. Tokens only, never money.
+// Stage of a small three-Stage Definition needs. Tokens only, never money. #348: the rail's Tokens block shows This session (the running
+// session alone), Earlier sessions (what the Stage used before it) and Context (the last call's input against the context window).
 
 const SLUG = 'tokens-test'
 
@@ -170,6 +171,8 @@ const readYaml = (file) => parseYAML(readFileSync(file, 'utf8'))
 // Each Stage takes two requests (draft the Field, then say so), each reporting 1,000 input tokens plus 8,000 read from the cache and
 // 50 output tokens: 18,000 input (16,000 cached, 89%) and 100 output a Stage.
 const PER_STAGE = { input: 18000, cached: 16000, output: 100 }
+// #348: each call's input is 9,000 tokens, against the context window an Anthropic AI Provider has when none is set (32,000).
+const CONTEXT = '9k of 32k (28%)'
 
 test('the rail and the run plan show tokens only, with the share read from cache on hover; the log keeps them per model and a reload keeps the totals', async () => {
   await withTrioServer(async ({ page, base, posts, instancesDir }) => {
@@ -180,10 +183,11 @@ test('the rail and the run plan show tokens only, with the share read from cache
     await page.click('[data-testid="interview-start"]')
     await page.waitForSelector('[data-testid="interview-stage-end"]')
 
-    // Shape one Stage in: the session total and this Stage's total, in words, the same here as there.
+    // Scope: this session's total in words, the same here as in the run plan, and how full the conversation is. No earlier sessions.
     assert.equal((await page.textContent('[data-testid="interview-tokens-session"]')).trim(), '18k tokens')
-    assert.equal((await page.textContent('[data-testid="interview-tokens-stage"]')).trim(), '18k tokens')
-    const hover = await page.getAttribute('[data-testid="interview-tokens-stage"]', 'title')
+    assert.equal(await page.locator('[data-testid="interview-tokens-earlier"]').count(), 0, 'no earlier session on this Stage')
+    assert.equal((await page.textContent('[data-testid="interview-tokens-context"]')).trim(), CONTEXT)
+    const hover = await page.getAttribute('[data-testid="interview-tokens-session"]', 'title')
     assert.equal(hover, 'Input 18,000 tokens, cached 16,000, output 100. 89% of input read from cache.')
     assert.equal((await row(page, 's1').locator('[data-testid="run-plan-tokens"]').textContent()).trim(), '18k tokens')
     assert.equal(await row(page, 's2').locator('[data-testid="run-plan-tokens"]').count(), 0, 'a Stage not reached has used nothing')
@@ -192,12 +196,12 @@ test('the rail and the run plan show tokens only, with the share read from cache
     // No money anywhere on the page's rail, and nothing per round.
     assert.doesNotMatch(await page.textContent('.interview-rail'), /[$£€]|\bcost\b|\bbudget\b|\bUSD\b/i)
 
-    // Save, advance, carry on: Shape starts by itself, the session total adds both Stages, this Stage's total is its own.
+    // Save, advance, carry on: Shape starts by itself, and This session is Shape's session (#348), not the run's.
     await page.click('[data-testid="interview-save-advance"]')
     await page.waitForSelector('[data-testid="interview-field"][data-field-key="m2.body"]')
     await page.waitForSelector('[data-testid="interview-stage-end"]')
-    assert.equal((await page.textContent('[data-testid="interview-tokens-session"]')).trim(), '36k tokens')
-    assert.equal((await page.textContent('[data-testid="interview-tokens-stage"]')).trim(), '18k tokens')
+    assert.equal((await page.textContent('[data-testid="interview-tokens-session"]')).trim(), '18k tokens')
+    assert.equal(await page.locator('[data-testid="interview-tokens-earlier"]').count(), 0)
     assert.equal((await row(page, 's1').locator('[data-testid="run-plan-tokens"]').textContent()).trim(), '18k tokens', "Scope's total comes from its committed log")
     assert.equal((await row(page, 's2').locator('[data-testid="run-plan-tokens"]').textContent()).trim(), '18k tokens')
     await page.click('[data-testid="interview-save"]')
@@ -229,7 +233,7 @@ test('the rail and the run plan show tokens only, with the share read from cache
   })
 })
 
-test('a paused run that is resumed after a reload still adds up the Stages it already went through', async () => {
+test('a paused run that is resumed after a reload still shows what each Stage it went through used', async () => {
   await withTrioServer(async ({ page, base }) => {
     await page.goto(`${base}/instance/${SLUG}?interview=1`)
     await page.waitForSelector('[data-testid="interview-run-until"]')
@@ -248,8 +252,61 @@ test('a paused run that is resumed after a reload still adds up the Stages it al
     await page.click('[data-testid="interview-resume"]')
     await page.waitForSelector('[data-testid="interview-field"][data-field-key="m3.body"]')
     await page.waitForSelector('[data-testid="interview-stage-end"]')
-    assert.equal((await page.textContent('[data-testid="interview-tokens-stage"]')).trim(), '18k tokens')
-    assert.equal((await page.textContent('[data-testid="interview-tokens-session"]')).trim(), '54k tokens', 'Scope, Shape and Ship: the run, not only this visit')
-    assert.equal(await page.locator('[data-testid="run-plan-tokens"]').count(), 3)
+    assert.equal((await page.textContent('[data-testid="interview-tokens-session"]')).trim(), '18k tokens', "Ship's session (#348)")
+    assert.deepEqual(await page.locator('[data-testid="run-plan-tokens"]').evaluateAll((els) => els.map((e) => e.textContent.trim())), ['18k tokens', '18k tokens', '18k tokens'])
+  })
+})
+
+// #348: Start this stage over begins a new session. This session counts from nothing, Earlier sessions holds what came before, Context
+// goes until the AI is called again, and the run plan's total is the two together. A reload keeps all three, and the Save commits both
+// sessions' lines, so another browser has the same total.
+test('after Start this stage over, This session counts only the new calls, Earlier sessions holds what came before, and a reload and another browser agree', async () => {
+  await withTrioServer(async ({ page, base, instancesDir }) => {
+    const text = async (id) => (await page.textContent(`[data-testid="${id}"]`)).trim()
+    const count = (id) => page.locator(`[data-testid="${id}"]`).count()
+    await page.goto(`${base}/instance/${SLUG}?interview=1`)
+    await page.waitForSelector('[data-testid="interview-start"]:not([disabled])')
+    await page.click('[data-testid="interview-start"]')
+    await page.waitForSelector('[data-testid="interview-stage-end"]')
+    assert.equal(await text('interview-tokens-session'), '18k tokens')
+    assert.equal(await text('interview-tokens-context'), CONTEXT)
+
+    await page.click('[data-testid="interview-restart"]')
+    await page.click('[data-testid="interview-restart-yes"]')
+    await page.waitForSelector('[data-testid="interview-start"]')
+    assert.equal(await text('interview-tokens-session'), '0 tokens', 'This session goes back to nothing')
+    assert.equal(await text('interview-tokens-earlier'), '18k tokens', 'what was used before the start over')
+    assert.equal(await page.getAttribute('[data-testid="interview-tokens-earlier"]', 'title'), 'Input 18,000 tokens, cached 16,000, output 100. 89% of input read from cache.')
+    assert.equal(await count('interview-tokens-context'), 0, 'the conversation was cleared')
+    assert.equal((await row(page, 's1').locator('[data-testid="run-plan-tokens"]').textContent()).trim(), '18k tokens')
+
+    await page.waitForSelector('[data-testid="interview-start"]:not([disabled])')
+    await page.click('[data-testid="interview-start"]')
+    await page.waitForSelector('[data-testid="interview-stage-end"]')
+    const figures = async () => ({ session: await text('interview-tokens-session'), earlier: await text('interview-tokens-earlier'), context: await text('interview-tokens-context'), plan: (await row(page, 's1').locator('[data-testid="run-plan-tokens"]').textContent()).trim() })
+    const expected = { session: '18k tokens', earlier: '18k tokens', context: CONTEXT, plan: '36k tokens' }
+    assert.deepEqual(await figures(), expected, 'only the new calls; the run plan adds the two')
+
+    // A reload picks up the working copy: the same three figures.
+    await page.reload()
+    await page.waitForSelector('[data-testid="interview-copy-restored"]')
+    assert.deepEqual(await figures(), expected)
+
+    // The Save commits both sessions' lines: the one the start over ended, with all it used, and the running one, which is the latest.
+    await page.click('[data-testid="interview-save"]')
+    await page.waitForSelector('[data-testid="interview-saved"]')
+    const status = readYaml(join(instanceFolder(instancesDir), 'interview', 's1.yaml')).status
+    assert.equal(status.length, 2)
+    assert.equal(status[0].state, 'started-over')
+    assert.notEqual(status[1].state, 'started-over')
+    assert.notEqual(status[0].session, status[1].session)
+    for (const line of status) assert.deepEqual(line.models, [{ type: 'anthropic', model: 'claude-small', inputTokens: PER_STAGE.input, cachedTokens: PER_STAGE.cached, outputTokens: PER_STAGE.output }])
+
+    // Another browser: nothing is running there, so both sessions are earlier ones, and the Stage's total is the same.
+    await page.evaluate(() => sessionStorage.clear())
+    await page.goto(`${base}/instance/${SLUG}?interview=1`)
+    await page.waitForSelector('[data-testid="run-plan-tokens"]')
+    assert.equal((await row(page, 's1').locator('[data-testid="run-plan-tokens"]').textContent()).trim(), '36k tokens')
+    assert.equal(await text('interview-tokens-earlier'), '36k tokens')
   })
 })

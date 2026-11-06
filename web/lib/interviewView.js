@@ -31,7 +31,7 @@ import { answeredCounts, assignChoices, planReview, reviewerLabels } from './rev
 import { ReviewContext, ReviewInputs, ReviewSection } from './reviewView.js'
 import { downloadReviewResponseList, hasReviewResponses, reviewResponseRows } from './reviewResponse.js'
 import { artefactRows, beginRun, chosenArtefacts, clearRun, interviewRuns, nextStage, planRows, resumableRun, resumedArtefacts, runArtefacts, runOpening, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
-import { EMPTY_TOKENS, addTokens, formatTokens, hasTokens, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
+import { EMPTY_TOKENS, formatContext, formatTokens, hasTokens, stageTokenFigures, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
 import { isRemoteInstance, lastSavedBy, openApproval, pullRequestLink, remoteRecord } from './interviewApproval.js'
 import { SENT_BACK_CHOICES, reopenOffer, staleLaterFields } from './prRevision.js'
@@ -827,15 +827,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     stageTitle: stageTitleOf,
     pageStageTitle: instance.stage.title,
   })
-  // #294: tokens, from what each AI Provider reported. A Stage's total is every session's status line in its committed log, except this
-  // session's own (it is counted in full from memory, so its older committed line is not added twice). The session total is this run:
-  // the Stages it went through before this one (from their logs) and what this session has used on this one.
-  const mineHere = snap?.tokens ?? EMPTY_TOKENS
-  const stageTokens = (id) => (id === instance.stage.id ? addTokens(tokensOfLog(stageLogs[id], { exceptSession: snap?.decisions?.session }), mineHere) : tokensOfLog(stageLogs[id]))
+  // #294: tokens, from what each AI Provider reported. A Stage's total is every session's status line in its committed log. On this Stage
+  // (#348) it is split in two: This session, the running session alone since it began or was last started over (counted from memory), and
+  // Earlier sessions, the log's other sessions plus those a start over ended here (also from memory: their committed lines may be older).
+  const figures = stageTokenFigures(stageLogs[instance.stage.id], { session: snap?.decisions?.session, tokens: snap?.tokens ?? EMPTY_TOKENS, ended: snap?.endedSessions ?? [] })
+  const stageTokens = (id) => (id === instance.stage.id ? figures.stage : tokensOfLog(stageLogs[id]))
   const currentAt = stagesList.findIndex((st) => st.id === instance.stage.id)
-  const runStartAt = Math.max(0, Math.min(currentAt, stagesList.findIndex((st) => st.id === runStart)))
-  const sessionTokens = stagesList.slice(runStartAt, currentAt).reduce((sum, st) => addTokens(sum, tokensOfLog(stageLogs[st.id])), mineHere)
-  const thisStageTokens = stageTokens(instance.stage.id)
   const resume = resumeLogs && !carryingOn && !update && !review && phase === 'kickoff' ? resumableRun({ stages: stagesList, currentStageId: instance.stage.id, logs: resumeLogs, openPullRequests: remoteRows?.pullRequests ?? {} }) : null
   const stageTitleOf = (id) => stagesList.find((s) => s.id === id)?.title ?? id
 
@@ -1693,15 +1690,25 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     if (!used || !hasTokens(used)) return null
     return html`<span class="rp-tokens" data-testid="run-plan-tokens" title=${tokenBreakdown(used)} tabindex="0">${formatTokens(totalTokens(used))}</span>`
   }
+  // #348: three figures. This session and Earlier sessions add up every call's input and output, so they grow with each call (each call
+  // resends the conversation); Context is how full the conversation is now, the input of the last call, which is what the model's limit
+  // counts. Earlier sessions shows only when there are some, Context only once the AI has been called.
   const tokensRail = () => {
-    if (!hasTokens(sessionTokens) && !hasTokens(thisStageTokens)) return null
+    const context = snap?.context ?? null
+    if (!hasTokens(figures.thisSession) && !hasTokens(figures.earlier) && !context) return null
     return html`<div class="rail-tokens" data-testid="interview-tokens">
       <h3 class="side">Tokens</h3>
       <dl>
         <dt>This session</dt>
-        <dd data-testid="interview-tokens-session" title=${tokenBreakdown(sessionTokens)} tabindex="0">${formatTokens(totalTokens(sessionTokens))}</dd>
-        <dt>This stage</dt>
-        <dd data-testid="interview-tokens-stage" title=${tokenBreakdown(thisStageTokens)} tabindex="0">${formatTokens(totalTokens(thisStageTokens))}</dd>
+        <dd data-testid="interview-tokens-session" title=${tokenBreakdown(figures.thisSession)} tabindex="0">${formatTokens(totalTokens(figures.thisSession))}</dd>
+        ${hasTokens(figures.earlier)
+          ? html`<dt>Earlier sessions</dt>
+              <dd data-testid="interview-tokens-earlier" title=${tokenBreakdown(figures.earlier)} tabindex="0">${formatTokens(totalTokens(figures.earlier))}</dd>`
+          : null}
+        ${context
+          ? html`<dt>Context</dt>
+              <dd data-testid="interview-tokens-context" title="How full the AI's conversation is now: the input of its last call, which is what counts against the model's limit. The token totals above add up every call, so they grow faster." tabindex="0">${formatContext(context)}</dd>`
+          : null}
       </dl>
       ${started && snap?.canCompact && phase !== 'paused'
         ? snap.compactPending

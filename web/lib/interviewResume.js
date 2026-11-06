@@ -5,10 +5,10 @@
 //
 // Pure: no DOM, no network, no storage. The Interview page reads the logs (web/lib/decisionsStore.js) and, on a workspace that has a
 // Provider to ask, Check status once, and hands both here.
-import { currentLogEntries, logSummary, openQuestions } from './decisionsLog.js'
+import { STARTED_OVER, currentLogEntries, logSummary, openQuestions } from './decisionsLog.js'
 
-/** A session in these states is finished with the Stage: it saved at the end of the run. */
-export const DONE_STATES = Object.freeze(['saved', 'done'])
+/** A session in these states is finished with the Stage: it saved at the end of the run, or Start this stage over ended it (#348). */
+export const DONE_STATES = Object.freeze(['saved', 'done', STARTED_OVER])
 /** A Stage the Provider reports in one of these states has been moved on past the interview. */
 export const MOVED_ON_STAGE_STATES = Object.freeze(['approved', 'advanced', 'merged', 'complete', 'done'])
 

@@ -544,6 +544,9 @@ export function createInterviewSession(config = {}) {
   let clashWaiter = null // { resolve, conflicts, entryIds }: the Save waiting on the clash cards
   let messages = []
   let lastInput = 0 // #329: the input tokens the AI Provider reported for the last call, which the card measures against the context window
+  // #348: how full the conversation is now, for the Tokens block's Context: the last call's input, or, once Compact now has started the
+  // conversation afresh, the size of the compacted one (the figure the thread line gives) until the next call reports. 0 before any call.
+  let contextTokens = 0
   let askAgainAt = 0 // #329: after "Not now", the card waits until the reported input reaches this
   let lastSystem = '' // #329: the system text of the last request, for the card's estimate of the size after compacting
   let nextId = 1
@@ -601,8 +604,12 @@ export function createInterviewSession(config = {}) {
     update: state.update ? { ...state.update, reopen: [...state.update.reopen], deferred: state.update.deferred.map((d) => ({ ...d })), elsewhere: state.update.elsewhere.map((d) => ({ ...d })) } : null,
     openFields: openFields(),
     decisions: { ...logSummary(log.entries()), pending: log.pending().length, session: log.sessionId },
-    // #294: this session's tokens on this Stage, as the status block of the log will record them (all the AI Providers it used).
+    // #294: this session's tokens on this Stage, as the status block of the log will record them (all the AI Providers it used). Since
+    // #348 that is since the session began or was last started over; `endedSessions` is the sessions a start over ended, with theirs.
     tokens: tokensOfModels(log.usage()),
+    endedSessions: log.endedSessions().map((e) => ({ session: e.session, tokens: tokensOfModels(e.models) })),
+    // #348: how full the AI's conversation is, against the model's context window (null where the AI Provider doesn't know it).
+    context: contextTokens ? { tokens: contextTokens, window: getAiProvider(state.providerId)?.contextWindow || null } : null,
     compactOffer: state.compactOffer ? { ...state.compactOffer } : null,
     canCompact: canCompact(),
   })
@@ -1639,6 +1646,7 @@ export function createInterviewSession(config = {}) {
       messages = compactConversation(messages, { summary, drafts: draftList() })
       const after = conversationTokens(system, messages)
       lastInput = 0
+      contextTokens = after
       askAgainAt = 0
       state.compactPending = false
       const without = failure ? `. The AI couldn't write its summary (${failure.replace(/\.$/, '')}), so it carries on from the drafts, the decisions log and your own messages` : ''
@@ -1738,6 +1746,7 @@ export function createInterviewSession(config = {}) {
         const provider = getAiProvider(state.providerId)
         countUsage(provider, result.usage)
         lastInput = result.usage.inputTokens
+        contextTokens = lastInput
         const textDrafts = provider ? capabilities(provider).textDrafts : false
         // The attachments go on the first message of each request and are not kept in the history, so a switch of AI Provider can decide them afresh.
         const base = (result.messages ?? messages).map((m, i) => (i === 0 ? messages[0] : m))
@@ -2026,8 +2035,11 @@ ${reviewAnswers.text}` : '',
       // #290 (ADR-0068): another session on this Stage that is not Done gets a card naming when it last saved. Carry on alongside
       // starts anyway (the Field-by-Field Save check keeps both safe); Cancel leaves the kickoff as it was.
       const resume = getContext?.()?.resume ?? null
-      if (!alongside && resume?.others?.length) {
-        state.sessionWarning = { others: resume.others }
+      // #348: a session Start this stage over ended is this one's own past, whatever its committed line still says.
+      const own = new Set([log.sessionId, ...log.endedSessions().map((e) => e.session)])
+      const others = (resume?.others ?? []).filter((o) => !own.has(o.session))
+      if (!alongside && others.length) {
+        state.sessionWarning = { others }
         emit()
         return
       }
@@ -2470,7 +2482,7 @@ ${reviewAnswers.text}` : '',
           compactOffer: state.compactOffer,
           compactPending: state.compactPending,
         },
-        compaction: { lastInput, askAgainAt },
+        compaction: { lastInput, askAgainAt, contextTokens },
         pendingChanges: [...pendingChanges],
         queuedReview,
         updateOpening,
@@ -2524,6 +2536,7 @@ ${reviewAnswers.text}` : '',
       })
       messages = saved.messages ?? []
       lastInput = saved.compaction?.lastInput ?? 0
+      contextTokens = saved.compaction?.contextTokens ?? lastInput
       askAgainAt = saved.compaction?.askAgainAt ?? 0
       nextId = saved.nextId ?? nextId
       pendingChanges.clear()
@@ -2598,16 +2611,19 @@ ${reviewAnswers.text}` : '',
 
     /**
      * "Start this stage over": appends a restart marker (the AI ignores every earlier answer from then on) and puts the session
-     * back at the kickoff. Unsaved drafts are dropped; saved content is untouched.
+     * back at the kickoff. Unsaved drafts are dropped; saved content is untouched. The log begins a new session (#348): its tokens start
+     * at nothing, and what the ended one used is kept as an earlier session of the Stage.
      */
     startOver() {
       if (state.phase === 'working' || state.phase === 'testing') return { ok: false, message: 'Wait for the AI to finish its turn first.' }
       controller?.abort()
-      log.addRestart()
+      // #348: a new session begins in the log, so This session counts from nothing; the one ended keeps its line and its tokens.
+      log.startOver({ opening: state.opening })
       state.resumed = null
       state.startedOver = true
       messages = []
       lastInput = 0
+      contextTokens = 0
       askAgainAt = 0
       state.compactOffer = null
       state.compactPending = false
