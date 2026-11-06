@@ -40,6 +40,7 @@ const definition = ({ owner = false } = {}) => ({
       fields: [
         { id: 'summary', title: 'Problem statement', type: 'markdown', required: true, targetWords: { small: 10, medium: 40, large: 80 } },
         { id: 'owner', title: 'Owner', type: 'text' },
+        { id: 'sponsor', title: 'Sponsor', type: 'text' },
       ],
     },
   ],
@@ -74,6 +75,7 @@ function openAiReply(text) {
 
 const draft = (id, field, value) => ({ id, input: { field, value } })
 const ask = { id: 'ask', name: 'ask_architect', input: { questions: [{ header: 'Owner', question: 'Who owns it?', field: 'details.owner', options: [{ label: 'Pat' }, { label: 'Sam' }], recommended: 'Pat', why: 'The deck names Pat.' }] } }
+const askSponsor = { id: 'ask2', name: 'ask_architect', input: { questions: [{ header: 'Sponsor', question: 'Who sponsors it?', field: 'details.sponsor', options: [{ label: 'Lee' }, { label: 'Kim' }], recommended: 'Lee', why: 'Only you can name the sponsor.' }] } }
 
 function fakeAi(handler) {
   const calls = []
@@ -182,26 +184,60 @@ test('no note while a round of cards is open', async () => {
   assert.equal(notesIn(ai), 0)
 })
 
-test('no note in Finish with your recommendations: not while the AI asks its last round, nor once the architect has had it', async () => {
-  let n = 0
-  const ai = fakeAi((req) => {
-    const said = lastUserText(req.body)
-    n++
-    if (n === 1) return anthropicReply({ tools: [draft('d1', 'details.summary', words(5)), ask] })
-    if (/^The architect chose "Finish with your recommendations"/.test(said)) return anthropicReply({ text: 'Accepted my recommendations.' })
-    if (/^The architect answered/.test(said)) return anthropicReply({ text: 'That was the last round.' })
-    return anthropicReply({ text: 'Noted.' })
-  })
+test('no note in Finish with your recommendations\' last round: not while the AI asks it, nor in its redraft once the architect has answered it', async () => {
+  const ai = fakeAi((_req, n) =>
+    [
+      anthropicReply({ tools: [draft('d1', 'details.summary', words(5)), ask] }),
+      // Finish accepts the open card's recommendation; the AI asks its one last round, about the Sponsor only the architect can name.
+      anthropicReply({ text: 'One last question.', tools: [askSponsor] }),
+      // The architect answers it: the AI redrafts and ends, the Problem statement still short. That is the last round's turn: no note.
+      anthropicReply({ text: 'That was the last round.' }),
+    ][n]
+  )
   const s = sessionWith(ai, { owner: true })
   await s.session.start()
   assert.equal(s.session.snapshot().phase, 'asking')
-  // Finish while the round is open accepts the recommendations and calls the AI for its last round: it asks nothing and ends.
   await s.session.finishWithRecommendations()
+  assert.equal(s.session.snapshot().phase, 'asking', 'the last round is open')
+  assert.equal(s.session.snapshot().round.final, true)
   assert.equal(notesIn(ai), 0)
+  const card = s.session.snapshot().round.cards[0]
+  s.session.choose(card.id, 'Kim')
+  assert.equal((await s.session.submitRound()).ok, true)
+  assert.equal(ai.calls.length, 3, 'the last round\'s turn ends with the AI\'s reply')
+  assert.equal(notesIn(ai), 0)
+  assert.equal(s.session.snapshot().phase, 'waiting')
   assert.equal(readyNow(s).ready, false, 'the Problem statement is still short')
-  // And once the architect has finished, chat gets no note either: the AI has been told to ask nothing more.
-  await s.session.send('Thanks.')
-  assert.equal(notesIn(ai), 0)
+})
+
+test('after Finish with your recommendations, a later chat turn gets the note, and is told to ask nothing more on cards', async () => {
+  // The architect finished, the last round is behind them, and they ask "so now what?": the AI is told what stands in the way, as
+  // in any turn, so its answer names the real blocker rather than a guess. Cards are no longer shown, so the note does not ask for them.
+  const ai = fakeAi((_req, n) =>
+    [
+      anthropicReply({ tools: [draft('d1', 'details.summary', words(5))] }),
+      anthropicReply({ text: 'Drafted.' }),
+      anthropicReply({ text: 'Still drafted.' }), // the note of the first turn, answered without a redraft
+      anthropicReply({ text: 'I have used my recommendations.' }), // Finish: the AI asks no last round
+      anthropicReply({ text: 'Everything is drafted.' }), // "so now what?"
+      anthropicReply({ text: 'The Problem statement is too short: I will lengthen it.', tools: [draft('d2', 'details.summary', words(30))] }),
+      anthropicReply({ text: 'Done: the stage-end card should be there now.' }),
+    ][n]
+  )
+  const s = sessionWith(ai)
+  await s.session.start()
+  assert.equal(notesIn(ai), 1)
+  await s.session.finishWithRecommendations()
+  assert.equal(ai.calls.length, 4)
+  assert.equal(notesIn(ai), 1, 'no note in the turn Finish asked for its last round')
+  await s.session.send('So now what?')
+  assert.equal(notesIn(ai), 2)
+  const note = lastUserText(ai.calls[5].body)
+  assert.match(note, /Details · Problem statement \(details\.summary\): 5 words/)
+  assert.match(note, /Finish with your recommendations/)
+  assert.doesNotMatch(note, /with question cards/)
+  assert.equal(ai.calls.length, 7)
+  assert.equal(readyNow(s).ready, true)
 })
 
 test('no note when nothing has been drafted this session, nor when the page gives no readiness', async () => {
@@ -243,6 +279,38 @@ test('the text fallback gets the same note, and the AI redrafts in a fenced bloc
   const said = ai.calls[1].body.messages.filter((m) => m.role === 'user').at(-1).content
   assert.match(typeof said === 'string' ? said : JSON.stringify(said), /Gantry's check: the Stage is not ready yet[\s\S]*Details · Problem statement \(details\.summary\): 5 words, needs about 24 to 40/)
   assert.equal(readyNow(s).ready, true)
+})
+
+test('the text fallback gets the note once a turn too: a Stage only the architect can make ready ends the turn after it', async () => {
+  const block = '```gantry-draft\n' + JSON.stringify({ field: 'details.summary', value: words(30) }) + '\n```'
+  const ai = fakeAi((_req, n) => openAiReply(n === 0 ? `I drafted the Problem statement.\n${block}` : 'I need the Owner from you before the Stage is ready.'))
+  const s = sessionWith(ai, { owner: true, provider: textOnly() })
+  await s.session.start()
+  assert.equal(ai.calls.length, 2, 'one note, then the turn ends')
+  const said = ai.calls[1].body.messages.filter((m) => m.role === 'user').at(-1).content
+  assert.match(typeof said === 'string' ? said : JSON.stringify(said), /Gantry's check: the Stage is not ready yet[\s\S]*Details · Owner \(details\.owner\): no content yet/)
+  assert.deepEqual(s.session.snapshot().thread.filter((t) => t.who === 'ai').map((t) => t.text), ['I drafted the Problem statement.', 'I need the Owner from you before the Stage is ready.'])
+  assert.equal(s.session.snapshot().phase, 'waiting')
+})
+
+const chatOnly = () => {
+  const p = providers.addAiProvider({ name: 'Plain', type: 'custom', address: 'https://models.example/v1', key: 'k', model: 'tiny' })
+  providers.setAiProviderTest(p.id, { status: 'passed', testedAt: 'now', questionCards: 'chat', readsImages: false, steps: [], message: 'ok' }, null)
+  return p
+}
+
+test('in plain-chat mode a reply that ends asking the architect something is a question open for them: no note, so it is not asked twice', async () => {
+  const block = '```gantry-draft\n' + JSON.stringify({ field: 'details.summary', value: words(30) }) + '\n```'
+  const ai = fakeAi((_req, n) => openAiReply(n === 0 ? `I drafted the Problem statement.\n${block}\n\nWho owns this work?` : 'Thanks: drafted.'))
+  const s = sessionWith(ai, { owner: true, provider: chatOnly() })
+  await s.session.start()
+  assert.equal(ai.calls.length, 1, 'the AI asked in chat: the turn ends there, as a round of cards would')
+  assert.equal(notesIn(ai), 0)
+  // A chat-mode reply that asks nothing still gets the note.
+  await s.session.send('Not sure yet.')
+  assert.equal(ai.calls.length, 3)
+  assert.equal(notesIn(ai), 1)
+  assert.match(lastUserText(ai.calls[2].body), /in short plain chat/)
 })
 
 test('in plain-chat mode the note says to ask in chat', () => {

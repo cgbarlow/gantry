@@ -141,16 +141,30 @@ export function roundsUsedUpLine(rounds = MAX_ROUNDS) {
  * from its stage-end card, from the page's own readiness (web/lib/interviewReadiness.js `stageReadiness`): the Gate check's outstanding items
  * for the Artefact aimed for, then each Field in scope that isn't done with Gantry's reasons. `fieldTitle(key)` names a Field
  * ("Module · Field"); `chat` says the architect is asked in plain chat rather than on cards. #350: the list is `outstandingItems`, the one
- * the architect's Not ready yet card shows, with each Field's key after its name so the AI can draft it.
+ * the architect's Not ready yet card shows, with each Field's key after its name so the AI can draft it. `finished`: the architect chose Finish
+ * with your recommendations and has had its last round, so cards are no longer shown.
  */
-export function readinessNote(readiness, { fieldTitle = (key) => key, chat = false } = {}) {
+export function readinessNote(readiness, { fieldTitle = (key) => key, chat = false, finished = false } = {}) {
   const named = (key) => `${fieldTitle(key)} (${key})`
   return [
     "Gantry's check: the Stage is not ready yet, so the architect has no stage-end card. What stands in the way:",
     ...outstandingItems(readiness, { name: named }).map((item) => `- ${outstandingLine(item)}`),
-    `Redraft now what you can from the Source documents and the answers you have. Ask the architect${chat ? ', in short plain chat,' : ', with question cards,'} only for what you cannot settle yourself. ` +
+    `Redraft now what you can from the Source documents and the answers you have. ${
+      finished
+        ? 'The architect chose Finish with your recommendations, so question cards are no longer shown: ask them, in short plain chat,'
+        : `Ask the architect${chat ? ', in short plain chat,' : ', with question cards,'}`
+    } only for what you cannot settle yourself. ` +
       'If nothing here is yours to settle, say in a sentence what stands in the way. Gantry sends this note once a turn.',
   ].join('\n')
+}
+
+/**
+ * #349: whether a reply asks the architect something in plain chat: its last paragraph holds a question. Where questions are asked in
+ * chat (plain-chat mode, or after Finish with your recommendations), that is what a round of cards is elsewhere: something open for them.
+ */
+export function asksInChat(text) {
+  const paragraphs = String(text ?? '').split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
+  return /\?/.test(paragraphs.at(-1) ?? '')
 }
 
 /** After this many turns in a row whose question cards were unusable, the rest of the session is asked in plain chat. */
@@ -587,6 +601,7 @@ export function createInterviewSession(config = {}) {
   let textDraftFields = [] // the Fields named in the draft blocks a text-only model has written so far this turn
   const otherTexts = [] // what the architect typed as "Other" on cards: their own words, so plain fact
   let pendingAsk = null // { callIds }: the native ask_architect call the open round answers
+  let lastRoundAnswered = false // #349: the next turn is the AI's redraft from the answers to Finish with your recommendations' last round
   let cardFailures = 0
   let cutOffs = 0 // #344: the replies in a row the output limit cut off, this turn
   let cutOffSaid = false // #344: the thread has named Max tokens this turn
@@ -1724,17 +1739,20 @@ export function createInterviewSession(config = {}) {
    *   * when the Stage is ready, or the page gives no readiness;
    *   * while anything is open for the architect: a round of cards, cards held back, a keep / use the AI's version / merge card about to be
    *     shown, review comments waiting to join, a clash;
-   *   * once the architect has chosen Finish with your recommendations: the AI has been told to ask nothing more;
+   *   * in Finish with your recommendations' last round: the turn the AI asks it (`accepting`), and its redraft once the architect has
+   *     answered it (`lastRound`), since the AI has been told to ask nothing more. A later turn the architect starts gets the note, told
+   *     that cards are no longer shown, so "so now what?" is answered with the real blockers;
+   *   * when the AI's reply asks the architect something in plain chat (`askedInChat`), where questions go in chat: that is open for them;
    *   * on a session that only brings Fields up to date or works through review comments, which has no stage-end card;
    *   * when every Field in scope is done and the Gate waits only on Fields this Stage can't draft;
    *   * when nothing is drafted this session (there is nothing for a stage-end card to Save), or the turn has nothing to show: an empty
    *     reply is #345's, with Carry on.
    * `firstId` is the first thread item of this turn.
    */
-  function readinessCheck(firstId) {
+  function readinessCheck(firstId, { lastRound = false, askedInChat = false } = {}) {
     const context = getContext()
     if (typeof context?.readiness !== 'function') return null
-    if (state.finish === 'accepting' || state.finish === 'done') return null
+    if (state.finish === 'accepting' || state.finish === 'final' || lastRound || askedInChat) return null
     if (state.update?.mode === 'only' || state.review?.mode === 'only') return null
     if (state.round || state.clash || state.held.length || queuedReview.length || [...pendingChanges.values()].some((c) => !c.shown)) return null
     // A draft the AI was asked to fix and has not sent again reaches the preview once the turn ends, so it is judged as it will stand.
@@ -1747,12 +1765,14 @@ export function createInterviewSession(config = {}) {
     // Every Field this Stage can draft is done, and what the Gate still needs lies outside it (a Module held until an earlier Stage merges,
     // #296, which the Waiting card explains): nothing the AI could fix.
     if (verdict.allDone && verdict.gate?.artefact) return null
-    return readinessNote(verdict, { fieldTitle, chat: state.cardMode === 'chat' })
+    return readinessNote(verdict, { fieldTitle, chat: state.cardMode === 'chat', finished: state.finish === 'done' })
   }
 
   async function runLoop() {
     state.phase = 'working'
     const firstId = nextId // #345: the thread items from here on are this turn's
+    const lastRound = lastRoundAnswered // #349: this turn is the redraft from the last round's answers
+    lastRoundAnswered = false
     state.carryOnAt = null
     let ended = false // #345: the turn ended of itself, not because its rounds ran out
     cutOffs = 0
@@ -1906,7 +1926,8 @@ export function createInterviewSession(config = {}) {
         }
         // #349: the turn would end here. If the Stage is not ready and nothing is open for the architect, the AI is told what stands in the
         // way and carries on, once a turn, so a Stage only the architect can make ready never loops.
-        const verdict = !readinessSaid && round < MAX_ROUNDS - 1 ? readinessCheck(firstId) : null
+        const askedInChat = (state.cardMode === 'chat' || state.finish === 'done') && asksInChat(shown)
+        const verdict = !readinessSaid && round < MAX_ROUNDS - 1 ? readinessCheck(firstId, { lastRound, askedInChat }) : null
         if (verdict) {
           readinessSaid = true
           messages.push({ role: 'user', fromGantry: true, text: verdict })
@@ -2067,7 +2088,10 @@ ${reviewAnswers.text}`
       state.finish = 'accepting'
       state.held = []
     }
-    if (last) state.finish = 'done'
+    if (last) {
+      state.finish = 'done'
+      lastRoundAnswered = true
+    }
     const heldIds = state.held.map((h) => h.id)
     const body = [
       `The architect answered ${cards.length === 1 ? 'the card' : `all ${cards.length} cards`} of round ${round.id}:`,
