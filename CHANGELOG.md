@@ -17,6 +17,105 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.16.1 — 2026-11-06
+
+The AI interview no longer leaves you guessing. A reply cut off at the AI Provider's output limit is recovered, a turn
+that ends with nothing to show says so, and a Stage that isn't ready yet says what's missing, to you and to the AI.
+The AI's replies are formatted, new AI Providers start with room to draft several Fields at once, and Word prints a
+Source document citation as a real footnote.
+
+### Added
+
+- **A Not ready yet card says what keeps a Stage from its stage-end card** (#350).
+  - **What went wrong.** Every Field could look drafted, the AI's turn would end, and no stage-end card came. Nothing
+    said what was missing.
+  - **What it does now.** Once something has been drafted and the AI's turn ends with the Stage not ready, a *Not ready
+    yet* card takes the stage-end card's place. It lists what the Gate check still needs, then each Field that isn't
+    done with the reason, for example *Scope notes · Body: 5 words, needs about 24 to 40*. Each Field's name takes you
+    to it in the live draft preview.
+  - **Two ways on.** *Ask the AI to finish these* (recommended) sends the list as your message. *Save and stop here*
+    saves the drafts and the decisions log, the same Save as Pause: the run stays paused, the Modules stay draft, and
+    nothing is advanced or sent for approval, so no Pull Request is opened. The card goes, and the stage-end card comes,
+    as soon as the Stage is ready.
+  - **When the AI can't finish them.** If everything this Stage drafts is done and the Gate waits only on Fields
+    outside it, the card says the AI can't finish them here and offers just *Save and stop here*. While *Carry on* is
+    offered, the card waits until that turn ends.
+
+### Changed
+
+- **New AI Providers start with room to draft several Fields in one reply** (#346).
+  - **What changes.** A new OpenAI, Anthropic, OpenRouter, Ollama or LM Studio AI Provider starts with **Max tokens**
+    at 16,000 instead of 4,096. Where Gantry knows the chosen model allows less, the form starts there and says so:
+    Anthropic and OpenRouter state each model's limit, and OpenAI's older chat models (gpt-3.5, gpt-4, gpt-4-turbo and
+    the first gpt-4o) stop at 4,096. Where the model has a small context window, it starts at half of it, leaving the
+    rest for the conversation.
+  - **Custom starts blank.** A **Custom** (OpenAI-compatible) AI Provider starts with Max tokens empty, so the service's
+    own limit applies, because services such as vLLM refuse a figure above their limit.
+  - **Anthropic left blank.** An Anthropic AI Provider with Max tokens left blank now sends 16,000 instead of 4,096,
+    and the form says so.
+  - **Your saved AI Providers keep their Max tokens**, including when you edit them. To give an existing one more room,
+    raise it under **AI Providers** on **Global Settings**.
+- **The AI's replies in the interview are formatted** (#347).
+  - **What changes.** Bold, lists, headings, tables and code in the AI's replies show as they do in the module editor's
+    preview, not as raw Markdown, both while the reply arrives and after. A Source document citation is a link that
+    opens the document; a removed document keeps the AI's words, marked *(removed)*. A Mermaid diagram is drawn once
+    the reply has finished arriving.
+  - **Unchanged.** Your own messages and Gantry's lines in the thread stay plain text, as typed. At phone width a wide
+    table or code block scrolls inside the reply rather than across the page.
+- **Word prints a Source document citation as a real footnote** (#351).
+  - **What changes.** Where a citation was, a small number sits against the word before it, and the footnote at the
+    foot of the page holds the citation's words, or the document's title if the words are empty. A code repository's
+    footnote also names the file and the short commit, for example *gantry, README.md, at commit de62a9e*. Word numbers
+    the footnotes in the reference document's **Footnote Text** and **Footnote Reference** styles.
+  - **No more doubled brackets.** Brackets that hold nothing but citations go, so the *((Gantry_Two_pager))* seen on
+    0.16.0 is gone. Two citations with a comma or semicolon between them keep it, as *four systems¹, ²*.
+  - **Where it stays plain.** A citation that labels a list item or a table cell, as in a References list, prints its
+    words as plain text, with no brackets and no footnote. So does a citation in a heading.
+  - **Unchanged.** The exported .md, the editor preview and the Sources appendix. This applies to the server render, a
+    Local Workspace's render and *Re-render onto this stage* alike.
+
+### Fixed
+
+- **A reply cut off at the output limit no longer quietly ends the turn** (#344).
+  - **What went wrong.** When the AI's reply reached the AI Provider's output limit part-way through a draft, the turn
+    just stopped.
+  - **What it does now.** The cut-off draft is not used. The AI is told its reply reached the limit and asked to send
+    fewer Fields per reply, or a shorter one, and the interview carries on. Meanwhile the status line reads *Reply cut
+    off at the output limit. Asking for a shorter one…*. Drafts the AI finished before the cut-off, and its text, are
+    kept.
+  - **Twice in a row.** If the next reply is cut off too, one line in the thread says so and names the fix: raise
+    **Max tokens** for that AI Provider under **AI Providers** on **Global Settings**.
+- **A turn that ends with nothing to show says so** (#345).
+  - **What went wrong.** The AI could read some files and then stop without a word, and the interview looked stalled.
+  - **What it does now.** The thread says *The AI stopped without replying.*, or, when the AI used all 24 rounds of
+    tool calls it gets in a turn, *The AI used up its 24 rounds of tool calls for this turn and stopped.* Either line
+    has a **Carry on** button that sends *go on* as your message. Screen readers hear the line once, and after Carry on
+    the keyboard focus moves to the conversation, then back to the chat box when the turn ends.
+- **The token figures are right after Start this stage over** (#348).
+  - **What went wrong.** After a start over, the Tokens block still counted the session you had ended.
+  - **What it does now.** It shows three figures. **This session** counts only the running session and goes back to
+    nothing on a start over. **Earlier sessions** is what the Stage used before it. **Context** is how full the AI's
+    conversation is now, for example *9k of 32k (28%)*, and drops after *Compact now*. The run plan's total for a
+    Stage is the two sessions added together.
+  - **Nothing is lost from the record.** A start over now begins a new session in the decisions log; the session it
+    ended keeps its own line, marked *started-over*, with every token it used. Reloading the page, even straight
+    after a start over, keeps all three figures.
+- **The AI is told what keeps the Stage from its stage-end card** (#349).
+  - **What went wrong.** When the AI's turn ended with the Stage not ready, it didn't know why, so asking it "so now
+    what?" got a guess.
+  - **What it does now.** Gantry tells the AI what the Gate check still needs and each unfinished Field with the
+    reason, and the AI carries on in the same turn, redrafting what it can and asking you only for the rest. This
+    happens at most once a turn, so a Stage only you can settle never loops. It is held back while *Finish with your
+    recommendations* asks its last round, and when the AI has just asked you something.
+  - **Its rules are corrected.** A Field is held back only by an unanswered or held-back question card. Logging an
+    open question just records it.
+
+### Notes
+
+- A reference document you uploaded yourself that has no **Footnote Text** or **Footnote Reference** style gets Word's
+  plain default for footnotes. Every bundled reference document has both.
+- Decisions logs now record interview rules version 5 (#349).
+
 ## 0.16.0 — 2026-11-05
 
 The AI searches a code repository Source document the way a developer searches a checkout: every file, complete
