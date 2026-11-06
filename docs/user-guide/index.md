@@ -818,8 +818,17 @@ While the AI is busy, one **status line** at the bottom of the conversation says
 - *Reading Tech LT deck, pages 3-5…*, *Reading Billing API src/orders/limits.ts…*, *Searching Billing API for "retry"…*: the AI is reading a Source document or a code repository.
 - *Trying again without the temperature setting…*: the model refused a temperature (or top_p, top_k) setting, and Gantry is sending the same request again without it (see **AI Providers**).
 - *Compacting the conversation…* and *Preparing Billing API… 12.4 MB* (see **Token usage and caching** and **Code repositories as Source documents**).
+- *Reply cut off at the output limit. Asking for a shorter one…*: the AI's last reply was too long for the AI Provider's output limit (see below).
 
 For screen readers the line is a polite status: each new activity is announced once, and the seconds and megabytes are not read out as they change.
+
+#### When a reply is cut off
+
+Every AI Provider stops a reply once it reaches its output limit, the AI Provider's **Max tokens** setting. A reply that drafts several long Fields at once can reach it part-way through a draft. Gantry doesn't lose the turn when that happens:
+
+- **Nothing half-written is used.** A draft the limit cut off is not checked or shown. The drafts the AI finished before it, and anything it wrote in the chat, are kept as usual.
+- **The AI is told and carries on.** Gantry tells the AI its reply reached the output limit and asks it to draft fewer Fields per reply, or a shorter one. The status line says *Reply cut off at the output limit. Asking for a shorter one…* while it does.
+- **Twice in a row, the thread says so.** If the next reply is cut off too, a line in the conversation says so once and names the fix: raise **Max tokens** for that AI Provider under **AI Providers** on **Global Settings**. The AI keeps trying with shorter replies in the meantime.
 
 #### Gantry checks every draft
 

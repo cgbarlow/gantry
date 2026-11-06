@@ -115,6 +115,8 @@ test('the status line names what is under way, the most specific thing first, an
   assert.deepEqual(statusLine({ ...working, waiting: { since: 0, without: null } }, 12_400), { kind: 'waiting', text: 'Waiting for the AI…', detail: '12 s', ticking: true })
   assert.deepEqual(statusLine({ ...working, waiting: { since: 0, without: 'temperature' } }, 3_000), { kind: 'retrying', text: 'Trying again without the temperature setting…', detail: '3 s', ticking: true })
   assert.equal(statusLine({ ...working, waiting: { since: 0, without: 'temperature and top_p' } }, 0).text, 'Trying again without the temperature and top_p settings…')
+  // #344: the reply before was cut off at the output limit, and the next request asks for a shorter one.
+  assert.deepEqual(statusLine({ ...working, waiting: { since: 0, without: null, cutOff: true } }, 4_000), { kind: 'cut-off', text: 'Reply cut off at the output limit. Asking for a shorter one…', detail: '4 s', ticking: true })
   assert.equal(statusLine({ ...working, writing: true }).text, 'Writing…')
   assert.equal(statusLine({ ...working, writing: true, preparing: true }).text, 'Preparing questions…')
   assert.equal(statusLine({ ...working, writing: true, drafting: true, draftingTitles: [] }).text, 'Drafting…')

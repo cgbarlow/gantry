@@ -62,7 +62,7 @@
 //     that card only when it would allow the re-open right then (`context.reopen`), and otherwise logs an open question naming the blocker.
 //
 // Nothing here saves. Drafts are an unsaved preview until the architect confirms the stage-end card.
-import { runTurn, runWithRecovery, ensureTested, isTooLong, EMPTY_USAGE } from './aiClient.js'
+import { runTurn, runWithRecovery, ensureTested, isTooLong, EMPTY_USAGE, CUT_OFF_CALL_RESULT } from './aiClient.js'
 import { ASK_TOOL_NAME, FALLBACK_FENCE } from './aiCards.js'
 import { AiProviderError, getAiProvider } from './aiProviders.js'
 import { artefactChoices, buildInterviewBrief, estimateTokens, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
@@ -114,6 +114,14 @@ export const MAX_ROUNDS = 24
 
 // What the architect sees of the AI's text: neither the draft blocks nor the read requests a text-only model writes.
 const shownText = (text) => stripLogBlocks(stripReadBlocks(stripDraftBlocks(text)))
+
+/** #344: what the AI is told after a reply the output limit cut off that left no tool call to answer (its text, or calls dropped whole). */
+const CUT_OFF_NOTE = 'Your last reply reached the output limit and was cut off. Send fewer Fields per reply, or a shorter one, and carry on.'
+
+/** #344: the thread's line when the AI's reply is cut off at the output limit twice in a row, said once a turn. */
+export function cutOffAgainLine(providerName) {
+  return `The AI's reply was cut off at the output limit again. To give it more room, raise Max tokens for ${providerName || 'this AI Provider'} under AI Providers on Global Settings.`
+}
 
 /** After this many turns in a row whose question cards were unusable, the rest of the session is asked in plain chat. */
 export const CARD_FAILURES_BEFORE_CHAT = 2
@@ -185,6 +193,8 @@ export function statusLine(snap, now = Date.now()) {
     return line('drafting', titles.length ? `Drafting ${listOf(titles)}…` : 'Drafting…')
   }
   if (snap.preparing) return line('preparing', 'Preparing questions…')
+  // #344: the reply before reached the output limit, and the request now under way asks for a shorter one.
+  if (snap.waiting?.cutOff) return line('cut-off', 'Reply cut off at the output limit. Asking for a shorter one…', seconds(snap.waiting.since), true)
   if (snap.waiting?.without) {
     const plural = / and /.test(snap.waiting.without) ? 'settings' : 'setting'
     return line('retrying', `Trying again without the ${snap.waiting.without} ${plural}…`, seconds(snap.waiting.since), true)
@@ -540,6 +550,8 @@ export function createInterviewSession(config = {}) {
   const otherTexts = [] // what the architect typed as "Other" on cards: their own words, so plain fact
   let pendingAsk = null // { callIds }: the native ask_architect call the open round answers
   let cardFailures = 0
+  let cutOffs = 0 // #344: the replies in a row the output limit cut off, this turn
+  let cutOffSaid = false // #344: the thread has named Max tokens this turn
   let controller = null
   let readsSinceDraft = [] // the reads made since the last drafts landed (#292)
   const repositoryBlocks = new Set() // #319: the repositories (and why) the architect has been told this session they can't be read
@@ -890,6 +902,7 @@ export function createInterviewSession(config = {}) {
     let result
     const repositoryTool = REPOSITORY_TOOL_NAMES.includes(call.name)
     if (call.name !== DRAFT_TOOL_NAME && call.name !== READ_TOOL_NAME && call.name !== LOG_TOOL_NAME && !repositoryTool) result = { ok: false, content: `There is no tool called ${call.name}.` }
+    else if (call.cutOff) result = { ok: false, content: CUT_OFF_CALL_RESULT } // #344: the output limit cut it short, so it is not run
     else if (call.invalid || call.input === null || call.input === undefined) {
       result = { ok: false, content: `The arguments were not valid JSON: ${call.invalid ?? (call.name === READ_TOOL_NAME ? 'send {"id": "document-id", "range": "pages 3-5"}' : repositoryTool ? 'send {"id": "repository-id", "path": "src/file.ts"}' : 'send {"field": "module.field", "value": ...}')}.` }
     } else if (repositoryTool) result = runRepository(call.name, call.input) // #319: a promise, settled before the result goes back to the AI
@@ -1429,8 +1442,9 @@ export function createInterviewSession(config = {}) {
       return
     }
     if (event.type === 'retry') {
-      // An invalid card went back to the model: a new request, waiting again.
-      state.waiting = { since: clock(), without: null }
+      // An invalid card went back to the model: a new request, waiting again. #344: a card the output limit cut off says so on the line.
+      if (event.cutOff) cutOffAgain()
+      state.waiting = { since: clock(), without: null, ...(event.cutOff ? { cutOff: true } : {}) }
       state.writing = false
       emit()
       return
@@ -1475,7 +1489,9 @@ export function createInterviewSession(config = {}) {
         emit()
       }
     } else if (event.type === 'tool-call') {
-      resultFor(event.call)
+      // #344: a call whose arguments are not whole JSON is answered once the turn is over, when the stop reason says whether the output
+      // limit cut it off; answering it now would tell the AI only that the JSON was invalid.
+      if (event.call.input !== null && event.call.input !== undefined) resultFor(event.call)
       draftingByCall.delete(event.call.id)
       state.drafting = draftingByCall.size > 0
       setDraftingFields()
@@ -1651,8 +1667,17 @@ export function createInterviewSession(config = {}) {
     state.compactOffer = { before: lastInput, after: Math.min(after, lastInput), window }
   }
 
+  // #344: one more reply in a row the output limit cut off. The second says in the thread, once a turn, that Max tokens is the fix.
+  function cutOffAgain() {
+    if (++cutOffs < 2 || cutOffSaid) return
+    cutOffSaid = true
+    say('sys', cutOffAgainLine(getAiProvider(state.providerId)?.name), { cutOff: true })
+  }
+
   async function runLoop() {
     state.phase = 'working'
+    cutOffs = 0
+    cutOffSaid = false
     state.error = null
     state.preparing = false
     state.compactOffer = null
@@ -1690,6 +1715,13 @@ export function createInterviewSession(config = {}) {
           }, handlers)
         )
         state.waiting = null // a reply that sent nothing at all has still ended
+        if (result.cutOff) cutOffAgain()
+        else cutOffs = 0
+        // #344: after a reply the output limit cut off, the next request asks for a shorter one, and the line says so until it answers.
+        const askShorter = () => {
+          carried = { since: clock(), without: null, cutOff: true }
+          state.waiting = carried
+        }
         const provider = getAiProvider(state.providerId)
         countUsage(provider, result.usage)
         lastInput = result.usage.inputTokens
@@ -1733,6 +1765,11 @@ export function createInterviewSession(config = {}) {
           for (const call of result.otherToolCalls) messages.push(toolMessage(call, await resultFor(call)))
           // Once a round of drafts has landed, the reads before it are spent: they are inputs of those drafts, not of later ones.
           if (result.otherToolCalls.some((c) => c.name === DRAFT_TOOL_NAME)) readsSinceDraft = []
+          if (result.cutOff) {
+            // #344: a cut-off call's result says so; a reply the limit cut off between calls has nothing that does, so a note goes with them.
+            if (!result.otherToolCalls.some((c) => c.cutOff)) messages.push({ role: 'user', fromGantry: true, text: CUT_OFF_NOTE })
+            askShorter()
+          }
           stopDrafting()
           emit()
           continue
@@ -1771,9 +1808,12 @@ export function createInterviewSession(config = {}) {
             say('sys', 'This model could not produce valid question cards, so Gantry will ask in plain chat from here on. That works, but is less reliable.')
           }
         }
-        if (retry) {
+        // #344: a reply the output limit cut off is answered, so the AI sends a shorter one rather than stopping part-way.
+        const cutOff = result.cutOff && round < MAX_ROUNDS - 1
+        if (retry || cutOff) {
           const check = notes.length ? `Gantry's check of your drafts:\n- ${notes.join('\n- ')}` : ''
-          messages.push({ role: 'user', fromGantry: true, ...joinParts([readsReply, check ? { text: check } : null].filter(Boolean), '\n\n') })
+          messages.push({ role: 'user', fromGantry: true, ...joinParts([cutOff ? { text: CUT_OFF_NOTE } : null, readsReply, check ? { text: check } : null].filter(Boolean), '\n\n') })
+          if (cutOff) askShorter()
           emit()
           continue
         }

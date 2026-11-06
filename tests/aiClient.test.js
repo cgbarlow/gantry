@@ -209,6 +209,72 @@ test('a call to the caller’s own tool comes back as a tool turn, with the card
   assert.deepEqual(ai.calls[0].body.tools.map((t) => t.function.name), ['ask_architect', 'read_document_section'])
 })
 
+// ---------- #344: a reply cut off at the output limit ----------
+
+// An Anthropic stream with some text, one complete draft_field call, and a second one the output limit cut off part-way: its block still
+// closes, with arguments that are not whole JSON, and the message stops with `max_tokens`.
+function anthropicCutOffStream({ stop = 'max_tokens' } = {}) {
+  const event = (name, data) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`
+  return (
+    event('message_start', { type: 'message_start', message: { id: 'm', role: 'assistant', content: [], usage: { input_tokens: 10, output_tokens: 1 } } }) +
+    event('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }) +
+    event('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Drafting both.' } }) +
+    event('content_block_stop', { type: 'content_block_stop', index: 0 }) +
+    event('content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'd1', name: 'draft_field', input: {} } }) +
+    event('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"field": "details.summary", "value": "Short."}' } }) +
+    event('content_block_stop', { type: 'content_block_stop', index: 1 }) +
+    event('content_block_start', { type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'd2', name: 'draft_field', input: {} } }) +
+    event('content_block_delta', { type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '{"field": "details.notes", "value": "A very long dra' } }) +
+    event('content_block_stop', { type: 'content_block_stop', index: 2 }) +
+    event('message_delta', { type: 'message_delta', delta: { stop_reason: stop }, usage: { output_tokens: 4096 } }) +
+    event('message_stop', { type: 'message_stop' })
+  )
+}
+const draftTool = { name: 'draft_field', description: 'Draft.', parameters: { type: 'object' } }
+
+test('#344: a reply Anthropic stopped at max_tokens is cut off, and only the call the limit cut short is marked; the complete one is used', async () => {
+  const p = anthropic()
+  const ai = fakeAi(() => sse(anthropicCutOffStream()))
+  const result = await client.runTurn(p, { messages: [{ role: 'user', text: 'go' }], tools: [draftTool] }, { fetchImpl: ai.fetchImpl })
+  assert.equal(result.kind, 'tools')
+  assert.equal(result.cutOff, true)
+  assert.equal(result.text, 'Drafting both.', 'the text before the cut-off is kept')
+  const [whole, cut] = result.otherToolCalls
+  assert.deepEqual(whole.input, { field: 'details.summary', value: 'Short.' })
+  assert.equal(whole.cutOff, undefined)
+  assert.equal(cut.input, null)
+  assert.equal(cut.cutOff, true)
+  assert.equal(ai.calls.length, 1, 'runTurn does not send it again itself: the caller answers the calls')
+})
+
+test('#344: an OpenAI-compatible reply that finished with "length" is cut off; one that finished normally is not', async () => {
+  const p = openai()
+  const chunk = (delta, finish = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
+  const cut = chunk({ tool_calls: [{ index: 0, id: 'call_1', function: { name: 'draft_field', arguments: '{"field": "details.notes", "value": "Lo' } }] }) + chunk({}, 'length') + 'data: [DONE]\n\n'
+  let result = await client.runTurn(p, { messages: [{ role: 'user', text: 'go' }], tools: [draftTool] }, { fetchImpl: fakeAi(() => sse(cut)).fetchImpl })
+  assert.equal(result.cutOff, true)
+  assert.equal(result.otherToolCalls[0].cutOff, true)
+  result = await client.runTurn(p, { messages: [{ role: 'user', text: 'go' }], tools: [draftTool] }, { fetchImpl: fakeAi(() => sse(openAiToolStream({ field: 'details.notes', value: 'x' }, 'draft_field'))).fetchImpl })
+  assert.equal(result.cutOff, false)
+  assert.equal(result.otherToolCalls[0].cutOff, undefined)
+})
+
+test('#344: a question card the output limit cut off goes back once saying the reply reached the output limit, not just that the JSON was invalid', async () => {
+  const p = openai()
+  const chunk = (delta, finish = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
+  const cut = chunk({ tool_calls: [{ index: 0, id: 'call_1', function: { name: ASK_TOOL_NAME, arguments: '{"questions": [{"question": "Which col' } }] }) + chunk({}, 'length') + 'data: [DONE]\n\n'
+  const ai = fakeAi((_req, n) => sse(n === 0 ? cut : openAiToolStream(validCard)))
+  const log = []
+  const result = await client.runTurn(p, { messages: [{ role: 'user', text: 'go' }] }, { fetchImpl: ai.fetchImpl, onEvent: (e) => log.push(e) })
+  assert.equal(result.kind, 'cards')
+  assert.equal(result.cutOff, false, 'the reply the cards came in was whole')
+  assert.equal(log.find((e) => e.type === 'retry').cutOff, true)
+  const sent = ai.calls[1].body.messages.at(-1)
+  assert.equal(sent.role, 'tool')
+  assert.match(sent.content, /output limit/)
+  assert.doesNotMatch(sent.content, /not valid JSON/)
+})
+
 // ---------- failures ----------
 
 test('each failure says what to do: key, credit, rate limit, address and model', async () => {
