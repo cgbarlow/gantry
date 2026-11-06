@@ -41,6 +41,9 @@ function withFakeAiProvider({ cors = false } = {}, fn) {
     res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders })
     if (req.url.startsWith('/v1/models')) {
       res.end(JSON.stringify({ data: [{ id: 'claude-big', max_input_tokens: 1000000, max_tokens: 128000 }, { id: 'claude-small', max_input_tokens: 200000, max_tokens: 8192 }] }))
+    } else if (req.url.startsWith('/or/models')) {
+      // OpenRouter's shape (#346): a small model whose top endpoint doesn't say how long a reply may be.
+      res.end(JSON.stringify({ data: [{ id: 'x/small', context_length: 8192, top_provider: { max_completion_tokens: null } }, { id: 'x/big', context_length: 400000, top_provider: { max_completion_tokens: 128000 } }] }))
     } else if (req.url.startsWith('/api/tags')) {
       res.end(JSON.stringify({ models: [{ name: 'llama3.1:8b' }, { name: 'qwen3:4b' }] }))
     } else if (req.url.startsWith('/api/show')) {
@@ -171,6 +174,10 @@ test('a new AI Provider of each type opens with the higher Max tokens, lowered f
       await page.waitForFunction(() => document.querySelector('#ai-provider-max-tokens').value === '16000')
       assert.equal(await page.locator('#ai-provider-max-tokens-hint').count(), 0)
 
+      // Anthropic needs a figure, so blank sends the default; the hint says so, and that some models refuse it.
+      await page.fill('#ai-provider-max-tokens', '')
+      assert.match(await page.textContent('#ai-provider-max-tokens-hint'), /Blank sends 16,000/)
+
       // Once the architect types a number, choosing a model leaves it alone.
       await page.fill('#ai-provider-max-tokens', '4096')
       await page.fill('#ai-provider-model', 'claude-small')
@@ -191,6 +198,28 @@ test('a new AI Provider of each type opens with the higher Max tokens, lowered f
       await page.click('.ai-provider-dialog .btn.primary')
       stored = await page.evaluate(() => JSON.parse(localStorage.getItem('gantry:ai-providers')))
       assert.equal(stored[0].maxTokens, 4096)
+    }))
+  })
+})
+
+// #346: a model whose context window the list gives, but not how long a reply may be, starts at half that window, so the reply limit
+// leaves room for the conversation.
+test('a new AI Provider on a model with a small context window starts at half of it', async () => {
+  await withFakeAiProvider({}, async (aiBase) => {
+    await withRunningServer({ allowPrivateAiUrls: true }, withPage(async (page, base) => {
+      await openSettings(page, base)
+      await page.click('text=Add AI Provider')
+      await page.fill('#ai-provider-name', 'Router')
+      await page.selectOption('#ai-provider-type', 'openrouter')
+      await page.fill('#ai-provider-address', `${aiBase}/or`)
+      await page.fill('#ai-provider-key', 'sk-or-1')
+      await page.waitForFunction(() => document.querySelectorAll('#ai-provider-model-options option').length === 2)
+      await page.fill('#ai-provider-model', 'x/small')
+      await page.waitForFunction(() => document.querySelector('#ai-provider-max-tokens').value === '4096')
+      assert.match(await page.textContent('#ai-provider-max-tokens-hint'), /Half this model's context window/)
+      await page.fill('#ai-provider-model', 'x/big')
+      await page.waitForFunction(() => document.querySelector('#ai-provider-max-tokens').value === '16000')
+      assert.equal(await page.locator('#ai-provider-max-tokens-hint').count(), 0)
     }))
   })
 })

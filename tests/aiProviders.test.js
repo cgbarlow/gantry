@@ -199,6 +199,21 @@ test('#346: a new AI Provider starts with room to draft several Fields in one re
   for (const model of ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo', 'gpt-4-0125-preview', 'gpt-4o-2024-05-13']) assert.equal(mod.suggestedMaxTokens({ type: 'openai', model }), 4096, model)
   for (const model of ['gpt-4o', 'gpt-4o-2024-08-06', 'gpt-4o-mini', 'gpt-4.1', 'gpt-5', 'o3']) assert.equal(mod.suggestedMaxTokens({ type: 'openai', model }), 16000, model)
 
+  // A model whose context window the list gives starts at no more than half of it, leaving the rest for the conversation: a reply
+  // limit as big as the whole window can't fit beside any prompt, and an endpoint that refuses it says "maximum context length", which
+  // reads as a conversation too long (compacting it can't help). OpenRouter often leaves max_completion_tokens null for a small model.
+  assert.equal(mod.suggestedMaxTokens({ type: 'openrouter', model: 'x/small' }, { id: 'x/small', contextWindow: 8192, maxOutput: null }), 4096)
+  assert.equal(mod.suggestedMaxTokens({ type: 'openrouter', model: 'x/same' }, { id: 'x/same', contextWindow: 8192, maxOutput: 8192 }), 4096)
+  assert.equal(mod.suggestedMaxTokens({ type: 'lmstudio', model: 'gemma' }, { id: 'gemma', contextWindow: 4096, maxOutput: null }), 2048)
+  assert.equal(mod.suggestedMaxTokens({ type: 'lmstudio', model: 'qwen' }, { id: 'qwen', contextWindow: 32768, maxOutput: null }), 16000)
+  assert.equal(mod.suggestedMaxTokens({ type: 'anthropic', model: 'claude-old' }, { id: 'claude-old', contextWindow: 200000, maxOutput: 8192 }), 8192)
+  // What limited it, for the dialog's hint.
+  assert.deepEqual(mod.maxTokensSuggestion({ type: 'openrouter', model: 'x/small' }, { id: 'x/small', contextWindow: 8192, maxOutput: null }), { maxTokens: 4096, limitedBy: 'context' })
+  assert.deepEqual(mod.maxTokensSuggestion({ type: 'anthropic', model: 'claude-old' }, { id: 'claude-old', contextWindow: 200000, maxOutput: 8192 }), { maxTokens: 8192, limitedBy: 'model' })
+  assert.deepEqual(mod.maxTokensSuggestion({ type: 'openai', model: 'gpt-4' }), { maxTokens: 4096, limitedBy: 'model' })
+  assert.deepEqual(mod.maxTokensSuggestion({ type: 'openrouter', model: 'x/y' }, { id: 'x/y', contextWindow: 400000, maxOutput: 128000 }), { maxTokens: 16000, limitedBy: null })
+  assert.deepEqual(mod.maxTokensSuggestion({ type: 'custom', model: 'x' }, { id: 'x', contextWindow: 4096, maxOutput: null }), { maxTokens: null, limitedBy: null })
+
   // Saved AI Providers keep their setting, blank included: nothing rewrites them.
   assert.equal(mod.normaliseAiProvider({ type: 'anthropic', maxTokens: 4096 }).maxTokens, 4096)
   assert.equal(mod.normaliseAiProvider({ type: 'anthropic' }).maxTokens, null)

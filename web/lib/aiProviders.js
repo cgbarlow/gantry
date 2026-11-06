@@ -386,15 +386,27 @@ export function parseModels(type, body) {
 }
 
 /**
- * #346: the Max tokens a new AI Provider of this type and model starts with: the type's default, or less where the model is known to
- * allow less (`listed`, its entry from parseModels, or OpenAI's older chat models). Null for a Custom one, which leaves the limit to the
- * server. A saved AI Provider is never changed by this; the dialog only offers it while the architect hasn't typed their own.
+ * #346: the Max tokens a new AI Provider of this type and model starts with, and what held it down: the type's default
+ * (`limitedBy: null`), or less where the model is known to allow less (`'model'`: `listed`, its entry from parseModels, or OpenAI's older
+ * chat models), or where the list gives a context window under twice the default (`'context'`: half of it, leaving the rest for the
+ * conversation; a limit near the whole window can't fit beside a prompt, and an endpoint that refuses it says "maximum context length",
+ * which reads as a conversation too long). Null for a Custom one, which leaves the limit to the server. A saved AI Provider is never
+ * changed by this; the dialog only offers it while the architect hasn't typed their own.
  */
-export function suggestedMaxTokens({ type, model = '' }, listed = null) {
+export function maxTokensSuggestion({ type, model = '' }, listed = null) {
   const start = aiProviderType(type)?.defaultMaxTokens ?? null
-  if (start === null) return null
+  if (start === null) return { maxTokens: null, limitedBy: null }
   const allowed = listed?.maxOutput ?? (type === 'openai' && OLDER_OPENAI_MODEL.test(model.trim()) ? OLDER_OPENAI_MAX_TOKENS : null)
-  return allowed && allowed > 0 ? Math.min(start, allowed) : start
+  const halfContext = listed?.contextWindow > 0 ? Math.floor(listed.contextWindow / 2) : null
+  let suggestion = { maxTokens: start, limitedBy: null }
+  if (allowed > 0 && allowed < suggestion.maxTokens) suggestion = { maxTokens: allowed, limitedBy: 'model' }
+  if (halfContext > 0 && halfContext < suggestion.maxTokens) suggestion = { maxTokens: halfContext, limitedBy: 'context' }
+  return suggestion
+}
+
+/** #346: the Max tokens alone from maxTokensSuggestion. */
+export function suggestedMaxTokens(provider, listed = null) {
+  return maxTokensSuggestion(provider, listed).maxTokens
 }
 
 /** Ollama's `POST /api/show` request for one model: the only place it states the context length. */

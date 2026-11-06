@@ -27,6 +27,8 @@ import {
   fetchOllamaContextWindow,
   contextWindowSource,
   suggestedMaxTokens,
+  maxTokensSuggestion,
+  DEFAULT_MAX_TOKENS,
 } from './aiProviders.js'
 import { testAndStore } from './aiClient.js'
 
@@ -35,6 +37,19 @@ const MODEL_FETCH_DEBOUNCE_MS = 500
 // #346: a new AI Provider starts with its type's Max tokens (16,000, or blank for a Custom one; see web/lib/aiProviders.js).
 function blankDraft(typeId = 'openai') {
   return normaliseAiProvider({ id: 'new', type: typeId, name: '', temperature: 0.3, maxTokens: suggestedMaxTokens({ type: typeId }) })
+}
+
+// #346: what the Max tokens figure means where it isn't plain: why a new AI Provider's suggestion is lower than the type's default, or what
+// blank sends. Anthropic needs a figure, so blank sends DEFAULT_MAX_TOKENS (web/lib/aiAdapters.js), which a model that allows less refuses.
+function maxTokensHint(draft, limitedBy) {
+  let text = null
+  if (limitedBy === 'model') text = 'The most this model allows.'
+  else if (limitedBy === 'context') text = "Half this model's context window, leaving the rest for the conversation."
+  else if (draft.maxTokens === null && draft.type === 'custom') text = "Blank leaves it to the service's own limit. Some refuse a figure above it."
+  else if (draft.maxTokens === null && draft.type === 'anthropic') {
+    text = `Blank sends ${DEFAULT_MAX_TOKENS.toLocaleString('en')}, as Anthropic needs a figure. A model that allows less refuses it.`
+  }
+  return text ? html`<p class="workspace-field-hint" id="ai-provider-max-tokens-hint">${text}</p>` : null
 }
 
 function textOrEmpty(value) {
@@ -59,9 +74,9 @@ export function AiProviderDialog({ provider, onClose }) {
   const [contextSource, setContextSource] = useState(provider?.contextWindowEdited ? 'edited' : 'default')
   const autoKnown = useRef(false)
   // #346: Max tokens follows the type and the chosen model only for a new AI Provider, and only until the architect types their own. A
-  // saved one keeps its setting.
+  // saved one keeps its setting. `maxTokensLimitedBy` says why the suggestion is below the type's default, for the hint.
   const maxTokensTyped = useRef(!isNew)
-  const [maxTokensForModel, setMaxTokensForModel] = useState(false)
+  const [maxTokensLimitedBy, setMaxTokensLimitedBy] = useState(null)
   const nameRef = useRef(null)
   const others = aiProviders.value.filter((p) => p.id !== provider?.id)
   const typeInfo = aiProviderType(draft.type)
@@ -145,8 +160,8 @@ export function AiProviderDialog({ provider, onClose }) {
   useEffect(() => {
     if (maxTokensTyped.current || models.status === 'loading') return
     const found = models.list.find((m) => m.id === draft.model) ?? null
-    const next = suggestedMaxTokens(draft, found)
-    setMaxTokensForModel(next !== null && next < (typeInfo.defaultMaxTokens ?? Infinity))
+    const { maxTokens: next, limitedBy } = maxTokensSuggestion(draft, found)
+    setMaxTokensLimitedBy(limitedBy)
     if (next !== draft.maxTokens) set({ maxTokens: next })
   }, [draft.type, draft.model, models])
 
@@ -267,16 +282,12 @@ export function AiProviderDialog({ provider, onClose }) {
                 draft.maxTokens,
                 (v) => {
                   maxTokensTyped.current = true
-                  setMaxTokensForModel(false)
+                  setMaxTokensLimitedBy(null)
                   set({ maxTokens: v })
                 },
                 { min: 1 }
               )}
-              ${maxTokensForModel
-                ? html`<p class="workspace-field-hint" id="ai-provider-max-tokens-hint">The most this model allows.</p>`
-                : draft.type === 'custom' && draft.maxTokens === null
-                  ? html`<p class="workspace-field-hint" id="ai-provider-max-tokens-hint">Blank leaves it to the service's own limit. Some refuse a figure above it.</p>`
-                  : null}
+              ${maxTokensHint(draft, maxTokensLimitedBy)}
               ${err('maxTokens')}
             </div>
           </div>
