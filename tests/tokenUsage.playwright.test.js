@@ -280,6 +280,16 @@ test('after Start this stage over, This session counts only the new calls, Earli
     assert.equal(await count('interview-tokens-context'), 0, 'the conversation was cleared')
     assert.equal((await row(page, 's1').locator('[data-testid="run-plan-tokens"]').textContent()).trim(), '18k tokens')
 
+    // A reload straight after the start over keeps it: the same figures at the kickoff, which still says Start interview, and the
+    // conversation from before the start over does not come back (a review of #348 found that it did).
+    await page.reload()
+    await page.waitForSelector('[data-testid="interview-start"]:not([disabled])')
+    assert.equal(await text('interview-tokens-session'), '0 tokens', 'This session is still nothing after a reload')
+    assert.equal(await text('interview-tokens-earlier'), '18k tokens')
+    assert.equal(await count('interview-tokens-context'), 0)
+    assert.equal(await text('interview-start'), 'Start interview')
+    assert.equal(await count('interview-copy-restored'), 0)
+
     await page.waitForSelector('[data-testid="interview-start"]:not([disabled])')
     await page.click('[data-testid="interview-start"]')
     await page.waitForSelector('[data-testid="interview-stage-end"]')

@@ -2514,9 +2514,13 @@ ${reviewAnswers.text}` : '',
      * True when the session is somewhere a copy can be taken: not mid-turn, under way, and holding something a Save has not taken: a draft
      * not yet saved, an answer not yet in the committed log, or a round of cards waiting. Straight after a Save there is nothing to keep, so
      * a reload shows the Interview page afresh (and, for a run paused by Save and stop, its Resume) rather than a copy of a finished Stage.
+     *
+     * #348: the kickoff a Start this stage over left is kept too, while its restart marker waits for a Save: the new session, the one it
+     * ended and the marker. Otherwise the copy from before the start over would stay, and a reload would bring the old session back.
      */
     get canKeepCopy() {
-      if (['kickoff', 'testing', 'working', 'paused'].includes(state.phase)) return false
+      if (state.phase === 'kickoff') return state.startedOver && log.pending().length > 0
+      if (['testing', 'working', 'paused'].includes(state.phase)) return false
       return Object.keys(state.drafts).length > 0 || log.pending().length > 0 || Boolean(state.round)
     },
 
@@ -2555,6 +2559,7 @@ ${reviewAnswers.text}` : '',
           compactOffer: state.compactOffer,
           compactPending: state.compactPending,
           carryOnAt: state.carryOnAt,
+          startedOver: state.startedOver,
         },
         compaction: { lastInput, askAgainAt, contextTokens },
         pendingChanges: [...pendingChanges],
@@ -2578,6 +2583,17 @@ ${reviewAnswers.text}` : '',
     importState(saved) {
       if (!saved || state.phase !== 'kickoff' || !saved.state) return false
       const s = saved.state
+      // #348: a copy taken at the kickoff a Start this stage over left. Only the log has anything in it (the new session, the one ended
+      // and the restart marker); the page stays at the kickoff, and its next start is a fresh interview.
+      if (s.phase === 'kickoff') {
+        if (!s.startedOver) return false
+        state.providerId = s.providerId ?? state.providerId
+        state.startedOver = true
+        nextId = saved.nextId ?? nextId
+        log.importState(saved.log)
+        emit()
+        return true
+      }
       Object.assign(state, {
         providerId: s.providerId ?? state.providerId,
         thread: s.thread ?? [],
@@ -2600,6 +2616,7 @@ ${reviewAnswers.text}` : '',
         compactOffer: s.compactOffer ?? null,
         compactPending: s.compactPending === true,
         carryOnAt: s.carryOnAt ?? null,
+        startedOver: s.startedOver === true,
         compacting: false,
         kickoffError: null,
         drafting: null,
@@ -2692,8 +2709,13 @@ ${reviewAnswers.text}` : '',
     startOver() {
       if (state.phase === 'working' || state.phase === 'testing') return { ok: false, message: 'Wait for the AI to finish its turn first.' }
       controller?.abort()
-      // #348: a new session begins in the log, so This session counts from nothing; the one ended keeps its line and its tokens.
-      log.startOver({ opening: state.opening })
+      // #348: a new session begins in the log, so This session counts from nothing; the one ended keeps its line and its tokens, and
+      // says who ran it, its target, Artefact and instructions as they are now, before the next kickoff picks again.
+      const context = getContext?.() ?? {}
+      log.startOver({
+        opening: state.opening,
+        status: { who: context.actor, target: context.targetStageId ?? context.stageId, artefact: context.artefactId, instructions: context.instructionsVersion },
+      })
       state.resumed = null
       state.startedOver = true
       messages = []

@@ -700,7 +700,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       if (copy) {
         const standing = copyStanding(copy, setup.logs?.[instance.stage.id] ?? null)
         if (standing === 'fresh') session.loadDecisions(setup.logs?.[instance.stage.id] ?? null)
-        if (standing === 'fresh' && session.importState(copy.state)) setCopyRestored(true)
+        // #348: a copy of the kickoff a Start this stage over left picks up only the start over, so it says nothing about a working copy.
+        if (standing === 'fresh' && session.importState(copy.state)) setCopyRestored(copy.state?.state?.phase !== 'kickoff')
         else {
           workingCopies.setAside(sessionKey, copy, standing)
           setAsideNotice({ savedAt: copy.savedAt })
@@ -927,7 +928,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
 
   async function startInterview(options) {
     // #331: the opening message is what the architect typed; else, on a Stage of a run, the run's; else, resuming the session they paused, that session's.
-    const words = opening.trim() || ((carryingOn || sameRun) && run.opening) || (startedOver.current ? '' : ctxRef.current?.resume?.adopt?.opening ?? '')
+    const words = opening.trim() || ((carryingOn || sameRun) && run.opening) || (startedOver.current || snap?.startedOver ? '' : ctxRef.current?.resume?.adopt?.opening ?? '')
     // Bring up to date, a review round and a revision are not runs: they have no target Stage and never move the Instance on (#298, #303, #299).
     // A revision has no box: its round is the Owner's comments.
     if (update || review || revise) {

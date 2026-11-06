@@ -278,3 +278,97 @@ test('after a start over, the session it ended is never named as another session
   assert.equal(session.snapshot().sessionWarning, null)
   assert.notEqual(session.snapshot().phase, 'kickoff', 'the interview started')
 })
+
+// ---------- review fixes ----------
+
+test('a reload straight after Start this stage over keeps it: the kickoff copy holds the new session, the ended one and the restart marker', async () => {
+  const replies = [{ input: 9000, cached: 8000 }, { input: 3000 }]
+  const ai = fakeAi(() => anthropicReply({ text: 'Hello.', ...replies.shift() }))
+  const provider = anthropic(200000)
+  const { session, context } = sessionWith(ai, provider)
+  await session.start()
+  assert.equal(session.canKeepCopy, true)
+  session.startOver()
+  assert.equal(session.snapshot().phase, 'kickoff')
+  // Before the fix a kickoff never kept a copy, so the one from before the start over stayed and a reload brought the old session back.
+  assert.equal(session.canKeepCopy, true, 'the start over is something a Save has not taken')
+  const before = session.snapshot()
+  const copy = JSON.parse(JSON.stringify(session.exportState()))
+
+  const other = createInterviewSession({ providerId: provider.id, getContext: () => context, fetchImpl: ai.fetchImpl })
+  assert.equal(other.importState(copy), true)
+  const after = other.snapshot()
+  assert.equal(after.phase, 'kickoff', 'still at the kickoff, waiting for Start interview')
+  assert.equal(after.startedOver, true, 'the kickoff says Start interview, not Resume')
+  assert.equal(after.decisions.session, before.decisions.session, 'the new session, not the one the start over ended')
+  assert.deepEqual(after.tokens, EMPTY_TOKENS, 'This session is still nothing')
+  assert.deepEqual(after.endedSessions, before.endedSessions, 'Earlier sessions still has what came before')
+  assert.equal(after.context, null, 'no Context until the AI is called again')
+  assert.deepEqual(after.thread, [], 'the old conversation does not come back')
+  assert.equal(other.canKeepCopy, true)
+  const delta = other.decisionsDelta({ runState: 'in-progress' })
+  assert.ok(delta.entries.some((e) => e.kind === 'restart'), 'the restart marker still reaches the next Save')
+  assert.deepEqual(delta.earlierSessions.map((s) => s.state), ['started-over'])
+
+  // Starting from the restored kickoff is a fresh interview, and only the new call counts as This session.
+  await other.start()
+  assert.notEqual(other.snapshot().phase, 'kickoff')
+  assert.equal(other.snapshot().resumed, null)
+  assert.deepEqual(other.snapshot().tokens, used(3000, 0, 5))
+})
+
+test('a kickoff that was not started over keeps no copy, and a kickoff copy without a start over is never picked up', () => {
+  const ai = fakeAi(() => anthropicReply({ text: 'Hello.' }))
+  const provider = anthropic(200000)
+  const { session, context } = sessionWith(ai, provider)
+  assert.equal(session.canKeepCopy, false)
+  const copy = JSON.parse(JSON.stringify(session.exportState()))
+  const other = createInterviewSession({ providerId: provider.id, getContext: () => context, fetchImpl: ai.fetchImpl })
+  assert.equal(other.importState(copy), false)
+})
+
+test('Start this stage over again before the AI is called adds no empty session: the running one carries on, with a marker for each', () => {
+  let n = 0
+  const log = createSessionLog({ stageId: 'shape', newSessionId: () => `s-${++n}`, who: () => 'a.architect' })
+  log.addUsage(claude, { inputTokens: 900, cacheReadTokens: 600, outputTokens: 40 })
+  log.startOver()
+  const running = log.sessionId
+  log.startOver()
+  log.startOver()
+  assert.equal(log.sessionId, running, 'a session that used nothing is not ended')
+  assert.deepEqual(log.endedSessions().map((e) => e.session), ['s-1'])
+  assert.equal(log.entries().filter((e) => e.kind === 'restart').length, 3, 'each start over still leaves its marker')
+  const delta = log.delta({ status: { state: 'in-progress', target: 'shape' } })
+  assert.deepEqual(delta.earlierSessions.map((s) => s.session), ['s-1'])
+  const file = applyDecisionsDelta(emptyDecisionsLog('shape'), delta, 'shape')
+  assert.deepEqual(file.status.map((s) => [s.session, s.state]), [['s-1', 'started-over'], [running, 'in-progress']], 'no status line with nothing in it')
+
+  // A session that has saved is ended like any other, even with no tokens reported.
+  const quiet = createSessionLog({ stageId: 'shape', newSessionId: () => `q-${++n}`, who: () => 'a.architect' })
+  quiet.delta({ status: { state: 'in-progress' }, saving: true })
+  const was = quiet.sessionId
+  quiet.startOver()
+  assert.notEqual(quiet.sessionId, was)
+  assert.deepEqual(quiet.endedSessions().map((e) => e.session), [was])
+})
+
+test("the line of a session a start over ended says who, target, Artefact and instructions as they were when it ended, not the next session's", async () => {
+  const ai = fakeAi(() => anthropicReply({ text: 'Hello.' }))
+  const { session, context } = sessionWith(ai, anthropic(200000), { targetStageId: 'shape', instructionsVersion: 'small@1' })
+  await session.start()
+  const first = session.snapshot().decisions.session
+  session.startOver()
+  // At the new kickoff the architect aims for another Artefact and another target, and a colleague's name is on the page.
+  Object.assign(context, { artefactId: 'heavy', targetStageId: 'ship', instructionsVersion: 'small@2', actor: 'b.colleague' })
+  await session.start()
+  const delta = session.decisionsDelta({ runState: 'in-progress', target: 'ship' })
+  const ended = delta.earlierSessions.find((s) => s.session === first)
+  assert.deepEqual({ who: ended.who, target: ended.target, artefact: ended.artefact, instructions: ended.instructions }, { who: 'a.architect', target: 'shape', artefact: 'light', instructions: 'small@1' })
+  assert.deepEqual({ who: delta.status.who, target: delta.status.target, artefact: delta.status.artefact }, { who: 'b.colleague', target: 'ship', artefact: 'heavy' }, 'the running session has the new ones')
+
+  // And through a working copy too.
+  const copy = JSON.parse(JSON.stringify(session.exportState()))
+  const other = createInterviewSession({ providerId: session.providerId, getContext: () => context, fetchImpl: ai.fetchImpl })
+  other.importState(copy)
+  assert.equal(other.decisionsDelta({ runState: 'in-progress' }).earlierSessions[0].artefact, 'light')
+})

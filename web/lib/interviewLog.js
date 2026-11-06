@@ -103,7 +103,7 @@ export function createSessionLog(config = {}) {
   const usage = new Map() // `type|model` -> { type, model, inputTokens, cachedTokens, outputTokens }
   let lastAiSave = null
   let saves = [] // the time of each AI Save this session has made on the Stage (#296)
-  // #348: the sessions Start this stage over ended: `{ session, models, lastAiSave, saves, opening }`, each as it stood when it ended. Every
+  // #348: the sessions Start this stage over ended: `{ session, models, lastAiSave, saves, opening, status }`, each as it stood when it ended. Every
   // Save sends their lines again (`earlierSessions`), so one that ended between two Saves still reaches the log with all it used.
   let ended = []
 
@@ -262,11 +262,17 @@ export function createSessionLog(config = {}) {
     /**
      * #348: Start this stage over. The restart marker is the last entry of the session it ends; that session is kept, with its tokens, as
      * an earlier session of the Stage, and a new session begins with a new id and no tokens. `opening` is the ended session's opening
-     * message (#331), which its line keeps. Entries not yet sent keep the session they were made in.
+     * message (#331), which its line keeps, and `status` (`{ who, target, artefact, instructions }`) what its line says about it: as it was
+     * when it ended, not what the next session picks at its kickoff. Entries not yet sent keep the session they were made in.
+     *
+     * A session that has used nothing (no tokens reported and no AI save, say Start this stage over pressed again before the AI was
+     * called) is not ended: it carries on, with the marker, so the status block never fills with lines that have nothing in them.
      */
-    startOver({ opening = '' } = {}) {
+    startOver({ opening = '', status = {} } = {}) {
       const marker = add({ kind: 'restart', note: 'Start this stage over' })
-      ended.push({ session: sessionId, models: [...usage.values()].map((u) => ({ ...u })), lastAiSave, saves: [...saves], ...(opening ? { opening } : {}) })
+      if (usage.size === 0 && !lastAiSave && saves.length === 0) return marker
+      const was = clean({ who: status.who || who(), target: status.target, artefact: status.artefact, instructions: status.instructions })
+      ended.push({ session: sessionId, models: [...usage.values()].map((u) => ({ ...u })), lastAiSave, saves: [...saves], ...(opening ? { opening } : {}), status: was })
       // A new id of its own, even when the id maker comes round to one already used (entry ids are `<session>-<n>`).
       const used = new Set([sessionId, ...ended.map((e) => e.session)])
       const made = makeSessionId()
@@ -439,16 +445,17 @@ export function createSessionLog(config = {}) {
         // #348: the sessions Start this stage over ended, each with all it used. A line already in the log takes only the tokens and the state.
         ...(ended.length
           ? {
+              // Its who, target, Artefact and instructions are its own, from when it ended (a copy kept before then has none: the Save's).
               earlierSessions: ended.map((e) => ({
                 session: e.session,
-                who: status.who ?? who(),
-                target: status.target,
+                who: e.status?.who ?? status.who ?? who(),
+                target: e.status?.target ?? status.target,
                 state: STARTED_OVER,
-                artefact: status.artefact,
+                artefact: e.status?.artefact ?? status.artefact,
                 lastAiSave: e.lastAiSave,
                 saves: e.saves,
                 models: e.models.map((m) => ({ ...m })),
-                instructions: status.instructions,
+                instructions: e.status?.instructions ?? status.instructions,
                 ...(e.opening ? { opening: e.opening } : {}),
                 skills: skillVersions,
               })),
