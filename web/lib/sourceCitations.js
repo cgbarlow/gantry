@@ -107,13 +107,27 @@ const LIST_ITEM_LABEL = new RegExp(String.raw`^[ \t]*(?:>[ \t]*)*(?:[-*+]|\d{1,9
 const CELL_LABEL = new RegExp(String.raw`(?:^|(?<!\\)\|)${OPENERS}$`)
 const TABLE_DELIMITER_ROW = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/
 const HEADING = /^[ \t]{0,3}#{1,6}(?:[ \t]|$)/
-// The start of a line that a note's mark must not be pulled against: a list bullet, a quote, a table's pipe.
-const BLOCK_START = /^[ \t]*(?:>[ \t]*)*(?:[-*+]|\d{1,9}[.)])?[ \t]*$|(?<!\\)\|[ \t]*$/
+// The start of a line that a note's mark must not be pulled against: a list bullet, a quote, a table's pipe, a definition's
+// `:` or `~`.
+const BLOCK_START = /^[ \t]*(?:>[ \t]*)*(?:[-*+:~]|\d{1,9}[.)])?[ \t]*$|(?<!\\)\|[ \t]*$/
 // What may sit between two citations in one bracket.
 const SEPARATOR = /^[ \t]*[;,]?[ \t]*$/
 
-// The note's words with everything Pandoc could read as markup escaped, so a `]`, `^` or `*` in them is printed as itself.
+// Words that are not Markdown (a document's title, a repository's file and commit) with everything Pandoc could read as markup
+// escaped, so a `]`, `^` or `*` in them is printed as itself.
 const escapeNote = (text) => text.replace(/[\\`*_[\]^~<>$@|&#{}]/g, '\\$&')
+// The author's link text keeps its Markdown, as it does where it labels an item: its brackets are already closed or escaped,
+// and only a `^` is escaped, which Pandoc could take for the end of a superscript begun by the note's own.
+const escapeCarets = (text) => text.replace(/\\[\s\S]|\^/g, (m) => (m === '^' ? '\\^' : m))
+// An unescaped `^`: with no whitespace between it and a note's `^`, Pandoc 2 reads the two as a superscript.
+const CARET = /(?<!\\)\^/
+
+/** The run of non-whitespace characters `text` ends with. */
+function trailingWord(text) {
+  let i = text.length
+  while (i > 0 && !/\s/.test(text[i - 1])) i--
+  return text.slice(i)
+}
 
 /** Whether the line at `pos` is in a pipe table: its block (the lines around it, up to a blank one) has a delimiter row. */
 function inPipeTable(segment, pos) {
@@ -138,14 +152,14 @@ function wordCitations(segment, titleFor) {
   if (!citations.length) return segment
 
   const titleOf = (c) => titleFor?.(c.id) ?? c.id
-  // A label keeps the author's Markdown, as the "(words)" it replaces did; a note's words are taken literally.
+  // A label and a note both keep the author's Markdown, as the "(words)" they replace did.
   const words = (c) => (c.text.trim() ? c.text.trim() : escapeNote(titleOf(c)))
   const note = (c) => {
-    let text = c.text.trim() ? unescapeText(c.text.trim()) : titleOf(c)
+    let text = c.text.trim() ? escapeCarets(c.text.trim()) : escapeNote(titleOf(c))
     // The words Copy citation writes for a repository already name the file, so it isn't said twice.
-    if (c.path && !text.includes(c.path)) text += `, ${c.path}`
-    if (c.commit) text += `, at commit ${shortCommit(c.commit)}`
-    return `^[${escapeNote(text)}]`
+    if (c.path && !(c.text.trim() ? unescapeText(c.text.trim()) : titleOf(c)).includes(c.path)) text += `, ${escapeNote(c.path)}`
+    if (c.commit) text += `, at commit ${escapeNote(shortCommit(c.commit))}`
+    return `^[${text}]`
   }
 
   // Runs of notes with nothing but separators between them: each run may be all that a bracket holds.
@@ -160,14 +174,26 @@ function wordCitations(segment, titleFor) {
   let at = 0
   let afterNote = false
   // Writes `text` in place of segment[from, to). A note's mark is pulled against the word before it, but never against a
-  // line's bullet, quote or table pipe, which would stop them being one. Pandoc would read `^[a]^[b]` as a superscript "[a]"
-  // followed by "[b]", so a note that would be followed straight away by a `^` (the next note, or the writer's own) is
-  // followed by a space: two marks side by side print "¹ ²".
+  // line's bullet, quote, table pipe or definition marker, which would stop them being one.
+  //
+  // Pandoc 2 (what apt installs, and what a server without pandoc-wasm converts with) reads two `^` with no whitespace
+  // between them as a superscript: `^[a]^[b]` and `^[a],^[b]` print a superscript "[a]" or "[a]," and a literal "[b]",
+  // and `O(n^2)^[a]` one of "2)". So whatever runs, unbroken by whitespace, from a note to the next `^` (the next note's,
+  // or the writer's own) gets a space before that `^`, and so does a note whose word before holds a `^`: two marks side by
+  // side print "¹ ²", and two with a comma between them "¹, ²". It also reads `[^` as the start of a footnote reference,
+  // so a note straight after a `[` (a Field tag's Span, #301) has a space before it, which a Span drops.
   const put = (from, to, text, isNote) => {
     let gap = segment.slice(at, from)
     const kept = gap.replace(/[ \t]+$/, '')
     if (isNote && kept !== gap && !BLOCK_START.test(segment.slice(lineStartOf(from), from - (gap.length - kept.length)).replace(RAW_BOOKMARK, ''))) gap = kept
-    if (afterNote && (gap || text).startsWith('^')) gap = ` ${gap}`
+    if (afterNote) {
+      const caret = /^\S*/.exec(gap + text)[0].search(CARET)
+      if (caret >= 0 && caret <= gap.length) gap = `${gap.slice(0, caret)} ${gap.slice(caret)}`
+    }
+    if (isNote) {
+      const before = /\s/.test(gap) ? /\S*$/.exec(gap)[0] : trailingWord(out) + gap
+      if (CARET.test(before) || /(?<!\\)\[$/.test(before)) gap += ' '
+    }
     out += gap + text
     at = to
     afterNote = isNote

@@ -98,9 +98,14 @@ describe('what Word prints', () => {
     assert.equal(sourceCitationsForWord('x [](source:a) y [](source:b)', (id) => (id === 'a' ? 'Client brief' : undefined)), 'x^[Client brief] y^[b]')
   })
 
-  test('the words are escaped, so a ], ^ or * in them cannot break the note', () => {
-    assert.equal(sourceCitationsForWord('x [Plan \\[v2\\]^2 *draft*](source:plan) y'), 'x^[Plan \\[v2\\]\\^2 \\*draft\\*] y')
+  test('nothing in the words can break the note, and the author\'s own Markdown in them is kept', () => {
+    // The link text was already Markdown, and stays so, as it does where a citation labels a list item: only a `^`, which
+    // Pandoc could read as the end of a superscript begun by the note's own, is escaped. Its brackets are closed or escaped.
+    assert.equal(sourceCitationsForWord('x [Plan \\[v2\\]^2 *draft*](source:plan) y'), 'x^[Plan \\[v2\\]\\^2 *draft*] y')
+    assert.equal(sourceCitationsForWord('x [*Client brief*, p. 4](source:a) y'), 'x^[*Client brief*, p. 4] y')
+    // A document's title, a repository's file and its commit are not Markdown, so they are taken literally.
     assert.equal(sourceCitationsForWord('x [](source:plan) y', () => 'A_b <c> @d $e'), 'x^[A\\_b \\<c\\> \\@d \\$e] y')
+    assert.equal(sourceCitationsForWord('x [*a*](source:r?path=src/my_file.ts) y'), 'x^[*a*, src/my\\_file.ts] y')
   })
 
   test("a repository citation's note names the file and the short commit it was read at", () => {
@@ -133,7 +138,54 @@ describe('what Word prints', () => {
   })
 
   test('a Field tag Span (#301) around a citation is not taken for square brackets', () => {
-    assert.equal(sourceCitationsForWord('x [[a](source:a)]{#gf_m_f} y'), 'x [^[a]]{#gf_m_f} y')
+    // Pandoc 2 reads `[^` as the start of a footnote reference, so a note straight after a `[` has a space before it; a Span
+    // drops it, so Word prints nothing extra.
+    assert.equal(sourceCitationsForWord('x [[a](source:a)]{#gf_m_f} y'), 'x [ ^[a]]{#gf_m_f} y')
+    assert.equal(sourceCitationsForWord('Owner: [[Brief](source:a) says so.]{#gf_m_f}'), 'Owner: [ ^[Brief] says so.]{#gf_m_f}')
+  })
+
+  test('two marks with only punctuation between them, and a mark beside the writer\'s own ^, are never read as a superscript', () => {
+    // Pandoc 2 reads `^[a],^[b]` as a superscript "[a]," followed by "[b]", so whatever sits between a note and the next `^`
+    // keeps a space in it.
+    assert.equal(sourceCitationsForWord('two places [Client brief, p. 4](source:a), [Notes](source:b).'), 'two places^[Client brief, p. 4], ^[Notes].')
+    assert.equal(sourceCitationsForWord('(see [Brief](source:a); [Notes](source:b))'), '(see^[Brief]; ^[Notes])')
+    assert.equal(sourceCitationsForWord('x [a](source:a),[b](source:b) y'), 'x^[a], ^[b] y')
+    assert.equal(sourceCitationsForWord('x [a](source:a)x^2^ y'), 'x^[a]x ^2^ y')
+    // A word before the mark that holds a `^` of the writer's keeps its space, or `^2)^[a]` would be a superscript "2)".
+    assert.equal(sourceCitationsForWord('it is O(n^2) [a](source:a).'), 'it is O(n^2) ^[a].')
+    assert.equal(sourceCitationsForWord('it is O(n\\^2) [a](source:a).'), 'it is O(n\\^2)^[a].', 'an escaped ^ is plain text')
+  })
+
+  test('a definition list keeps the space after its marker', () => {
+    assert.equal(sourceCitationsForWord('Term\n: [a](source:a) definition'), 'Term\n: ^[a] definition')
+    assert.equal(sourceCitationsForWord('Term\n\n:   [a](source:a) definition'), 'Term\n\n:   ^[a] definition')
+    assert.equal(sourceCitationsForWord('Term\n~ [a](source:a) definition'), 'Term\n~ ^[a] definition')
+    assert.equal(sourceCitationsForWord('Owner: [a](source:a) x'), 'Owner:^[a] x', 'a colon after a word is not a marker')
+  })
+
+  test('the Pandoc this server converts with reads every one of them as notes, with nothing left as a superscript or literal', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const cases = [
+      ['two places [Client brief, p. 4](source:a), [Notes](source:b).', 2],
+      ['(see [Brief](source:a); [Notes](source:b))', 2],
+      ['x [a](source:a),[b](source:b) y', 2],
+      ['x ([a](source:a); [b](source:b)) y', 2],
+      ['E = mc[a](source:a)^2^', 1],
+      ['it is O(n^2) [a](source:a).', 1],
+      ['x [[a](source:a)]{#gf_m_f} y', 1],
+      ['Owner: [[Brief](source:a) says so.]{#gf_m_f}', 1],
+      ['x [Plan \\[v2\\]^2 *draft*](source:plan) y', 1],
+      ['Term\n: [a](source:a) definition', 1],
+    ]
+    for (const [markdown, notes] of cases) {
+      const ast = JSON.stringify(JSON.parse(execFileSync('pandoc', ['-f', 'markdown', '-t', 'json'], { input: sourceCitationsForWord(markdown), encoding: 'utf8' })).blocks)
+      assert.equal(ast.match(/"t":"Note"/g)?.length ?? 0, notes, `${markdown} → ${sourceCitationsForWord(markdown)}`)
+      assert.doesNotMatch(ast, /"t":"Superscript","c":\[\{"t":"Str","c":"\[/, markdown)
+      assert.doesNotMatch(ast, /"\^\[|"\[\^/, `${markdown}: no note left as literal text`)
+      if (markdown.includes('{#gf_m_f}')) assert.match(ast, /"t":"Span","c":\[\["gf_m_f"/, `${markdown}: the Field's bookmark is still there`)
+      if (markdown.startsWith('Term')) assert.match(ast, /"t":"DefinitionList"/, markdown)
+      if (markdown.includes('*draft*')) assert.match(ast, /"t":"Emph"/, markdown)
+    }
   })
 
   test('code, fenced blocks, images and other links are left exactly as they were', () => {
