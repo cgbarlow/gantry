@@ -830,6 +830,15 @@ Every AI Provider stops a reply once it reaches its output limit, the AI Provide
 - **The AI is told and carries on.** Gantry tells the AI its reply reached the output limit and asks it to draft fewer Fields per reply, or a shorter one. The status line says *Reply cut off at the output limit. Asking for a shorter one…* while it does.
 - **Twice in a row, the thread says so.** If the next reply is cut off too, a line in the conversation says so once and names the fix: raise **Max tokens** for that AI Provider under **AI Providers** on **Global Settings**. The AI keeps trying with shorter replies in the meantime.
 
+#### When a turn ends with nothing to show
+
+When the status line goes, the AI has handed the turn back to you. Usually it leaves something behind: a reply, question cards or a draft. If it leaves nothing, the conversation says why, so the interview never just looks stalled:
+
+- *The AI stopped without replying.* The AI's last reply was empty: no text, no question cards and no draft. Anything it read on the way (the *Read …* lines) is still in the conversation, but the AI didn't follow it with anything.
+- *The AI used up its 24 rounds of tool calls for this turn and stopped.* The AI can read documents and draft Fields up to 24 times in one turn before it has to hand back to you. A turn spent reading a large repository file by file can reach that limit.
+
+Both lines carry a **Carry on** button. It sends "go on" to the AI as your own message, exactly as if you had typed it, and the next turn starts with the status line as usual. You can type something else instead, such as which file to read next or what to draft, and the button goes once the conversation moves on. Screen readers announce the line once, when the turn ends, and the button is reachable with the keyboard like any other.
+
 #### Gantry checks every draft
 
 The AI writes each Field through a *draft field step*, and Gantry checks the draft before it reaches the preview:

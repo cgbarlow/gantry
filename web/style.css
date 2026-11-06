@@ -2223,6 +2223,8 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-page .msg.ai { background: var(--bg-raised); border: var(--hairline) solid var(--line); }
 .interview-page .msg.you { background: var(--text); color: var(--bg); margin-left: 15%; }
 .interview-page .msg.sys { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); padding: 2px 0; }
+/* #345: a turn that ended with nothing to show, and the button that sends "go on". */
+.interview-page .msg.sys.carry-on { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text); }
 .interview-page .caret::after { content: '▍'; animation: interview-blink 1s steps(1) infinite; }
 .interview-page .status-detail { font-variant-numeric: tabular-nums; }
 @keyframes interview-blink { 50% { opacity: 0; } }

@@ -123,6 +123,17 @@ export function cutOffAgainLine(providerName) {
   return `The AI's reply was cut off at the output limit again. To give it more room, raise Max tokens for ${providerName || 'this AI Provider'} under AI Providers on Global Settings.`
 }
 
+/** #345: what Carry on sends, as the architect's own message, after a turn that ended with nothing to show. */
+export const CARRY_ON_MESSAGE = 'go on'
+
+/** #345: the thread's line when a turn ends with nothing new to show: no text, no question card and no draft. */
+export const STOPPED_LINE = 'The AI stopped without replying.'
+
+/** #345: the thread's line when a turn ends because the AI used up its rounds of tool calls (`MAX_ROUNDS`) while still calling tools. */
+export function roundsUsedUpLine(rounds = MAX_ROUNDS) {
+  return `The AI used up its ${rounds} rounds of tool calls for this turn and stopped.`
+}
+
 /** After this many turns in a row whose question cards were unusable, the rest of the session is asked in plain chat. */
 export const CARD_FAILURES_BEFORE_CHAT = 2
 
@@ -1676,6 +1687,8 @@ export function createInterviewSession(config = {}) {
 
   async function runLoop() {
     state.phase = 'working'
+    const firstId = nextId // #345: the thread items from here on are this turn's
+    let ended = false // #345: the turn ended of itself, not because its rounds ran out
     cutOffs = 0
     cutOffSaid = false
     state.error = null
@@ -1756,6 +1769,7 @@ export function createInterviewSession(config = {}) {
           }
           pendingAsk = callIds.length ? { callIds } : null
           incoming = result.cards
+          ended = true
           break
         }
 
@@ -1817,6 +1831,7 @@ export function createInterviewSession(config = {}) {
           emit()
           continue
         }
+        ended = true
         break
       }
       promoteHeld()
@@ -1824,6 +1839,10 @@ export function createInterviewSession(config = {}) {
       if (state.finish === 'accepting') state.finish = 'done'
       // #329: Compact now, asked for while the AI was busy, is done as soon as the turn ends with no round of cards open.
       if (state.compactPending && !state.round && !state.clash) await compact()
+      // #345: a turn that ends with nothing new to show says why, with Carry on, rather than just stopping: the AI used up its rounds while
+      // still calling tools, or its last reply was empty. Reads are not something to show (they were what the turn was spent on).
+      if (!ended) say('sys', roundsUsedUpLine(), { carryOn: 'rounds' })
+      else if (!state.round && !state.clash && !state.thread.some((t) => t.id >= firstId && (t.who === 'ai' || t.drafted))) say('sys', STOPPED_LINE, { carryOn: 'empty' })
       state.phase = state.round ? 'asking' : 'waiting'
       offerCompaction()
     } catch (err) {

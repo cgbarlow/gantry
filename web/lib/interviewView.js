@@ -15,7 +15,7 @@ import { aiProviders, defaultAiProvider, updateAiProvider } from './aiProviders.
 import { AiProviderDialog, AiRecoveryPrompt } from './aiProvidersView.js'
 import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
 import { repositoryReaderFor } from './sourceRepositoryClient.js'
-import { createInterviewSession, statusLine } from './interviewSession.js'
+import { createInterviewSession, statusLine, CARRY_ON_MESSAGE } from './interviewSession.js'
 import { stageReadiness } from './interviewReadiness.js'
 import { PAGE_SIZE, isAnswered, pageCards, pageCount } from './interviewRounds.js'
 import { loadInterviewSkillsInBrowser } from './interviewSkills.js'
@@ -1612,9 +1612,24 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     `
   }
 
+  // #345: the line a turn that ended with nothing to show left, while Carry on still answers it: between turns, with no round of cards open,
+  // and with nothing from the architect or the AI after it.
+  const carryOnAt = (() => {
+    const list = snap?.thread ?? []
+    if (phase !== 'waiting' || snap?.round || snap?.clash) return null
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].carryOn) return list[i].id
+      if (list[i].who !== 'sys') return null
+    }
+    return null
+  })()
   const thread = () =>
-    (snap?.thread ?? []).map(
-      (m) => html`<div key=${m.id} class=${`msg ${m.who}${m.streaming ? ' streaming caret' : ''}`} data-testid="interview-msg" data-who=${m.who}>${m.text}</div>`
+    (snap?.thread ?? []).map((m) =>
+      m.id === carryOnAt
+        ? html`<div key=${m.id} class="msg sys carry-on" data-testid="interview-msg" data-who="sys" data-carry-on=${m.carryOn}>
+            ${m.text} <button type="button" class="btn small" data-testid="interview-carry-on" title=${`Send "${CARRY_ON_MESSAGE}" to the AI, so it picks up where it stopped.`} onClick=${() => sessionRef.current?.send(CARRY_ON_MESSAGE)}>Carry on</button>
+          </div>`
+        : html`<div key=${m.id} class=${`msg ${m.who}${m.streaming ? ' streaming caret' : ''}`} data-testid="interview-msg" data-who=${m.who} data-carry-on=${m.carryOn}>${m.text}</div>`
     )
 
   // The `fields` part of the decisions log (ADR-0064): what each drafted Field was drafted from, including every read the AI made (#292).
@@ -2325,7 +2340,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                     ? html`<p class="msg sys" data-testid="interview-status" data-activity=${status.kind}>
                         <span data-testid="interview-status-text">${status.text}</span>${status.detail ? html` <span class="status-detail" data-testid="interview-status-detail" aria-hidden="true">${status.detail}</span>` : null}<span class="caret"></span>
                       </p>`
-                    : null}
+                    : carryOnAt !== null
+                      ? html`<span class="visually-hidden" data-testid="interview-carry-on-announce">${snap.thread.find((t) => t.id === carryOnAt).text} Choose Carry on to let it continue.</span>`
+                      : null}
                 </div>`
               : null}
             ${reopening.message && !update ? html`<p class="inline-error" role="alert" data-testid="interview-reopen-error">${reopening.message}</p>` : null}
