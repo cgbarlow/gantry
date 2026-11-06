@@ -72,6 +72,7 @@ import { AiProviderError, getAiProvider } from './aiProviders.js'
 import { artefactChoices, buildInterviewBrief, estimateTokens, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
 import { DRAFT_TOOL, DRAFT_TOOL_NAME, DRAFT_FENCE, DRAFT_TEXT_FALLBACK_INSTRUCTIONS, checkDraft, extractDraftBlocks, isBlankValue, normaliseDraftValue, citedSourceIds, stripDraftBlocks } from './interviewDraft.js'
 import { countWords } from './targetSize.js'
+import { outstandingItems, outstandingLine } from './interviewReadiness.js'
 import {
   READ_TOOL,
   READ_TOOL_NAME,
@@ -142,22 +143,14 @@ export function roundsUsedUpLine(rounds = MAX_ROUNDS) {
  * #349: Gantry's note to the AI when its turn would end with the Stage not ready and nothing open for the architect: what keeps the Stage
  * from its stage-end card, from the page's own readiness (web/lib/interviewReadiness.js `stageReadiness`): the Gate check's outstanding items
  * for the Artefact aimed for, then each Field in scope that isn't done with Gantry's reasons. `fieldTitle(key)` names a Field
- * ("Module · Field"); `chat` says the architect is asked in plain chat rather than on cards.
+ * ("Module · Field"); `chat` says the architect is asked in plain chat rather than on cards. #350: the list is `outstandingItems`, the one
+ * the architect's Not ready yet card shows, with each Field's key after its name so the AI can draft it.
  */
 export function readinessNote(readiness, { fieldTitle = (key) => key, chat = false } = {}) {
   const named = (key) => `${fieldTitle(key)} (${key})`
-  const isKey = (item) => /^[^\s.]+\.[^\s.]+$/.test(String(item))
-  const lines = []
-  const gate = readiness?.gate
-  if (gate && !gate.pass) {
-    const outstanding = (gate.outstanding ?? []).map((item) => (isKey(item) ? named(item) : item))
-    if (!gate.artefact) lines.push('- The Gate check: no Artefact is aimed for yet.')
-    else lines.push(`- The Gate check for ${gate.artefact.title ?? gate.artefact.id}: ${outstanding.length ? `outstanding ${outstanding.join(', ')}` : 'does not pass yet'}`)
-  }
-  for (const [key, field] of Object.entries(readiness?.fields ?? {})) if (!field.done) lines.push(`- ${named(key)}: ${field.reasons.join('; ')}`)
   return [
     "Gantry's check: the Stage is not ready yet, so the architect has no stage-end card. What stands in the way:",
-    ...lines,
+    ...outstandingItems(readiness, { name: named }).map((item) => `- ${outstandingLine(item)}`),
     `Redraft now what you can from the Source documents and the answers you have. Ask the architect${chat ? ', in short plain chat,' : ', with question cards,'} only for what you cannot settle yourself. ` +
       'If nothing here is yours to settle, say in a sentence what stands in the way. Gantry sends this note once a turn.',
   ].join('\n')

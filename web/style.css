@@ -2391,6 +2391,11 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-rail .runplan .rp-checkable:hover, .interview-rail .runplan .rp-checkable:focus-visible { background: var(--surface-hover, rgba(127, 127, 127, 0.12)); outline: none; }
 .interview-rail .runplan .rp-pr { flex-basis: 100%; padding-left: 18px; font-size: 11px; }
 .interview-page .stage-end.awaiting { border-color: var(--stamp-review-bg); }
+/* #350: the Not ready yet card, in the stage-end card's place, and the Field in the live draft preview its link takes you to. */
+.interview-page .stage-end.not-ready { border-color: var(--stamp-draft-bg); }
+.interview-page .stage-end.not-ready .not-ready-list { margin: 6px 0 10px; padding-left: 18px; font-size: 13px; }
+.interview-page .stage-end.not-ready .not-ready-list li { margin: 2px 0; }
+.interview-preview .field-proto:focus { outline: 2px solid var(--stamp-draft-bg); outline-offset: 4px; border-radius: var(--radius); }
 .interview-page .qcard .btn .rec { background: transparent; color: inherit; border: var(--hairline) solid currentColor; }
 .interview-page .kick-resume { padding: 10px 12px; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius); margin: 0 0 12px; }
 

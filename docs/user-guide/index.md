@@ -996,6 +996,13 @@ Both buttons of the card make **one stage Save**, the same Save as in the editor
 
 When the interview is only for this Stage, the card has one button, **Save and stop here**. When it is **running until a later Stage**, the card has two (see below).
 
+**When the Stage isn't ready, a Not ready yet card says why.** If the AI's turn ends with something drafted, no question cards open or held back, **Finish with your recommendations** not waiting on its last round, and the Stage still not ready, a **Not ready yet** card appears where the stage-end card would be. It lists **what's outstanding**, in the same words Gantry gives the AI: what the Gate check still needs, then each Field in scope that isn't done with the reason, for example *"Estimates: 142 words, needs about 180 to 300"* or *"Teams required: no content yet"*. Each Field's name is a link that takes the live draft preview to that Field, where you can also edit it by hand. The card has two buttons:
+
+- **Ask the AI to finish these** (recommended) sends the list to the AI as your message, and the AI redrafts what it can or asks you for the rest.
+- **Save and stop here** makes **one stage Save** of the drafts and the decisions log, through the same Save check as any other, and leaves the run **paused** on this Stage, as **Pause** does. The Stage is saved, not finished: nothing is advanced or sent for approval (on Azure DevOps or GitHub no Pull Request is opened), and the Modules stay **`draft`**. **Advance to next stage** and **Request Sign-off** in the editor still check the Gate exactly as they always do. Open the Interview page again, or choose **Resume now**, to carry on.
+
+While the card is up the run plan shows the Stage as **drafting**, and after **Save and stop here** as **paused**. The card goes as soon as the Stage is ready (by the AI's redraft or your own edit), and the stage-end card takes its place. It isn't shown while a round of cards is open or while the AI is working.
+
 ### Running until a later Stage
 
 A Stage is often drafted straight after the one before it. **Run until** at the kickoff lets one interview carry on across Stages without you starting each one: pick the Stage to end at, and the AI drafts the current Stage, then the next, and so on up to and including the one you picked. This section is about a Local and a Server-hosted workspace, because neither needs approval to move to the next Stage. A workspace on Azure DevOps or GitHub runs the same way except that a Stage moves on only when the Owner approves its Pull Request (see **Approvals in a session**).

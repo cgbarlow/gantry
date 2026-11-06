@@ -71,3 +71,31 @@ export function stageReadiness({ definition, structure, stageId, artefactId, siz
   const allDone = entries.every((f) => f.done)
   return { gate, fields, allDone, ready: gate.pass && allDone, doneCount: entries.filter((f) => f.done).length, total: entries.length }
 }
+
+// A Gate check's outstanding item that is a Field, as `module.field`, rather than words of its own.
+const isFieldKey = (item) => /^[^\s.]+\.[^\s.]+$/.test(String(item))
+
+/**
+ * #350: what keeps the Stage from its stage-end card, in Gantry's words, from a `stageReadiness` verdict: the Gate check's outstanding
+ * items for the Artefact aimed for, then each Field in scope that isn't done with its reasons. It is the one list both the architect (the
+ * Not ready yet card, web/lib/interviewView.js) and the AI (the session's note, web/lib/interviewSession.js `readinessNote`, #349) are
+ * given, so the two never word it differently. `name(key)` names a Field, in the Gate's items as in the Fields'. Returns
+ * `[{ kind: 'gate', text } | { kind: 'field', key, name, text }]`, empty when the Stage is ready; `outstandingLine` writes one as a line.
+ */
+export function outstandingItems(readiness, { name = (key) => key } = {}) {
+  const items = []
+  const gate = readiness?.gate
+  if (gate && !gate.pass) {
+    const outstanding = (gate.outstanding ?? []).map((item) => (isFieldKey(item) ? name(item) : item))
+    if (!gate.artefact) items.push({ kind: 'gate', text: 'The Gate check: no Artefact is aimed for yet.' })
+    else items.push({ kind: 'gate', text: `The Gate check for ${gate.artefact.title ?? gate.artefact.id}: ${outstanding.length ? `outstanding ${outstanding.join(', ')}` : 'does not pass yet'}` })
+  }
+  for (const [key, field] of Object.entries(readiness?.fields ?? {})) if (!field.done) items.push({ kind: 'field', key, name: name(key), text: field.reasons.join('; ') })
+  return items
+}
+
+/** One item of `outstandingItems` as a line: a Field is "its name: its reasons". */
+export const outstandingLine = (item) => (item.kind === 'field' ? `${item.name}: ${item.text}` : item.text)
+
+/** #350: the architect's message that the Not ready yet card's Ask the AI to finish these sends: the card's own list. */
+export const finishTheseMessage = (items) => ['Please finish these, so the Stage is ready:', ...items.map((item) => `- ${outstandingLine(item)}`)].join('\n')

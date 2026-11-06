@@ -17,7 +17,7 @@ import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
 import { repositoryReaderFor } from './sourceRepositoryClient.js'
 import { citationIndex, openCitation, renderMarkdownPreview } from './markdownPreview.js'
 import { createInterviewSession, statusLine, CARRY_ON_MESSAGE } from './interviewSession.js'
-import { stageReadiness } from './interviewReadiness.js'
+import { finishTheseMessage, outstandingItems, stageReadiness } from './interviewReadiness.js'
 import { PAGE_SIZE, isAnswered, pageCards, pageCount } from './interviewRounds.js'
 import { loadInterviewSkillsInBrowser } from './interviewSkills.js'
 import { modulesWithStandard } from './standardModules.js'
@@ -744,6 +744,25 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     !stageEndReady &&
     saving?.phase !== 'drafting-ahead' &&
     ((phase === 'waiting' && !snap?.round && !finishing && Boolean(readiness) && readiness.allDone && !readiness.ready) || (phase === 'kickoff' && nothingDraftable))
+  // #350: the AI's turn has ended with something drafted, nothing open for the architect (no round of cards, none held back, no clash, and
+  // Finish with your recommendations not waiting on its last round) and the Stage not ready: the Not ready yet card takes the stage-end
+  // card's place, and goes as soon as the Stage is ready. A card this page shows first (the Waiting card, a Stage sent back, a Save made) wins.
+  const notReadyNow =
+    !update &&
+    !review &&
+    !revise &&
+    phase === 'waiting' &&
+    draftKeys.length > 0 &&
+    Boolean(readiness) &&
+    !readiness.ready &&
+    !snap?.round &&
+    !snap?.held &&
+    !snap?.clash &&
+    !finishing &&
+    !waitingNow &&
+    !(sentBack && sentBack.stageId === instance.currentStageId) &&
+    !(remote && awaiting) &&
+    !['saved', 'advancing', 'drafting-ahead'].includes(saving?.phase)
   // Where the current Stage stands in the run plan.
   const settled = run && run.at === instance.stage.id && (run.phase === 'paused' || run.phase === 'done') ? run.phase : null
   let planCurrent = 'idle'
@@ -997,9 +1016,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   // "stop" (Save and stop here, #293); both make the one stage Save, and "advance" then moves the Instance on so the next Stage's interview
   // starts by itself. `pause` is Pause (#290): the same Save, asked for by the architect mid-Stage, which leaves the session to be resumed.
   // The status block of the decisions log, written in the same Save, records the run's target and each Stage's state. Resolves true when
-  // the Save worked.
-  async function runSave({ action = 'stop', pause = false } = {}) {
-    setSaving({ phase: 'saving', pause })
+  // the Save worked. `notReady` (#350) is the Not ready yet card's Save and stop here: Pause's Save, so the run is left paused on this Stage
+  // with nothing advanced or sent for approval, but asked for from the card, which says how it went.
+  async function runSave({ action = 'stop', pause = false, notReady = false } = {}) {
+    setSaving({ phase: 'saving', pause: pause && !notReady, notReady })
     const keys = Object.keys(drafts)
     // #300: what the card said the Save would re-render; once the drafts are saved the page can no longer work it out from them.
     const willReRender = action === 'approval' && !pause && earlierToRender.length > 0
@@ -1035,7 +1055,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       if (pause) {
         sessionRef.current?.markPaused()
         updateRun(instance.slug, { phase: 'paused', at: instance.stage.id })
-        setSaving({ phase: 'paused', fields: keys.length, returned })
+        setSaving({ phase: 'paused', fields: keys.length, returned, notReady })
         return true
       }
       if (action === 'head-start') {
@@ -1061,11 +1081,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     // The Save did not happen, so the choices made on clash cards for it are taken back.
     if (result.settledIds?.length) sessionRef.current?.discardEntries(result.settledIds)
-    setSaving({ phase: 'error', message: result.message || 'The Save did not go through.', pause: runState === 'paused' })
+    setSaving({ phase: 'error', message: result.message || 'The Save did not go through.', pause: runState === 'paused' && !notReady, notReady })
     return false
   }
   const saveStage = (action = 'stop') => runSave({ action })
   const pauseInterview = () => runSave({ pause: true })
+  const saveNotReady = () => runSave({ pause: true, notReady: true })
 
   // Saves what Bring up to date settled (#298): the answers in the decisions log, with any re-cited or redrafted Fields, as one stage Save through
   // the Save check. It is not the end of a Stage: no run, no advance, no request for approval. The session's status line is written only when the
@@ -1829,9 +1850,10 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const pausedView = () => {
     if (phase !== 'paused') return null
     return html`<div class="qcard stage-end saved" data-testid="interview-paused" role="status">
-      <p class="qhead">Paused</p>
+      <p class="qhead">${saving?.notReady ? 'Saved and paused here' : 'Paused'}</p>
       <p>
         ${saving?.fields ? `${saving.fields} Field${saving.fields === 1 ? '' : 's'} and the decisions log are saved as one Save. ` : 'The decisions log is saved. '}The Modules stay <strong>draft</strong>.
+        ${saving?.notReady ? html`${stage?.title ?? instance.stage.title} is saved, not finished: it isn't ready, so nothing was advanced or sent for approval.` : null}
         Open the Interview page on this Instance again, in this browser or any other, and the AI recaps from the log and carries on. The earlier conversation is not kept.
       </p>
       ${returnedList(saving?.returned)}
@@ -2129,6 +2151,50 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     </div>`
   }
 
+  // #350: the Not ready yet card, in the stage-end card's place while the Stage isn't ready and nothing is open for the architect. What's
+  // outstanding is web/lib/interviewReadiness.js `outstandingItems`, the list the AI is told (#349); each Field's name takes the live draft
+  // preview to that Field, where it can be edited by hand. Ask the AI to finish these sends the list as the architect's message. Save and
+  // stop here is Pause's Save: one stage Save, the run paused on this Stage, nothing advanced or sent for approval (a remote Stage asks for
+  // none), so Advance to next stage and Request Sign-off still check the Gate in the editor. The status region says once that it is up.
+  const showField = (key) => {
+    const el = [...document.querySelectorAll('[data-testid="interview-field"]')].find((node) => node.getAttribute('data-field-key') === key)
+    if (!el) return
+    el.scrollIntoView({ block: 'center' })
+    el.focus({ preventScroll: true })
+  }
+  const notReadyCard = () => {
+    const outstanding = outstandingItems(readiness, { name: fieldTitle })
+    const busySaving = saving?.phase === 'saving' || Boolean(blockedReason) || handEditing !== null
+    return html`<div class="qcard stage-end not-ready" data-testid="interview-not-ready" role="group" aria-labelledby="interview-not-ready-head">
+      <div class="qchip">Stage</div>
+      <p class="qhead" id="interview-not-ready-head">Not ready yet</p>
+      <p>${stage?.title ?? instance.stage.title} isn't ready for its stage-end card. What's outstanding:</p>
+      <ul class="not-ready-list">
+        ${outstanding.map((item, i) =>
+          item.kind === 'field'
+            ? html`<li key=${item.key} data-testid="interview-not-ready-item" data-kind="field">
+                <button type="button" class="btn-link" data-testid="interview-not-ready-field" data-field-key=${item.key} onClick=${() => showField(item.key)}>${item.name}</button>: ${item.text}
+              </li>`
+            : html`<li key=${`gate-${i}`} data-testid="interview-not-ready-item" data-kind="gate">${item.text}</li>`
+        )}
+      </ul>
+      ${saving?.phase === 'error' && saving.notReady ? html`<p class="inline-error" role="alert" data-testid="interview-save-error">${saving.message}</p>` : null}
+      <p class="kick-note" data-testid="interview-not-ready-stop-note">
+        <strong>Save and stop here</strong> makes one Save of the drafts and the decisions log and pauses the run on this Stage: it is saved, not finished. Nothing is advanced
+        or sent for approval, and the Modules stay <strong>draft</strong>.
+      </p>
+      <div class="round-actions">
+        <button type="button" class="btn primary" data-testid="interview-not-ready-ask" disabled=${busySaving} onClick=${() => sessionRef.current?.send(finishTheseMessage(outstanding))}>
+          Ask the AI to finish these
+          <span class="rec">RECOMMENDED</span>
+        </button>
+        <button type="button" class="btn ghost" data-testid="interview-not-ready-save" disabled=${busySaving} onClick=${saveNotReady}>
+          ${saving?.phase === 'saving' && saving.notReady ? 'Saving…' : 'Save and stop here'}
+        </button>
+      </div>
+    </div>`
+  }
+
   const stageEnd = () => {
     if (review) return reviewEnd()
     if (update) return updateEnd()
@@ -2186,6 +2252,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         <p class="qhead">Saved. Moving on to ${followingStage?.title ?? 'the next Stage'}…</p>
       </div>`
     }
+    if (notReadyNow) return notReadyCard()
     // Only when the Gate check passes for the Artefact aimed for and every Field in scope is done; and, after "Finish with your recommendations", once the last round has been answered.
     if (!stageEndReady) return null
     const more = target !== instance.stage.id && Boolean(followingStage)
@@ -2242,7 +2309,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             const drafting = (snap?.draftingFields ?? []).includes(fieldKey)
             const open = handEditing?.key === fieldKey && Boolean(draft)
             const editable = Boolean(draft) && !drafting && !open && !blockedReason
-            return html`<div key=${fieldKey} class="field-proto" data-testid="interview-field" data-field-key=${fieldKey} data-state=${draft ? 'draft' : isBlankValue(savedValue) ? 'empty' : 'saved'} data-drafting=${drafting ? 'true' : 'false'} data-hand-edited=${draft?.handEdited ? 'true' : 'false'}>
+            // tabindex -1: the Not ready yet card's link to a Field moves the focus here (#350).
+            return html`<div key=${fieldKey} class="field-proto" tabindex="-1" data-testid="interview-field" data-field-key=${fieldKey} data-state=${draft ? 'draft' : isBlankValue(savedValue) ? 'empty' : 'saved'} data-drafting=${drafting ? 'true' : 'false'} data-hand-edited=${draft?.handEdited ? 'true' : 'false'}>
               <span class="field-label">${field.title ?? field.id}
                 ${draft && !draft.handEdited ? html`<span class="ai-mark" data-testid="interview-ai-mark">AI draft · unsaved</span>` : null}
                 ${draft?.handEdited ? html`<span class="ai-mark hand-mark" data-testid="interview-hand-mark">Your edit · unsaved</span>` : null}
@@ -2391,7 +2459,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                       </p>`
                     : carryOnAt !== null
                       ? html`<span class="visually-hidden" data-testid="interview-carry-on-announce">${snap.thread.find((t) => t.id === carryOnAt).text} Choose Carry on to let it continue.</span>`
-                      : null}
+                      : notReadyNow
+                        ? html`<span class="visually-hidden" data-testid="interview-not-ready-announce">${stage?.title ?? instance.stage.title} isn't ready yet. The Not ready yet card says what's outstanding.</span>`
+                        : null}
                 </div>`
               : null}
             ${reopening.message && !update ? html`<p class="inline-error" role="alert" data-testid="interview-reopen-error">${reopening.message}</p>` : null}
