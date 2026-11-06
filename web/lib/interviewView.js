@@ -17,7 +17,7 @@ import { SourceDocumentsPanel } from './sourceDocumentsPanel.js'
 import { repositoryReaderFor } from './sourceRepositoryClient.js'
 import { citationIndex, citedRef, openCitation, renderMarkdownPreview } from './markdownPreview.js'
 import { createInterviewSession, statusLine, CARRY_ON_MESSAGE } from './interviewSession.js'
-import { finishTheseMessage, outstandingItems, stageReadiness } from './interviewReadiness.js'
+import { finishTheseMessage, onlyOutsideTheStage, outstandingItems, stageReadiness } from './interviewReadiness.js'
 import { PAGE_SIZE, isAnswered, pageCards, pageCount } from './interviewRounds.js'
 import { loadInterviewSkillsInBrowser } from './interviewSkills.js'
 import { modulesWithStandard } from './standardModules.js'
@@ -810,9 +810,13 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     !stageEndReady &&
     saving?.phase !== 'drafting-ahead' &&
     ((phase === 'waiting' && !snap?.round && !finishing && Boolean(readiness) && readiness.allDone && !readiness.ready) || (phase === 'kickoff' && nothingDraftable))
+  // #345: the line a turn that ended with nothing to show left, while Carry on still answers it.
+  const carryOnNow = carryOnLine(snap)
   // #350: the AI's turn has ended with something drafted, nothing open for the architect (no round of cards, none held back, no clash, and
   // Finish with your recommendations not waiting on its last round) and the Stage not ready: the Not ready yet card takes the stage-end
   // card's place, and goes as soon as the Stage is ready. A card this page shows first (the Waiting card, a Stage sent back, a Save made) wins.
+  // A turn cut short (its rounds of tool calls used up, or no reply at all, #345) has Carry on as its one next step, so the card waits for a
+  // turn that ends of itself.
   const notReadyNow =
     !update &&
     !review &&
@@ -825,6 +829,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     !snap?.held &&
     !snap?.clash &&
     !finishing &&
+    !carryOnNow &&
     !waitingNow &&
     !(sentBack && sentBack.stageId === instance.currentStageId) &&
     !(remote && awaiting) &&
@@ -1743,8 +1748,6 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     `
   }
 
-  // #345: the line a turn that ended with nothing to show left, while Carry on still answers it.
-  const carryOnNow = carryOnLine(snap)
   // Carry on goes as the turn it starts begins, so the focus would fall to the page: it moves to the thread, where the status line and the
   // reply appear, and on to the chat box once the turn is over, unless the architect has put it somewhere else meanwhile.
   const carryOnFocus = useRef(false)
@@ -2226,6 +2229,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   // preview to that Field, where it can be edited by hand. Ask the AI to finish these sends the list as the architect's message. Save and
   // stop here is Pause's Save: one stage Save, the run paused on this Stage, nothing advanced or sent for approval (a remote Stage asks for
   // none), so Advance to next stage and Request Sign-off still check the Gate in the editor. The status region says once that it is up.
+  // When every Field the Stage drafts is done and the Gate waits only on Fields outside it (`onlyOutsideTheStage`), the AI is told nothing
+  // (#349) and has nothing to finish: the card says so, and Save and stop here is its one button.
   const showField = (key) => {
     const el = [...document.querySelectorAll('[data-testid="interview-field"]')].find((node) => node.getAttribute('data-field-key') === key)
     if (!el) return
@@ -2234,6 +2239,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   }
   const notReadyCard = () => {
     const outstanding = outstandingItems(readiness, { name: fieldTitle })
+    const outside = onlyOutsideTheStage(readiness)
     const busySaving = saving?.phase === 'saving' || Boolean(blockedReason) || handEditing !== null
     return html`<div class="qcard stage-end not-ready" data-testid="interview-not-ready" role="group" aria-labelledby="interview-not-ready-head">
       <div class="qchip">Stage</div>
@@ -2248,17 +2254,25 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
             : html`<li key=${`gate-${i}`} data-testid="interview-not-ready-item" data-kind="gate">${item.text}</li>`
         )}
       </ul>
+      ${outside
+        ? html`<p data-testid="interview-not-ready-outside">
+            Every Field ${stage?.title ?? instance.stage.title} drafts is done. What the Gate check still needs lies outside them, so the AI can't finish it here: it is
+            filled in where its Module is edited.
+          </p>`
+        : null}
       ${saving?.phase === 'error' && saving.notReady ? html`<p class="inline-error" role="alert" data-testid="interview-save-error">${saving.message}</p>` : null}
       <p class="kick-note" data-testid="interview-not-ready-stop-note">
         <strong>Save and stop here</strong> makes one Save of the drafts and the decisions log and pauses the run on this Stage: it is saved, not finished. Nothing is advanced
         or sent for approval, and the Modules stay <strong>draft</strong>.
       </p>
       <div class="round-actions">
-        <button type="button" class="btn primary" data-testid="interview-not-ready-ask" disabled=${busySaving} onClick=${() => sessionRef.current?.send(finishTheseMessage(outstanding))}>
-          Ask the AI to finish these
-          <span class="rec">RECOMMENDED</span>
-        </button>
-        <button type="button" class="btn ghost" data-testid="interview-not-ready-save" disabled=${busySaving} onClick=${saveNotReady}>
+        ${outside
+          ? null
+          : html`<button type="button" class="btn primary" data-testid="interview-not-ready-ask" disabled=${busySaving} onClick=${() => sessionRef.current?.send(finishTheseMessage(outstanding))}>
+              Ask the AI to finish these
+              <span class="rec">RECOMMENDED</span>
+            </button>`}
+        <button type="button" class=${`btn ${outside ? 'primary' : 'ghost'}`} data-testid="interview-not-ready-save" disabled=${busySaving} onClick=${saveNotReady}>
           ${saving?.phase === 'saving' && saving.notReady ? 'Saving…' : 'Save and stop here'}
         </button>
       </div>

@@ -11,7 +11,7 @@ globalThis.localStorage = {
   setItem: (k, v) => map.set(k, String(v)),
   removeItem: (k) => map.delete(k),
 }
-const { stageReadiness, outstandingItems, outstandingLine, finishTheseMessage } = await import('../web/lib/interviewReadiness.js')
+const { stageReadiness, outstandingItems, outstandingLine, finishTheseMessage, onlyOutsideTheStage } = await import('../web/lib/interviewReadiness.js')
 const { readinessNote } = await import('../web/lib/interviewSession.js')
 
 // The Gate needs the Problem statement (a budget of 24 to 40 words at medium) and an Owner.
@@ -90,4 +90,26 @@ test('Ask the AI to finish these: the architect\'s message is the card\'s own li
       '- Details · Owner: no content yet',
     ].join('\n')
   )
+})
+
+// A Stage that mounts a Module read-only (#152) for its Gate: every Field the Stage drafts can be done while the Gate still waits.
+const withReadOnly = {
+  ...definition,
+  stages: [{ ...definition.stages[0], modules: ['details', 'shared'], readOnlyModules: ['shared'] }],
+  artefacts: [{ id: 'light', title: 'Light', gate: 'shaped', requires: ['details.summary', 'shared.notes'] }],
+  modules: [...definition.modules, { id: 'shared', title: 'Shared', fields: [{ id: 'notes', title: 'Notes', type: 'markdown', required: true }] }],
+}
+const readOnlyVerdict = (drafts) =>
+  stageReadiness({ definition: withReadOnly, structure: withReadOnly, stageId: 'shape', artefactId: 'light', size: 'medium', modules: [...saved, { id: 'shared', status: 'draft', fields: [{ id: 'notes', value: '' }] }], drafts })
+
+test('only outside the Stage: every Field it drafts is done and the Gate waits on Fields it cannot draft, so the AI has nothing to finish', () => {
+  const verdict = readOnlyVerdict({ 'details.summary': { value: words(30) } })
+  assert.equal(verdict.ready, false)
+  assert.equal(onlyOutsideTheStage(verdict), true)
+  assert.deepEqual(outstandingItems(verdict).map(outstandingLine), ['The Gate check for Light: outstanding shared.notes'])
+  // A Field of its own still to finish, a Gate with no Artefact aimed for, a ready Stage and no verdict are not that.
+  assert.equal(onlyOutsideTheStage(readOnlyVerdict({ 'details.summary': { value: words(5) } })), false)
+  assert.equal(onlyOutsideTheStage({ gate: { pass: false, artefact: null, outstanding: [] }, fields: {}, allDone: true, ready: false }), false)
+  assert.equal(onlyOutsideTheStage(verdictFor({ 'details.summary': { value: words(30) }, 'details.owner': { value: 'Pat' } })), false)
+  assert.equal(onlyOutsideTheStage(null), false)
 })

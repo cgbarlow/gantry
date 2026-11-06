@@ -72,7 +72,7 @@ import { AiProviderError, getAiProvider } from './aiProviders.js'
 import { artefactChoices, buildInterviewBrief, estimateTokens, normalizeSavedContent, requiredFieldKeys } from './interviewBrief.js'
 import { DRAFT_TOOL, DRAFT_TOOL_NAME, DRAFT_FENCE, DRAFT_TEXT_FALLBACK_INSTRUCTIONS, checkDraft, extractDraftBlocks, isBlankValue, normaliseDraftValue, citedSourceIds, stripDraftBlocks } from './interviewDraft.js'
 import { countWords } from './targetSize.js'
-import { outstandingItems, outstandingLine } from './interviewReadiness.js'
+import { onlyOutsideTheStage, outstandingItems, outstandingLine } from './interviewReadiness.js'
 import {
   READ_TOOL,
   READ_TOOL_NAME,
@@ -1763,8 +1763,8 @@ export function createInterviewSession(config = {}) {
     const verdict = context.readiness({ drafts, openFields: openFields() })
     if (!verdict || verdict.ready) return null
     // Every Field this Stage can draft is done, and what the Gate still needs lies outside it (a Module held until an earlier Stage merges,
-    // #296, which the Waiting card explains): nothing the AI could fix.
-    if (verdict.allDone && verdict.gate?.artefact) return null
+    // #296, which the Waiting card explains, or one this Stage mounts read-only, #152): nothing the AI could fix.
+    if (onlyOutsideTheStage(verdict)) return null
     return readinessNote(verdict, { fieldTitle, chat: state.cardMode === 'chat', finished: state.finish === 'done' })
   }
 

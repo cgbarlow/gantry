@@ -94,6 +94,13 @@ export function outstandingItems(readiness, { name = (key) => key } = {}) {
   return items
 }
 
+/**
+ * #350: whether what keeps the Stage lies only outside the Fields it drafts: every Field in scope is done and the Gate check for the
+ * Artefact aimed for waits on Fields this Stage can't draft (a Module it mounts read-only, #152, or one held until an earlier Stage merges,
+ * #296). Then there is nothing for the AI to finish: the session sends it no note (#349) and the Not ready yet card doesn't offer to ask it.
+ */
+export const onlyOutsideTheStage = (readiness) => Boolean(readiness && !readiness.ready && readiness.allDone && readiness.gate?.artefact)
+
 /** One item of `outstandingItems` as a line: a Field is "its name: its reasons". */
 export const outstandingLine = (item) => (item.kind === 'field' ? `${item.name}: ${item.text}` : item.text)
 

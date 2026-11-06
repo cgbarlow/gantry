@@ -1009,7 +1009,9 @@ When the interview is only for this Stage, the card has one button, **Save and s
 - **Ask the AI to finish these** (recommended) sends the list to the AI as your message, and the AI redrafts what it can or asks you for the rest.
 - **Save and stop here** makes **one stage Save** of the drafts and the decisions log, through the same Save check as any other, and leaves the run **paused** on this Stage, as **Pause** does. The Stage is saved, not finished: nothing is advanced or sent for approval (on Azure DevOps or GitHub no Pull Request is opened), and the Modules stay **`draft`**. **Advance to next stage** and **Request Sign-off** in the editor still check the Gate exactly as they always do. Open the Interview page again, or choose **Resume now**, to carry on.
 
-While the card is up the run plan shows the Stage as **drafting**, and after **Save and stop here** as **paused**. The card goes as soon as the Stage is ready (by the AI's redraft or your own edit), and the stage-end card takes its place. It isn't shown while a round of cards is open or while the AI is working.
+When every Field the Stage drafts is done and the Gate check waits only on Fields outside them (a Module the Stage mounts read-only, for example), the AI has nothing to finish and isn't asked: the card says so, and **Save and stop here** is its one button. Fill the rest in where its Module is edited.
+
+While the card is up the run plan shows the Stage as **drafting**, and after **Save and stop here** as **paused**. The card goes as soon as the Stage is ready (by the AI's redraft or your own edit), and the stage-end card takes its place. It isn't shown while a round of cards is open, while the AI is working, or while **Carry on** is offered because the AI stopped short (it used up its rounds of tool calls, or stopped without replying): press **Carry on** first, and the card comes if the Stage still isn't ready once that turn ends.
 
 ### Running until a later Stage
 
