@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
-import { bodyTables, docxPart, expectedTableOfContents, headerRowFormat, headingBookmarks, headingNumbers, rowsCantSplit, tableOfContents, wordStyles } from './helpers/wordDocx.js'
+import { bodyTables, docxPart, expectedTableOfContents, footnoteMarks, footnotes, headerRowFormat, headingBookmarks, headingNumbers, rowsCantSplit, tableOfContents, wordStyles } from './helpers/wordDocx.js'
+import { renderArtefact } from '../lib/render.js'
 
 // #197 (spec #192) — the browser half of design v3's Word styles. The default Render converts in the
 // browser with pandoc-wasm (Pandoc 3.10), not the server's native Pandoc that tests/designV3.test.js
@@ -23,17 +24,28 @@ function renderSadInBrowser() {
   return sadInBrowser
 }
 
+// A scratch copy of the example, at Detailed Design: the SAD renders there, and the bundled example has passed it.
+function exampleAtDetailedDesign(root) {
+  const instancesDir = join(root, 'instances')
+  cpSync(EXAMPLE, join(instancesDir, 'examples'), { recursive: true })
+  rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
+  const instanceYaml = join(instancesDir, 'examples', 'instance.yaml')
+  const atDetailedDesign = readFileSync(instanceYaml, 'utf8').replace(/^stage: .*$/m, 'stage: detailed-design')
+  assert.match(atDetailedDesign, /^definitionVersion: 3$/m)
+  writeFileSync(instanceYaml, atDetailedDesign)
+  // #353: and a footnote of the author's own between two citations, which the cross-references' numbers count.
+  const designBasis = join(instancesDir, 'examples', 'modules', 'design-basis.md')
+  const text = readFileSync(designBasis, 'utf8')
+  const withNote = text.replace('Claims data stays in New Zealand [', 'Claims data stays in New Zealand^[A note of the author.] and [')
+  assert.notEqual(withNote, text)
+  writeFileSync(designBasis, withNote)
+  return instancesDir
+}
+
 async function renderSadInBrowserOnce() {
   const root = mkdtempSync(join(tmpdir(), 'gantry-v3-word-styles-e2e-'))
-  const instancesDir = join(root, 'instances')
   try {
-    cpSync(EXAMPLE, join(instancesDir, 'examples'), { recursive: true })
-    rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
-    // The SAD renders at Detailed Design, which the bundled example has passed; open it there.
-    const instanceYaml = join(instancesDir, 'examples', 'instance.yaml')
-    const atDetailedDesign = readFileSync(instanceYaml, 'utf8').replace(/^stage: .*$/m, 'stage: detailed-design')
-    assert.match(atDetailedDesign, /^definitionVersion: 3$/m)
-    writeFileSync(instanceYaml, atDetailedDesign)
+    const instancesDir = exampleAtDetailedDesign(root)
     let docx
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
       const browser = await launchBrowser()
@@ -104,4 +116,35 @@ test('the browser\'s pandoc-wasm render of the v3 SAD has its table of contents 
   assert.deepEqual(toc.entries.slice(0, 4).map(({ text }) => text), ['Document Control', 'Review & sign-off', '1\tOverview', '1.1\tExecutive summary'])
   const bookmarks = headingBookmarks(documentXml)
   for (const [i, entry] of toc.entries.entries()) assert.equal(bookmarks.get(entry.anchor)?.heading, expected[i].heading, `${entry.text} links to its heading (#${entry.anchor})`)
+})
+
+// #353: the example's SAD cites "Design workshop notes", "Client brief, p. 2" and the Requirements register more than once, across
+// its Modules. The browser's conversion gives each one footnote and a cross-reference showing its number wherever it is cited
+// again, exactly as the server's native Pandoc does.
+test('the browser\'s pandoc-wasm render of the v3 SAD makes one footnote per reference, and each later citation shows its number on open, as the native render does (#353)', async () => {
+  const docx = await renderSadInBrowser()
+  const marks = footnoteMarks(docxPart(docx, 'word/document.xml'))
+  const notes = footnotes(docxPart(docx, 'word/footnotes.xml'))
+  const words = notes.map((n) => n.text)
+  assert.deepEqual(words, [...new Set(words)], `one footnote per reference: ${words.join(' | ')}`)
+  const author = marks.find((m) => m.kind === 'footnote' && notes.find((n) => n.id === m.id)?.text === 'A note of the author.')
+  assert.ok(author, "the author's own footnote is there")
+  const references = marks.filter((m) => m.kind === 'reference')
+  assert.ok(references.some((m) => m.refersTo > author.number), "a cross-reference shows a number that counts the author's footnote")
+  assert.ok(references.length > 0, 'the SAD cites a reference again')
+  for (const m of references) {
+    assert.equal(m.shown, String(m.refersTo), `${m.bookmark} shows its footnote's number before any update of fields`)
+    assert.equal(m.style, 'FootnoteReference')
+    assert.equal(m.switches, '\\f \\h')
+  }
+
+  const root = mkdtempSync(join(tmpdir(), 'gantry-v3-word-styles-native-'))
+  try {
+    const native = renderArtefact('examples', 'sad', { instancesDir: exampleAtDetailedDesign(root) })
+    const shape = (all) => all.map((m) => (m.kind === 'footnote' ? m.number : `→${m.shown}`))
+    assert.deepEqual(shape(marks), shape(footnoteMarks(docxPart(native.docxPath, 'word/document.xml'))))
+    assert.deepEqual(words, footnotes(docxPart(native.docxPath, 'word/footnotes.xml')).map((n) => n.text))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })

@@ -8,6 +8,7 @@ import {
   buildSourceAppendix,
   citedSourceIds,
   findSourceCitations,
+  numberCitationCrossReferences,
   sourceAppendixProblem,
   sourceCitationFor,
   sourceCitationsForWord,
@@ -19,6 +20,7 @@ import { createAsset, listAssets } from '../lib/assets.js'
 import { findDefinitionProblemsInStructure, loadDefinition, buildDefinitionYamlObject } from '../lib/definition.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { removeCitations } from './helpers/uncite.js'
+import { docxPart, footnoteMarks, footnotes } from './helpers/wordDocx.js'
 
 // #281 (map #238, decided in #245): Source documents cited from module content as `[text](source:<id>)`, printed in Word as a real footnote (#351), and an optional Sources appendix an Artefact's Definition opts into with `source-appendix: true`.
 
@@ -196,6 +198,137 @@ describe('what Word prints', () => {
   test('text with no citation comes back unchanged', () => {
     const markdown = '# Title\n\nSome *words* and a [link](https://example.com).\n'
     assert.equal(sourceCitationsForWord(markdown), markdown)
+  })
+})
+
+describe('a reference cited again (#353)', () => {
+  // The first citation of a reference is its footnote, with a bookmark around the mark; every later one with the same words is a
+  // NOTEREF cross-reference to that bookmark, showing the footnote's number. Read back here as `⟦1⟧^[words]⟦/1⟧` (a footnote in
+  // bookmark 1) and `⟨1:3⟩` (a cross-reference to bookmark 1 showing "3"), so the tests say what Word gets.
+  const readable = (text) =>
+    text
+      .replace(/`<w:bookmarkStart w:id="(\d+)" w:name="_RefCitation(\d+)"\/>`\{=openxml\}/g, (_, id, n) => {
+        assert.equal(Number(id), 3000000 + Number(n), 'bookmark ids clear of Pandoc\'s, the table of contents\' and the Field tags\'')
+        return `⟦${n}⟧`
+      })
+      .replace(/`<w:bookmarkEnd w:id="(\d+)"\/>`\{=openxml\}/g, (_, id) => `⟦/${Number(id) - 3000000}⟧`)
+      .replace(/`<w:r>[^`]*? NOTEREF _RefCitation(\d+) \\f \\h [^`]*?<w:t>(\d*)<\/w:t>[^`]*`\{=openxml\}/g, '⟨$1:$2⟩')
+  const word = (markdown, titleFor) => readable(sourceCitationsForWord(markdown, titleFor))
+
+  test('a citing A, B, then A again makes two footnotes, and the third shows the first one\'s number', () => {
+    assert.equal(word('x [A](source:a) y [B](source:b) z [A](source:a).'), 'x⟦1⟧^[A]⟦/1⟧ y^[B] z⟨1:1⟩.')
+    assert.equal(word('x [A](source:a) y [A](source:a) z [A](source:a).'), 'x⟦1⟧^[A]⟦/1⟧ y⟨1:1⟩ z⟨1:1⟩.')
+  })
+
+  test('the same reference means the same printed words: a section, a file or a commit makes another one', () => {
+    assert.equal(
+      word('a [Gantry hosting](source:h) b [Gantry hosting, Constraints](source:h) c [Gantry hosting, Constraints](source:h) d [Gantry hosting](source:h) e [Gantry hosting, Out of scope](source:h)'),
+      'a⟦1⟧^[Gantry hosting]⟦/1⟧ b⟦2⟧^[Gantry hosting, Constraints]⟦/2⟧ c⟨2:2⟩ d⟨1:1⟩ e^[Gantry hosting, Out of scope]'
+    )
+    const A = 'de62a9e1234567890abcdef1234567890abcdef1'
+    const B = '0123456789abcdef0123456789abcdef01234567'
+    assert.equal(
+      word(`a [gantry](source:g?path=README.md&commit=${A}) b [gantry](source:g?path=README.md&commit=${B}) c [gantry](source:g?path=README.md&commit=${A})`),
+      'a⟦1⟧^[gantry, README.md, at commit de62a9e]⟦/1⟧ b^[gantry, README.md, at commit 0123456] c⟨1:1⟩'
+    )
+    // Compared as the footnote prints them: after the fallback on the document's title, with the spaces around trimmed.
+    assert.equal(word('a [](source:a) b [ Client brief ](source:b) c [Client brief](source:a)', () => 'Client brief'), 'a⟦1⟧^[Client brief]⟦/1⟧ b⟨1:1⟩ c⟨1:1⟩')
+  })
+
+  test('the numbers count the author\'s own footnotes, inline or by label, and nothing that only looks like one', () => {
+    const markdown = 'x [A](source:a) y^[mine] z [B](source:b) w[^n] v [B](source:b) u [A](source:a).\n\n[^n]: Defined.'
+    assert.equal(word(markdown), 'x⟦1⟧^[A]⟦/1⟧ y^[mine] z⟦2⟧^[B]⟦/2⟧ w[^n] v⟨2:3⟩ u⟨1:1⟩.\n\n[^n]: Defined.')
+    // Before the first citation: a label used twice is two footnotes. Not footnotes: an undefined label, a definition, code,
+    // an escaped `^`, an HTML comment and a fenced block.
+    const before = 'One[^n] two[^n] `^[code]` \\^[escaped] [^undefined] <!-- ^[comment] -->\n\n```\n^[fenced]\n```\n\n[^n]: Defined.\n\nSee [A](source:a) and [A](source:a).'
+    assert.match(word(before), /See⟦1⟧\^\[A\]⟦\/1⟧ and⟨1:3⟩\.$/)
+  })
+
+  test('a citation printed as plain words starts no footnote, and a reference cited once is the note it was', () => {
+    assert.equal(
+      word('## Intro ([A](source:a))\n\n- [A](source:a): the brief\n\n| Doc |\n| --- |\n| [A](source:a) |\n\nText [A](source:a) and [A](source:a).'),
+      '## Intro (A)\n\n- A: the brief\n\n| Doc |\n| --- |\n| A |\n\nText⟦1⟧^[A]⟦/1⟧ and⟨1:1⟩.'
+    )
+    assert.equal(sourceCitationsForWord('- [A](source:a): x\n\nSee [A](source:a).'), '- A: x\n\nSee^[A].')
+  })
+
+  test('the whole text is one document: a reference cited on both sides of a fenced block, or in a table cell, is footnoted once', () => {
+    assert.equal(word('x [a](source:a)\n\n```\ncode\n```\n\ny [a](source:a)'), 'x⟦1⟧^[a]⟦/1⟧\n\n```\ncode\n```\n\ny⟨1:1⟩')
+    assert.equal(word('See [a](source:a).\n\n| Doc | Note |\n| --- | --- |\n| x | as said [a](source:a) |'), 'See⟦1⟧^[a]⟦/1⟧.\n\n| Doc | Note |\n| --- | --- |\n| x | as said⟨1:1⟩ |')
+  })
+
+  test('side by side, a cross-reference keeps #351\'s separators and spacing', () => {
+    assert.equal(word('x [a](source:a), [a](source:a) y'), 'x⟦1⟧^[a]⟦/1⟧, ⟨1:1⟩ y')
+    assert.equal(word('x [a](source:a),[a](source:a) y'), 'x⟦1⟧^[a]⟦/1⟧, ⟨1:1⟩ y')
+    assert.equal(word('x [a](source:a)[a](source:a) y'), 'x⟦1⟧^[a]⟦/1⟧ ⟨1:1⟩ y')
+    assert.equal(word('x ([a](source:a); [b](source:b)) y ([b](source:b); [a](source:a)).'), 'x⟦1⟧^[a]⟦/1⟧ ⟦2⟧^[b]⟦/2⟧ y⟨2:2⟩ ⟨1:1⟩.')
+    assert.equal(word('x [b](source:b), [a](source:a) y [a](source:a)'), 'x^[b], ⟦1⟧^[a]⟦/1⟧ y⟨1:2⟩', 'a bookmarked note after a note keeps its space')
+    assert.equal(word('x [a](source:a) y [a](source:a)x^2^ z'), 'x⟦1⟧^[a]⟦/1⟧ y⟨1:1⟩x ^2^ z', 'and a cross-reference is kept from the writer\'s own ^')
+  })
+
+  test('the numbers are counted over the whole document, so a footnote in front of the Fields moves them on', () => {
+    const fields = sourceCitationsForWord('a [A](source:a) b [A](source:a)')
+    assert.equal(readable(numberCitationCrossReferences(`Cover^[x]\n\n${fields}`)), 'Cover^[x]\n\na⟦1⟧^[A]⟦/1⟧ b⟨1:2⟩')
+    assert.equal(numberCitationCrossReferences(numberCitationCrossReferences(fields)), fields, 'counting again changes nothing')
+    assert.equal(numberCitationCrossReferences('No ^[cross-reference] here.'), 'No ^[cross-reference] here.')
+  })
+
+  test('the Pandoc this server converts with makes one footnote per reference, and each cross-reference shows the right number in the Footnote Reference style', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const markdown = [
+      'Built from it ([A](source:a)). See [B](source:b), [A](source:a); and the author\'s own^[Mine.] note[^n].',
+      '',
+      '- [B](source:b): the list labels it',
+      '',
+      'Again [Gantry hosting](source:h) and [Gantry hosting, Constraints](source:h) ([B](source:b); [Gantry hosting, Constraints](source:h)).',
+      '',
+      '[^n]: Defined.',
+    ].join('\n')
+    const dir = mkdtempSync(join(tmpdir(), 'gantry-noteref-'))
+    try {
+      const docx = join(dir, 'out.docx')
+      execFileSync('pandoc', ['-f', 'markdown', '-t', 'docx', '-o', docx], { input: sourceCitationsForWord(markdown) })
+      const marks = footnoteMarks(docxPart(docx, 'word/document.xml'))
+      const notes = footnotes(docxPart(docx, 'word/footnotes.xml'))
+      assert.deepEqual(notes.map((n) => n.text), ['A', 'B', 'Mine.', 'Defined.', 'Gantry hosting', 'Gantry hosting, Constraints'])
+      assert.deepEqual(
+        marks.map((m) => (m.kind === 'footnote' ? m.number : `→${m.shown}`)),
+        [1, 2, '→1', 3, 4, 5, 6, '→2', '→6']
+      )
+      for (const m of marks.filter((m) => m.kind === 'reference')) {
+        assert.equal(m.shown, String(m.refersTo), `${m.bookmark} shows the number of the footnote it refers to`)
+        assert.equal(m.style, 'FootnoteReference')
+        assert.equal(m.switches, '\\f \\h')
+      }
+      const text = docxPart(docx, 'word/document.xml')
+      assert.doesNotMatch(text, /w:dirty|updateFields/, 'nothing asks Word to update fields')
+      assert.match(text, /B: the list labels it/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('Pandoc 2 reads each of them as a footnote or a cross-reference, with nothing left as a superscript', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const cases = [
+      ['x [a](source:a), [a](source:a) y', 1],
+      ['x [a](source:a),[a](source:a) y', 1],
+      ['x [a](source:a)[a](source:a) y', 1],
+      ['x [b](source:b),[a](source:a) y [a](source:a)', 2],
+      ['x ([a](source:a); [b](source:b)) y ([b](source:b); [a](source:a)).', 2],
+      ['x [a](source:a) y [a](source:a)x^2^ z', 1],
+      ['it is O(n^2) [a](source:a) and O(n^2) [a](source:a).', 1],
+      ['x [[a](source:a)]{#gf_m_f} y [[a](source:a)]{#gf_m_g}', 1],
+    ]
+    for (const [markdown, notes] of cases) {
+      const word = sourceCitationsForWord(markdown)
+      const ast = JSON.stringify(JSON.parse(execFileSync('pandoc', ['-f', 'markdown', '-t', 'json'], { input: word, encoding: 'utf8' })).blocks)
+      assert.equal(ast.match(/"t":"Note"/g)?.length ?? 0, notes, `${markdown} → ${word}`)
+      assert.equal(ast.match(/NOTEREF/g)?.length ?? 0, (word.match(/NOTEREF/g) ?? []).length, `${markdown}: every cross-reference reaches Word`)
+      assert.doesNotMatch(ast, /"t":"Superscript","c":\[\{"t":"(?:RawInline|Str","c":"[[,;])/, `${markdown} → ${word}`)
+      assert.doesNotMatch(ast, /"\^\[|"\[\^/, `${markdown}: no note left as literal text`)
+      if (markdown.includes('^2^')) assert.match(ast, /"t":"Superscript","c":\[\{"t":"Str","c":"2"\}\]/, 'the writer\'s own superscript is still one')
+    }
   })
 })
 
@@ -443,6 +576,31 @@ describe('rendering', () => {
       assert.doesNotMatch(text, /\(Client brief\)|\(operating model\)/)
       // The Sources appendix is unchanged: the cited documents, once each.
       assert.match(text, /Client brief\s*Client brief v3\.docx\s*4 Mar 2026\s*Old notes \(removed\)\s*notes\.txt\s*15 Jan 2026/)
+    })
+  })
+
+  // #353: through the compile step and a real Pandoc conversion. The example's Full SOAP cites "Client brief, p. 2" in the
+  // Background and again in the Design basis; here the Background cites it first, with an author's own footnote after it.
+  test('a reference cited in several Fields and Modules is one footnote, and every later citation shows its number on open, with an author\'s footnote between', async () => {
+    const citing = "Targets are set [Client brief, p. 2](source:client-brief), with the author's own^[A note of the author.] note between, and again [Client brief, p. 2](source:client-brief)."
+    await withCitingExample({ appendix: false, citing }, async ({ instancesDir, definitionsDir }) => {
+      const result = renderArtefact(SLUG, 'soap-full', { instancesDir, definitionsDir })
+      const marks = footnoteMarks(docxPart(result.docxPath, 'word/document.xml'))
+      const notes = footnotes(docxPart(result.docxPath, 'word/footnotes.xml'))
+      const words = notes.map((n) => n.text)
+      assert.deepEqual(words, [...new Set(words)], `one footnote per reference: ${words.join(' | ')}`)
+      assert.equal(marks.filter((m) => m.kind === 'footnote').length, notes.length)
+      const brief = marks.find((m) => m.kind === 'footnote' && notes.find((n) => n.id === m.id)?.text === 'Client brief, p. 2')
+      const author = marks.find((m) => m.kind === 'footnote' && notes.find((n) => n.id === m.id)?.text === 'A note of the author.')
+      assert.ok(brief && author, `both footnotes are there: ${words.join(' | ')}`)
+      assert.equal(author.number, brief.number + 1, "the author's footnote is numbered after the citation's")
+      const again = marks.filter((m) => m.kind === 'reference' && m.refersTo === brief.number)
+      assert.ok(again.length >= 2, 'the later citations, in this Field and in the Design basis, are cross-references to it')
+      assert.ok(again.some((m) => m.bookmarks.includes('design-basis')), 'one of them in another Module')
+      for (const m of marks.filter((m) => m.kind === 'reference')) {
+        assert.equal(m.shown, String(m.refersTo), `${m.bookmark} shows its footnote's number before any update of fields`)
+        assert.equal(m.style, 'FootnoteReference')
+      }
     })
   })
 

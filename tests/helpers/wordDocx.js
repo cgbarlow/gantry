@@ -284,3 +284,44 @@ export function expectedTableOfContents(documentXml, styles, numberingXml) {
     .filter((h) => h.level <= 3)
     .map(({ text, number, heading, level }) => ({ style: `TOC${level}`, text: number ? `${number}\t${text}` : text, heading }))
 }
+
+/**
+ * #353: the footnote marks a reader sees in the body, in order. A real footnote's mark is numbered as Word numbers it, 1, 2, 3…
+ * in the order they appear: `{ kind: 'footnote', id, number, bookmarks }`, `bookmarks` being the names of the bookmarks around
+ * it. A NOTEREF cross-reference shows its field's cached result before any update of fields: `{ kind: 'reference', bookmark,
+ * switches, shown, style, refersTo, bookmarks }`, `style` being the shown run's character style and `refersTo` the number of
+ * the footnote inside that bookmark (undefined when there is none).
+ */
+export function footnoteMarks(documentXml) {
+  const body = documentXml.slice(documentXml.indexOf('<w:body'))
+  const marks = []
+  const open = new Map()
+  const footnoteIn = new Map()
+  let number = 0
+  const token = /<w:bookmarkStart w:id="(\d+)" w:name="([^"]*)"\s*\/>|<w:bookmarkEnd w:id="(\d+)"\s*\/>|<w:footnoteReference w:id="(\d+)"\s*\/>|<w:instrText[^>]*>\s*NOTEREF (\S+)([^<]*)<\/w:instrText>/g
+  for (const m of body.matchAll(token)) {
+    if (m[1]) open.set(m[1], m[2])
+    else if (m[3]) open.delete(m[3])
+    else if (m[4]) {
+      number++
+      for (const name of open.values()) if (!footnoteIn.has(name)) footnoteIn.set(name, number)
+      marks.push({ kind: 'footnote', id: m[4], number, bookmarks: [...open.values()] })
+    } else {
+      const rest = body.slice(m.index + m[0].length)
+      const separate = rest.indexOf('w:fldCharType="separate"')
+      const end = rest.indexOf('w:fldCharType="end"')
+      const result = separate >= 0 && separate < end ? rest.slice(separate, end) : ''
+      const shown = [...result.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((t) => t[1]).join('')
+      const style = /<w:rStyle w:val="([^"]*)"/.exec(result.slice(result.indexOf('<w:r>')))?.[1]
+      marks.push({ kind: 'reference', bookmark: m[5], switches: m[6].trim(), shown, style, bookmarks: [...open.values()] })
+    }
+  }
+  return marks.map((mark) => (mark.kind === 'reference' ? { ...mark, refersTo: footnoteIn.get(mark.bookmark) } : mark))
+}
+
+/** #353: a .docx's footnotes, without Word's separators: `[{ id, text }]` from `word/footnotes.xml`, a no-break space (Pandoc keeps "p. 4" together with one) read as an ordinary one. */
+export function footnotes(footnotesXml) {
+  return [...footnotesXml.matchAll(/<w:footnote( [^>]*)>([\s\S]*?)<\/w:footnote>/g)]
+    .filter((m) => !/w:type="(?:continuationSeparator|separator)"/.test(m[1]))
+    .map((m) => ({ id: /w:id="(-?\d+)"/.exec(m[1])[1], text: [...m[2].matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((t) => t[1]).join('').replace(/\u00a0/g, ' ').trim() }))
+}

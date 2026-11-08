@@ -7,7 +7,7 @@
 // #319 (docs/adr/0072): a citation of a code repository may carry the file and the commit it was read at after the id, as a query
 // (web/lib/sourceRepository.js): `[orders service](source:billing-api?path=src/orders.ts&commit=3f2a9c1…)`. Every other citation is unchanged.
 //
-// In the editor the link is clickable and opens the document (web/lib/markdownPreview.js). Word readers usually have no repo access, so the Word render makes it a real footnote reading "Client brief, p. 4", with no hyperlink (#351, sourceCitationsForWord below). The exported `.md` keeps the link as written, as it keeps a diagram caption's syntax. Only a link is a citation: an image (`![…](source:…)`) is not, and neither is anything inside a code span or a fenced code block.
+// In the editor the link is clickable and opens the document (web/lib/markdownPreview.js). Word readers usually have no repo access, so the Word render makes it a real footnote reading "Client brief, p. 4", with no hyperlink (#351, sourceCitationsForWord below), and a later citation of the same reference shows that footnote's number (#353). The exported `.md` keeps the link as written, as it keeps a diagram caption's syntax. Only a link is a citation: an image (`![…](source:…)`) is not, and neither is anything inside a code span or a fenced code block.
 //
 // An Artefact whose Definition sets `source-appendix: true` ends with a Sources list of the documents it cites: each with its title, original filename and upload date (or, #318, for a page fetched from a web address, its address and "retrieved <date>"). A removed document is still listed, marked removed. With the key off (its default) there is no list.
 //
@@ -122,6 +122,37 @@ const escapeCarets = (text) => text.replace(/\\[\s\S]|\^/g, (m) => (m === '^' ? 
 // An unescaped `^`: with no whitespace between it and a note's `^`, Pandoc 2 reads the two as a superscript.
 const CARET = /(?<!\\)\^/
 
+// #353: one footnote per reference. A citation whose footnote would read exactly as an earlier one's (the same words, after
+// the fallback on the document's title, and for a repository the same file and commit) makes no footnote of its own: it
+// prints that footnote's number, as Word's Insert Cross-reference does, a NOTEREF field to a bookmark around the first
+// footnote's mark. `\f` gives it the Footnote Reference style, and `\h` makes it a link to the footnote. The field carries
+// the number as its shown result (numberCitationCrossReferences below), so it is right when the document opens, with no
+// update of fields, and Word keeps it right when it renumbers. The ids are clear of Pandoc's own, the table of contents'
+// (1000000 on) and the Field tags' (2000000 on, lib/wordFieldTags.js). A reference cited once is the plain note it was.
+const CITATION_BOOKMARK_ID_BASE = 3000000
+const citationBookmarkName = (n) => `_RefCitation${n}`
+const bookmarkedNote = (n, words) =>
+  '`<w:bookmarkStart w:id="' + (CITATION_BOOKMARK_ID_BASE + n) + '" w:name="' + citationBookmarkName(n) + '"/>`{=openxml}' +
+  `^[${words}]` +
+  '`<w:bookmarkEnd w:id="' + (CITATION_BOOKMARK_ID_BASE + n) + '"/>`{=openxml}'
+const FOOTNOTE_REFERENCE_RUN_PROPERTIES = '<w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr>'
+const noteCrossReference = (n, shown = '') =>
+  '`' +
+  `<w:r>${FOOTNOTE_REFERENCE_RUN_PROPERTIES}<w:fldChar w:fldCharType="begin"/></w:r>` +
+  `<w:r>${FOOTNOTE_REFERENCE_RUN_PROPERTIES}<w:instrText xml:space="preserve"> NOTEREF ${citationBookmarkName(n)} \\f \\h </w:instrText></w:r>` +
+  `<w:r>${FOOTNOTE_REFERENCE_RUN_PROPERTIES}<w:fldChar w:fldCharType="separate"/></w:r>` +
+  `<w:r>${FOOTNOTE_REFERENCE_RUN_PROPERTIES}<w:t>${shown}</w:t></w:r>` +
+  `<w:r>${FOOTNOTE_REFERENCE_RUN_PROPERTIES}<w:fldChar w:fldCharType="end"/></w:r>` +
+  '`{=openxml}'
+const CITATION_BOOKMARK = /^`<w:bookmarkStart w:id="\d+" w:name="(_RefCitation\d+)"\/>`$/
+const NOTE_CROSS_REFERENCE = /^`<w:r>[^`]*?<w:instrText xml:space="preserve"> NOTEREF (_RefCitation\d+) \\f \\h <\/w:instrText>[^`]*?<w:t>(\d*)<\/w:t>[^`]*`$/
+// Any raw OpenXML inline: a bookmark (the first footnote's, or a Field tag's) or a cross-reference.
+const RAW_INLINE = /`<w:[^`]*`\{=openxml\}/g
+const LEADING_BOOKMARKS = /^(?:`<w:bookmarkStart [^`]*`\{=openxml\})*/
+// `text` as Pandoc 2's superscript sees it, character for character: a raw inline is one unbroken piece (the spaces in its
+// XML are no break), and a cross-reference opens like a note, so one is kept apart from a `^` beside it as a note is.
+const asPandocSees = (text) => text.replace(RAW_INLINE, (raw) => (NOTE_CROSS_REFERENCE.test(raw.slice(0, -'{=openxml}'.length)) ? '^' + '_'.repeat(raw.length - 1) : raw.replace(/\s/g, '_')))
+
 /** The run of non-whitespace characters `text` ends with. */
 function trailingWord(text) {
   let i = text.length
@@ -137,7 +168,9 @@ function inPipeTable(segment, pos) {
   return block.split('\n').some((line) => line.includes('|') && TABLE_DELIMITER_ROW.test(line))
 }
 
-function wordCitations(segment, titleFor) {
+// `noteFor(words)` writes the note for a citation in running text whose footnote reads `words` (#353: a note, a bookmarked
+// note, or a cross-reference to one).
+function wordCitations(segment, titleFor, noteFor) {
   const lineStartOf = (pos) => segment.lastIndexOf('\n', pos - 1) + 1
   const lineEndOf = (pos) => (segment.indexOf('\n', pos) < 0 ? segment.length : segment.indexOf('\n', pos))
   const citations = []
@@ -159,7 +192,7 @@ function wordCitations(segment, titleFor) {
     // The words Copy citation writes for a repository already name the file, so it isn't said twice.
     if (c.path && !(c.text.trim() ? unescapeText(c.text.trim()) : titleOf(c)).includes(c.path)) text += `, ${escapeNote(c.path)}`
     if (c.commit) text += `, at commit ${escapeNote(shortCommit(c.commit))}`
-    return `^[${text}]`
+    return noteFor(text)
   }
 
   // Runs of notes with nothing but separators between them: each run may be all that a bracket holds.
@@ -186,12 +219,18 @@ function wordCitations(segment, titleFor) {
     let gap = segment.slice(at, from)
     const kept = gap.replace(/[ \t]+$/, '')
     if (isNote && kept !== gap && !BLOCK_START.test(segment.slice(lineStartOf(from), from - (gap.length - kept.length)).replace(RAW_BOOKMARK, ''))) gap = kept
+    // #353: a first footnote's bookmark and a cross-reference are raw OpenXML, read here as Pandoc 2 reads them
+    // (asPandocSees); a note's own `^` comes after the bookmark it opens with, and its space goes before the bookmark.
     if (afterNote) {
-      const caret = /^\S*/.exec(gap + text)[0].search(CARET)
-      if (caret >= 0 && caret <= gap.length) gap = `${gap.slice(0, caret)} ${gap.slice(caret)}`
+      const caret = /^\S*/.exec(asPandocSees(gap + text))[0].search(CARET)
+      if (caret >= 0 && caret <= gap.length + LEADING_BOOKMARKS.exec(text)[0].length) {
+        const at = Math.min(caret, gap.length)
+        gap = `${gap.slice(0, at)} ${gap.slice(at)}`
+      }
     }
     if (isNote) {
-      const before = /\s/.test(gap) ? /\S*$/.exec(gap)[0] : trailingWord(out) + gap
+      const seen = asPandocSees(gap)
+      const before = /\s/.test(seen) ? /\S*$/.exec(seen)[0] : trailingWord(asPandocSees(out)) + seen
       if (CARET.test(before) || /(?<!\\)\[$/.test(before)) gap += ' '
     }
     out += gap + text
@@ -223,9 +262,68 @@ function wordCitations(segment, titleFor) {
  * The text the Word document prints for the citations in `markdown` (#351): a Pandoc inline note, `^[words]`, for each one in
  * running text, and the plain words for one that labels a list item or a table cell, or sits in a heading. An empty link text
  * falls back on `titleFor(id)` (the document's title), then on the id. `markdown` is returned unchanged where it holds no citation.
+ *
+ * #353: `markdown` is the whole Word document's text, so a reference is footnoted once in it. The first citation of a reference
+ * cited more than once in running text is a note with a bookmark around its mark, and every later one a cross-reference to it
+ * showing its number. A citation printed as plain words (a label, a heading) starts no footnote.
  */
 export function sourceCitationsForWord(markdown, titleFor) {
-  return mapOutsideFences(markdown, (segment) => wordCitations(segment, titleFor))
+  const times = new Map()
+  mapOutsideFences(markdown, (segment) =>
+    wordCitations(segment, titleFor, (words) => {
+      times.set(words, (times.get(words) ?? 0) + 1)
+      return `^[${words}]`
+    })
+  )
+  const bookmarks = new Map()
+  const word = mapOutsideFences(markdown, (segment) =>
+    wordCitations(segment, titleFor, (words) => {
+      if (times.get(words) < 2) return `^[${words}]`
+      if (bookmarks.has(words)) return noteCrossReference(bookmarks.get(words))
+      bookmarks.set(words, bookmarks.size + 1)
+      return bookmarkedNote(bookmarks.size, words)
+    })
+  )
+  return bookmarks.size ? numberCitationCrossReferences(word) : word
+}
+
+// What Pandoc makes a footnote of, in the order Word numbers them: an inline note, `^[`, and a reference, `[^label]`, to a note
+// the text defines (each reference is a footnote of its own; the definition, `[^label]:` at the start of a line, is none). Code
+// spans (our bookmarks and cross-references among them), HTML comments and escaped characters are passed over, and so are
+// fenced blocks (a raw OpenXML block among them, which Pandoc prints as it is).
+const NOTE_OR_PASSED_OVER = /(`+)(?:(?!\1)[\s\S])*?\1(?!`)|<!--[\s\S]*?-->|\\[\s\S]|^[ \t]{0,3}\[\^[^\]\s]+\]:|\^\[|\[\^([^\]\s]+)\]/gm
+const NOTE_DEFINITION = /^[ \t]{0,3}\[\^([^\]\s]+)\]:/gm
+
+/**
+ * #353: `markdown` (the Word document's whole text, as Pandoc converts it) with each citation cross-reference's shown number
+ * filled in: the number Word gives the footnote its bookmark holds, counting every footnote before it, the author's own
+ * (`^[…]`, `[^1]`) among them. Run once more on the finished text (lib/render.js), so a footnote in what goes in front of
+ * the Fields counts too. `markdown` is returned unchanged where it holds no cross-reference.
+ */
+export function numberCitationCrossReferences(markdown) {
+  const text = String(markdown ?? '')
+  if (!text.includes(' NOTEREF _RefCitation')) return text
+  const defined = new Set()
+  mapOutsideFences(text, (segment) => {
+    for (const m of segment.matchAll(NOTE_DEFINITION)) defined.add(m[1])
+    return segment
+  })
+  let footnotes = 0
+  const numbers = new Map()
+  return mapOutsideFences(text, (segment) =>
+    segment.replace(NOTE_OR_PASSED_OVER, (match, tick, label, offset) => {
+      if (tick) {
+        if (!segment.startsWith('{=openxml}', offset + match.length)) return match
+        const bookmark = CITATION_BOOKMARK.exec(match)
+        if (bookmark) numbers.set(bookmark[1], footnotes + 1)
+        const reference = NOTE_CROSS_REFERENCE.exec(match)
+        return reference ? match.replace(/<w:t>\d*<\/w:t>/, `<w:t>${numbers.get(reference[1]) ?? ''}</w:t>`) : match
+      }
+      if (match === '^[') footnotes++
+      else if (label !== undefined && defined.has(label)) footnotes++
+      return match
+    })
+  )
 }
 
 /** The citation to paste into a field for a document: `[Client brief](source:client-brief)`. #319: for a repository, `at` (`{ path, commit }`) names the file and the commit it was read at, and the file is the link's text. */
