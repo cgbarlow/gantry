@@ -207,12 +207,12 @@ describe('a reference cited again (#353)', () => {
   // bookmark 1) and `⟨1:3⟩` (a cross-reference to bookmark 1 showing "3"), so the tests say what Word gets.
   const readable = (text) =>
     text
-      .replace(/`<w:bookmarkStart w:id="(\d+)" w:name="_RefCitation(\d+)"\/>`\{=openxml\}/g, (_, id, n) => {
+      .replace(/``<w:bookmarkStart w:id="(\d+)" w:name="_RefCitation(\d+)"\/>``\{=openxml\}/g, (_, id, n) => {
         assert.equal(Number(id), 3000000 + Number(n), 'bookmark ids clear of Pandoc\'s, the table of contents\' and the Field tags\'')
         return `⟦${n}⟧`
       })
-      .replace(/`<w:bookmarkEnd w:id="(\d+)"\/>`\{=openxml\}/g, (_, id) => `⟦/${Number(id) - 3000000}⟧`)
-      .replace(/`<w:r>[^`]*? NOTEREF _RefCitation(\d+) \\f \\h [^`]*?<w:t>(\d*)<\/w:t>[^`]*`\{=openxml\}/g, '⟨$1:$2⟩')
+      .replace(/``<w:bookmarkEnd w:id="(\d+)"\/>``\{=openxml\}/g, (_, id) => `⟦/${Number(id) - 3000000}⟧`)
+      .replace(/``<w:r>[^`]*? NOTEREF _RefCitation(\d+) \\f \\h [^`]*?<w:t>(\d*)<\/w:t>[^`]*``\{=openxml\}/g, '⟨$1:$2⟩')
   const word = (markdown, titleFor) => readable(sourceCitationsForWord(markdown, titleFor))
 
   test('a citing A, B, then A again makes two footnotes, and the third shows the first one\'s number', () => {
@@ -301,7 +301,8 @@ describe('a reference cited again (#353)', () => {
         assert.equal(m.switches, '\\f \\h')
       }
       const text = docxPart(docx, 'word/document.xml')
-      assert.doesNotMatch(text, /w:dirty|updateFields/, 'nothing asks Word to update fields')
+      assert.doesNotMatch(text, /w:dirty/, 'no field is marked for Word to update')
+      assert.doesNotMatch(docxPart(docx, 'word/settings.xml'), /updateFields/, 'nothing asks Word to update fields when it opens')
       assert.match(text, /B: the list labels it/)
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -328,6 +329,91 @@ describe('a reference cited again (#353)', () => {
       assert.doesNotMatch(ast, /"t":"Superscript","c":\[\{"t":"(?:RawInline|Str","c":"[[,;])/, `${markdown} → ${word}`)
       assert.doesNotMatch(ast, /"\^\[|"\[\^/, `${markdown}: no note left as literal text`)
       if (markdown.includes('^2^')) assert.match(ast, /"t":"Superscript","c":\[\{"t":"Str","c":"2"\}\]/, 'the writer\'s own superscript is still one')
+    }
+  })
+})
+
+describe('a reference cited again, beside code, stray backticks and the author\'s own footnotes (#353)', () => {
+  // Converted by both Pandocs: the one this server runs and the browser's pandoc-wasm, which every render request may use.
+  // Each comes back as the body's text, its footnote marks (a footnote's number, or `→shown` for a cross-reference), the
+  // footnotes' text, and the cross-references whose shown number is not the number of the footnote they point at.
+  const convertBoth = async (word) => {
+    const { execFileSync } = await import('node:child_process')
+    const { convert } = await import('../node_modules/pandoc-wasm/src/index.node.js')
+    const dir = mkdtempSync(join(tmpdir(), 'gantry-noteref-'))
+    try {
+      const native = join(dir, 'native.docx')
+      execFileSync('pandoc', ['-f', 'markdown', '-t', 'docx', '-o', native], { input: word })
+      const wasm = join(dir, 'wasm.docx')
+      const converted = await convert({ from: 'markdown', to: 'docx', 'output-file': 'output.docx' }, word, {})
+      writeFileSync(wasm, new Uint8Array(await converted.files['output.docx'].arrayBuffer()))
+      return [native, wasm].map((docx) => {
+        const xml = docxPart(docx, 'word/document.xml')
+        const body = xml.slice(xml.indexOf('<w:body'))
+        const marks = footnoteMarks(xml)
+        return {
+          docx,
+          xml,
+          text: [...body.matchAll(/<w:t(?: [^>]*)?>([^<]*)<\/w:t>/g)].map((t) => t[1]).join(''),
+          marks: marks.map((m) => (m.kind === 'footnote' ? m.number : `→${m.shown}`)),
+          wrong: marks.filter((m) => m.kind === 'reference' && m.shown !== String(m.refersTo)),
+          notes: footnotes(docxPart(docx, 'word/footnotes.xml')).map((n) => n.text),
+        }
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  test('a citation straight after a code span keeps the code, and its bookmark or cross-reference is still raw OpenXML', async () => {
+    const markdown = 'Set in `gantry.yaml` [Gantry hosting](source:h).\n\nThe limit is in `limits.ts` [Gantry hosting](source:h), as before.'
+    const word = sourceCitationsForWord(markdown)
+    // An empty Span between them, which prints nothing: backticks side by side would be read as one longer delimiter.
+    assert.doesNotMatch(word, /```/)
+    assert.match(word, /`gantry\.yaml`\[\]\{\}``<w:bookmarkStart /)
+    for (const docx of await convertBoth(word)) {
+      assert.match(docx.text, /^Set in gantry\.yaml\. *The limit is in limits\.ts1?, as before\.$/, docx.docx)
+      assert.deepEqual(docx.marks, [1, '→1'], docx.docx)
+      assert.deepEqual(docx.wrong, [], docx.docx)
+      assert.doesNotMatch(docx.xml, /<w:p(?: [^>]*)?>[^<]/, `${docx.docx}: no bare text in a paragraph`)
+    }
+  })
+
+  test('a stray backtick, in another paragraph or in the same one, does not upset the bookmarks or the numbers', async () => {
+    const markdown = "Press the ` key to go.\n\nSee [A](source:a) and^[mine] then [A](source:a).\n\nDon`t miss [B](source:b), cited again [B](source:b) and ``x`` too."
+    for (const docx of await convertBoth(sourceCitationsForWord(markdown))) {
+      assert.deepEqual(docx.marks, [1, 2, '→1', 3, '→3'], docx.docx)
+      assert.deepEqual(docx.wrong, [], docx.docx)
+      assert.deepEqual(docx.notes, ['A', 'mine', 'B'], docx.docx)
+      assert.match(docx.text, /Press the ` key to go\./, docx.docx)
+      assert.match(docx.text, /Don`t miss, cited again3 and x too\./, docx.docx)
+    }
+    // Over the whole document too: a stray backtick in what goes in front of the Fields.
+    const fields = sourceCitationsForWord('See [A](source:a) and [A](source:a).')
+    assert.match(numberCitationCrossReferences(`Don\`t^[cover]\n\n${fields}`), /<w:t>2<\/w:t>/)
+  })
+
+  test("a reference first cited in an author's own footnote is footnoted where it is next cited in the text, and the footnote shows its number", async () => {
+    const markdown = 'Text^[see [A](source:a) for it] and [A](source:a) then [A](source:a).'
+    for (const docx of await convertBoth(sourceCitationsForWord(markdown))) {
+      assert.deepEqual(docx.marks, [1, 2, '→2'], docx.docx)
+      assert.deepEqual(docx.wrong, [], docx.docx)
+      assert.deepEqual(docx.notes, ['see 2 for it', 'A'], docx.docx)
+    }
+    // A footnote definition is a note too, and a reference cited only in notes is the note it was.
+    assert.equal(sourceCitationsForWord('Text^[see [A](source:a)].'), 'Text^[see ^[A]].')
+    const defined = sourceCitationsForWord('Text[^n] and [A](source:a).\n\n[^n]: As [A](source:a) says.')
+    for (const docx of await convertBoth(defined)) {
+      assert.deepEqual(docx.marks, [1, 2], docx.docx)
+      assert.deepEqual(docx.notes, ['As2 says.', 'A'], docx.docx)
+    }
+  })
+
+  test('a ^[ that Pandoc makes no footnote of, in a link address, an HTML tag or math, is not counted', async () => {
+    const markdown = 'See [site](http://x.org/^[a]) and <span title="^[x]">s</span> and $x^[1]$ and [A](source:a) and [A](source:a).'
+    for (const docx of await convertBoth(sourceCitationsForWord(markdown))) {
+      assert.deepEqual(docx.marks, [1, '→1'], docx.docx)
+      assert.deepEqual(docx.wrong, [], docx.docx)
     }
   })
 })
