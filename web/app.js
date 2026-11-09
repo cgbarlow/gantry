@@ -78,7 +78,7 @@ import { wrap } from './lib/editorWrap.js'
 import { SourceDocumentsPanel } from './lib/sourceDocumentsPanel.js'
 import { citedCommits, citedSourceIds } from './lib/sourceCitations.js'
 import { repositoryReaderFor } from './lib/sourceRepositoryClient.js'
-import { InterviewPage, clearInterviewSessions, unsavedDraftModules } from './lib/interviewView.js'
+import { InterviewPage, clearInterviewSessions, startRoundAfresh, unsavedDraftModules } from './lib/interviewView.js'
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
 import { createLocalDecisionsStore, createServerDecisionsStore, planLocalDecisions } from './lib/decisionsStore.js'
 import { approvalStatusLine } from './lib/interviewApproval.js'
@@ -4966,6 +4966,7 @@ function ReviewCommentsPanel({ instance }) {
   function workThrough(event) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
+    startRoundAfresh(instance.slug, 'review')
     location.route(`${goHere.pathname}${goHere.search}`)
   }
   // #304 (ADR-0066): the Review response list, made on demand from the decisions logs. Nothing is written to the Reviewed copy or committed.
@@ -5298,6 +5299,7 @@ function OutOfDatePanel({ instance }) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
     // The Instance loads again for that Stage when it differs from the one on screen; the Interview page for it replaces this one.
+    startRoundAfresh(instance.slug, 'update')
     if (instance.workspaceBacked) {
       if (instance.stage.id !== instance.currentStageId) viewedStage.value = null
     } else if (startStage !== instance.stage.id) {
@@ -5357,6 +5359,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
     }
   }, [instance.slug, reviewVersion])
   function openReviewRound() {
+    startRoundAfresh(instance.slug, 'review')
     const here = new URL(window.location.href)
     here.searchParams.set('interview', '1')
     here.searchParams.set('review', '1')
@@ -6716,7 +6719,10 @@ function ModuleEditorPage({ slug: routeRef }) {
   // "Back to the run": the Interview page of the current Stage, which is awaiting approval again.
   const leaveRevision = () => goToInterview(null)
   // After a revision: the Interview page on a later Stage, in Bring up to date, for the Fields drafted from content the revision changed (keep or redraft each).
-  const updateInterviewStage = (stageId) => goToInterview(stageId, { update: '1' })
+  const updateInterviewStage = (stageId) => {
+    startRoundAfresh(instanceData.peek()?.slug, 'update') // #358: a Bring up to date of its own, with nothing saved in it yet
+    return goToInterview(stageId, { update: '1' })
+  }
 
   // #293: "Save, advance, carry on" moves the Instance on to its next Stage once the Save has worked. The Gate is checked again here,
   // on what was just saved, by the same code as the editor's "Advance to next stage".

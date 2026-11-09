@@ -250,6 +250,61 @@ test('server workspace: the banner opens the round on the first Stage that has f
   })
 })
 
+test('server workspace: the run plan says it is checking until the Definition is in, and a Bring up to date begun again from the banner starts its plan afresh', async () => {
+  await withPairServer(async ({ page, base, posts, folder }) => {
+    const panel = await seedCitations(page, base, folder)
+    await panel.locator('[data-testid="source-replaces"]').selectOption({ label: 'This replaces… Brief' })
+    await upload(panel, 'Brief v2.md', '# Brief v2\n\nAlpha claims take 11 days.\n')
+    await showFields(page)
+    await page.locator('[data-testid="out-of-date-banner"]').waitFor()
+
+    // #358: the Definition is held back, so the page cannot yet know what Alpha has to bring up to date. Its row says it is checking, never
+    // "nothing Out of date", and no Stage has a count yet.
+    let release
+    const held = new Promise((resolve) => (release = resolve))
+    await page.route((url) => url.pathname.startsWith('/api/definitions/pair/versions/'), async (route) => {
+      await held
+      await route.continue()
+    })
+    await page.click('[data-testid="bring-up-to-date"]')
+    await page.waitForSelector('[data-testid="run-plan-row"][data-stage-id="a"]')
+    assert.deepEqual(await plan(page), [
+      ['a', 'current', 'false', 'checking…', ''],
+      ['b', 'plain', 'false', '', ''],
+    ])
+    release()
+    await page.waitForSelector('[data-testid="interview-update-intro"]')
+    await page.waitForFunction(() => document.querySelector('[data-testid="run-plan-row"][data-stage-id="a"] .rp-note')?.textContent === 'bringing up to date')
+    await page.unroute((url) => url.pathname.startsWith('/api/definitions/pair/versions/'))
+
+    // Alpha's Field kept and saved, then Next: on Beta's page Alpha reads done, as part of the same round.
+    await page.waitForSelector('[data-testid="interview-start"]:not([disabled])')
+    await page.click('[data-testid="interview-start"]')
+    await page.waitForSelector('[data-testid="interview-round"]')
+    await choose(page, 'update:ma.body', 'Keep')
+    await page.click('[data-testid="round-submit"]')
+    await page.waitForSelector('[data-testid="update-ready"]')
+    await page.click('[data-testid="update-save"]')
+    await page.waitForSelector('[data-testid="update-saved"]')
+    await page.click('[data-testid="update-next-button"]')
+    await page.waitForFunction(() => document.querySelector('[data-testid="run-plan-row"][data-stage-id="b"]')?.dataset.state === 'current')
+    assert.deepEqual((await plan(page))[0], ['a', 'done', 'false', 'done', ''])
+
+    // Back to the editor, and Bring up to date again from the banner: a new round, so it opens on Beta (the only Stage still flagged) and Alpha,
+    // which this round has not touched, has no label, as after a reload.
+    await page.click('[data-testid="interview-back"]')
+    await page.waitForSelector('[data-testid="out-of-date-banner"]')
+    await page.click('[data-testid="bring-up-to-date"]')
+    await page.waitForSelector('[data-testid="interview-update-intro"]')
+    await page.waitForFunction(() => document.querySelector('[data-testid="run-plan-row"][data-stage-id="b"] .rp-note')?.textContent === 'bringing up to date')
+    assert.deepEqual(await plan(page), [
+      ['a', 'plain', 'false', '', ''],
+      ['b', 'current', 'false', 'bringing up to date', '1 Out of date'],
+    ])
+    assert.equal(posts.length, 0, 'a kept Field needs no AI')
+  })
+})
+
 test('server workspace: a removed document offers keep, re-cite and redraft without it; a re-cite is Gantry’s own change, with no AI', async () => {
   await withPairServer(async ({ page, base, posts, folder }) => {
     const panel = await seedCitations(page, base, folder)

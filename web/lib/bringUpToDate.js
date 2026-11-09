@@ -450,21 +450,24 @@ const ROUND_WORDS = Object.freeze({
 })
 // A Provider's word about a Stage (#295) is a fact whatever the page is doing, so a row that says it keeps it.
 const PROVIDER_STATES = new Set(['awaiting-approval', 'approval-queued'])
+const providerNote = (row) => row.note.replace(/ · target$/, '')
 
 /**
  * #358: the run plan while the page brings Fields up to date. Bring up to date is not a run: it has no target, and it works through every
  * Stage with Out of date Fields in order, so the rows say that instead of the normal run's "target" and the Stages struck through after it.
  *
  * @param {object} input
- * @param {object[]} input.rows  the normal run plan (web/lib/interviewRun.js `planRows`), whose Pull Request links and Check status are kept
+ * @param {object[]} input.rows  the normal run plan (web/lib/interviewRun.js `planRows`), whose Pull Request links and Check status are kept.
+ *   The page builds it aimed at the last Stage (a round has no target of its own), so a later Stage the Provider queued is not struck through.
  * @param {string} input.pageStageId  the Stage on screen, marked `current`
  * @param {{stageId: string, count: number}[]} [input.toDo]  `stagesToUpdate`, the page's own Stage included: each is `to-do` with its count
  * @param {boolean} [input.saved]  the page's round has been saved, so its Stage is `done` (a Field left flagged on purpose still counts)
- * @param {string[]} [input.done]  the Stages whose round was saved earlier in this tab: `done`, unless flagged again since
- * @param {boolean} [input.checking]  the Out of date check for the page's Stage has not answered yet (#357), so its row says so, not a count
+ * @param {string[]} [input.done]  the Stages whose round was saved earlier in this round: `done`, unless flagged again since
+ * @param {boolean} [input.checking]  what the page's Stage has to do is not known yet: the Definition, the Out of date check (#357) or the
+ *   Reviewed copies are still loading. Its row says it is checking, never that it has nothing, and is not taken as done from an earlier save.
  * @param {'update'|'review'} [input.words]
  * @returns {object[]} the rows, each with `count` and `target: false`. A row in none of these is `plain` with no note, unless the Provider
- *   says it is awaiting approval or queued for it.
+ *   says it is awaiting approval or queued for it. The page's own row says that too, after what the page is doing.
  */
 export function roundPlanRows({ rows, pageStageId, toDo = [], saved = false, done = [], checking = false, words = 'update' }) {
   const say = ROUND_WORDS[words] ?? ROUND_WORDS.update
@@ -475,11 +478,14 @@ export function roundPlanRows({ rows, pageStageId, toDo = [], saved = false, don
     let state
     let note
     if (row.id === pageStageId) {
-      state = saved || (!count && doneHere.has(row.id)) ? 'done' : 'current'
+      state = saved || (!checking && !count && doneHere.has(row.id)) ? 'done' : 'current'
       note = state === 'done' ? 'done' : checking ? 'checking…' : count ? say.current : say.none
+      // The Stage on screen may be awaiting approval (an Azure DevOps or GitHub workspace): it still is, whatever the round does, and its row
+      // keeps its Pull Request link and Check status, so it says so too.
+      if (PROVIDER_STATES.has(row.state)) note = `${note} · ${providerNote(row)}`
     } else if (count) [state, note] = ['to-do', say.toDo]
     else if (doneHere.has(row.id)) [state, note] = ['done', 'done']
-    else if (PROVIDER_STATES.has(row.state)) [state, note] = [row.state, row.note.replace(/ · target$/, '')]
+    else if (PROVIDER_STATES.has(row.state)) [state, note] = [row.state, providerNote(row)]
     else [state, note] = ['plain', '']
     return { ...row, state, note, count, target: false }
   })

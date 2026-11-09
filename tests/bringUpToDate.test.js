@@ -483,6 +483,13 @@ describe('#358: in Bring up to date the run plan lists the Stages to work throug
     // #357: until the check for the page's Stage has answered, nothing is known, so the row says it is checking.
     const checking = roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: toDo.slice(1), checking: true }).find((r) => r.id === 'soap')
     assert.deepEqual([checking.state, checking.note], ['current', 'checking…'])
+    // While the Definition or the flags are still loading nothing is known yet, so there are no counts at all: the row still says it is checking,
+    // never "nothing Out of date", and the same goes for review comments while the Reviewed copies are read.
+    const loading = roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: [], checking: true })
+    assert.deepEqual(view(loading).slice(1, 3), [['soap', 'current', 'checking…', 0, false], ['hld', 'plain', '', 0, false]])
+    assert.equal(roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: [], checking: true, words: 'review' }).find((r) => r.id === 'soap').note, 'checking…')
+    // A Stage saved earlier in this tab is not taken as done while the check for it has not answered: it may have been flagged again since.
+    assert.deepEqual(view(roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: [], done: ['soap'], checking: true })).slice(1, 2), [['soap', 'current', 'checking…', 0, false]])
   })
 
   test("a Provider's Pull Request is still shown: a Stage awaiting approval or queued for it keeps that state, its link and Check status", () => {
@@ -492,10 +499,29 @@ describe('#358: in Bring up to date the run plan lists the Stages to work throug
     const soap = round.find((r) => r.id === 'soap')
     assert.deepEqual([soap.state, soap.note, soap.pullRequest, soap.checkable], ['awaiting-approval', 'awaiting approval', { id: 7, url: 'https://example.test/pr/7' }, true])
     assert.deepEqual(view(round).slice(2), [
-      ['hld', 'current', 'bringing up to date', 4, false],
+      ['hld', 'current', 'bringing up to date · approval queued', 4, false],
       ['dd', 'plain', '', 0, false],
       ['build', 'plain', '', 0, false],
     ])
+  })
+
+  test("the Stage on screen awaiting approval still says so, beside what the page is doing, with its link and Check status", () => {
+    const remote = { pullRequests: { soap: { id: 7, url: 'https://example.test/pr/7' } } }
+    const rows = planRows({ stages, currentStageId: 'soap', targetStageId: 'build', instanceStageId: 'soap', remote })
+    const soap = (round) => round.find((r) => r.id === 'soap')
+    const current = soap(roundPlanRows({ rows, pageStageId: 'soap', toDo: [{ stageId: 'soap', count: 2 }] }))
+    assert.deepEqual([current.state, current.note, current.pullRequest, current.checkable], ['current', 'bringing up to date · awaiting approval', { id: 7, url: 'https://example.test/pr/7' }, true])
+    assert.equal(soap(roundPlanRows({ rows, pageStageId: 'soap', toDo: [], saved: true })).note, 'done · awaiting approval')
+    assert.equal(soap(roundPlanRows({ rows, pageStageId: 'soap', toDo: [], checking: true })).note, 'checking… · awaiting approval')
+    assert.equal(soap(roundPlanRows({ rows, pageStageId: 'soap', toDo: [{ stageId: 'soap', count: 1 }], words: 'review' })).note, 'working through comments · awaiting approval')
+  })
+
+  test('a later Stage the Provider queued for approval says so, since a round aims its plan at the last Stage and strikes nothing through', () => {
+    // The page builds the rows aimed at the last Stage (a round has no target of its own), so a Stage after the page's is not "beyond".
+    const remote = { pullRequests: {}, queued: { hld: true } }
+    const rows = planRows({ stages, currentStageId: 'soap', targetStageId: 'build', instanceStageId: 'soap', remote })
+    const hld = roundPlanRows({ rows, pageStageId: 'soap', toDo: [{ stageId: 'soap', count: 2 }] }).find((r) => r.id === 'hld')
+    assert.deepEqual([hld.state, hld.note, hld.target], ['approval-queued', 'approval queued', false])
   })
 
   test('review comments use the same plan, in their own words', () => {

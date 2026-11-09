@@ -54,10 +54,18 @@ export function clearInterviewSessions() {
   sessions.clear()
   roundsSaved.clear()
 }
-// #358: the Stages whose Bring up to date (or review comments) round was saved in this tab, by `<slug>|update` (`|review`), so the run plan on
+// #358: the Stages whose Bring up to date (or review comments) round was saved in this round, by `<slug>|update` (`|review`), so the run plan on
 // the next Stage's page still reads done for them once their flags have cleared.
 const roundsSaved = new Map()
 const noteRoundSaved = (slug, mode, stageId) => roundsSaved.set(`${slug}|${mode}`, new Set([...(roundsSaved.get(`${slug}|${mode}`) ?? []), stageId]))
+/**
+ * #358: a Bring up to date (`'update'`) or review comments round (`'review'`) begun afresh, from the editor's banner or from another page, has
+ * done nothing yet: the Stages an earlier round saved are not done in its plan, just as after a reload. Going on to the next Stage of the same
+ * round (Next, Go to) keeps them.
+ */
+export function startRoundAfresh(slug, mode) {
+  roundsSaved.delete(`${slug}|${mode}`)
+}
 /**
  * The Modules of this Stage that hold unsaved drafts from the interview (#289), for the editor's banner: the editor shows saved content
  * only, so it points to the Interview page, where those drafts are edited. `[]` when no interview is open for the Stage.
@@ -893,7 +901,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const outOfDateByStage = outOfDateCountByStage(outOfDate)
   // #295: the Provider's word about the Pull Requests, which overrides the log's (a Stage with one open is awaiting approval; a later Stage the log queued shows Approval queued).
   const remoteRows = remote ? remoteRecord({ instance, stages: stagesList, logs: { ...stageLogs, [instance.stage.id]: committedLog } }) : null
-  const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: target, current: planCurrent, remote: remoteRows, instanceStageId: instance.currentStageId }).map((row) => ({ ...row, outOfDate: outOfDateByStage[row.id] ?? 0, changedSinceApproval: remote ? changedMark(instance, row.id) : null }))
+  // #358: Bring up to date and review comments are rounds, not runs (see `planShown`): with no target of their own, their plan is aimed at the
+  // last Stage, so a later Stage the Provider queued for approval still says so rather than being struck through.
+  const roundMode = update ? 'update' : review ? 'review' : null
+  const planTarget = roundMode ? stagesList[stagesList.length - 1]?.id ?? target : target
+  const planRowsNow = planRows({ stages: stagesList, currentStageId: instance.stage.id, targetStageId: planTarget, current: planCurrent, remote: remoteRows, instanceStageId: instance.currentStageId }).map((row) => ({ ...row, outOfDate: outOfDateByStage[row.id] ?? 0, changedSinceApproval: remote ? changedMark(instance, row.id) : null }))
   // #300 (ADR-0069): the earlier documents the stage-end Save re-renders before it asks for approval, so the card says so.
   const earlierToRender = remote && setup.status === 'ready' ? earlierDocumentsToRender({ definition: setup.definition, instance, approved: approvedPrinted, draftKeys }) : []
   const newSinceIds = new Set(newSince.map((s) => s.id))
@@ -959,8 +971,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       : null
   // #358: Bring up to date and review comments are not runs: they have no target, and they work through every Stage that has something, in
   // order. So the run plan lists those Stages (Bring up to date with its count of Out of date Fields), marks the one on screen as current and
-  // the ones saved in this tab as done, and strikes nothing through. A revision (#299) is part of the run it was sent back from, and keeps it.
-  const roundMode = update ? 'update' : review ? 'review' : null
+  // the ones saved in this round as done, and strikes nothing through. A revision (#299) is part of the run it was sent back from, and keeps it.
+  // Until what the page's Stage has is known (the Definition, the Out of date check, or the Reviewed copies are still loading), its row says
+  // it is checking, never that it has nothing.
   const reviewStages = reviewPlan ? [...(reviewPlan.items.length ? [{ stageId: instance.stage.id, count: reviewPlan.items.length }] : []), ...reviewPlan.stages.filter((st) => st.stageId !== instance.stage.id)] : []
   const planShown = roundMode
     ? roundPlanRows({
@@ -969,7 +982,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         toDo: update ? updateStages : reviewStages,
         saved: saving?.phase === 'saved' && Boolean(saving.update),
         done: [...(roundsSaved.get(`${instance.slug}|${roundMode}`) ?? [])],
-        checking: update && !flagsReady,
+        checking: update ? !flagsReady || setup.status !== 'ready' : !reviewPlan,
         words: roundMode,
       }).map((row) => (update ? { ...row, outOfDate: row.count } : row))
     : planRowsNow

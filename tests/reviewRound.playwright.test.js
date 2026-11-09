@@ -99,6 +99,8 @@ const cardWith = (page, text) => cards(page).filter({ hasText: text })
 const choose = (card, label) => card.locator(`[data-testid="card-option"][data-option="${label}"] input`).check()
 const chosenOf = (card) => card.locator('[data-testid="card-option"][data-chosen="true"]').evaluateAll((els) => els.map((el) => el.dataset.option))
 const readYaml = (file) => parseYAML(readFileSync(file, 'utf8'))
+// #358: the run plan's row for a Stage, as [state, target, note].
+const planRow = (page, stageId) => page.locator(`[data-testid="run-plan-row"][data-stage-id="${stageId}"]`).evaluate((r) => [r.dataset.state, r.dataset.target, r.querySelector('.rp-note').textContent])
 
 // Answers every card on the page the same cheap way ("Keep as is" where the card has it, else "Note it"), except those in `except` and a recommended "Accept the edit", which stands.
 async function answerPageWith(page, except = new Map()) {
@@ -132,13 +134,29 @@ test('server workspace: the review round asks one card per unresolved thread, an
     await page.goto(`${base}/instance/${SLUG}`)
     await showSourcesAndDecisions(page)
     await page.getByTestId('review-copies-panel').waitFor()
+    // #358: while the Reviewed copies are read the run plan says the Stage on screen is being checked, not that it has no comments. The copy is
+    // held back here so that can be seen.
+    let release
+    const held = new Promise((resolve) => (release = resolve))
+    await page.route((url) => /^\/api\/instance\/reviews\/[^/]+\/file$/.test(url.pathname), async (route) => {
+      await held
+      await route.continue()
+    })
     // The editor's panel is the way in from where the comments are listed.
     await page.getByTestId('review-work-through').click()
+    await page.waitForSelector('[data-testid="interview-review-loading"]')
+    await page.waitForSelector('[data-testid="run-plan-row"][data-stage-id="shape"]')
+    assert.deepEqual(await planRow(page, 'shape'), ['current', 'false', 'checking…'])
+    release()
     await page.waitForSelector('[data-testid="interview-review-intro"]')
     assert.match(page.url(), /interview=1/)
     assert.match(page.url(), /review=1/)
     assert.equal(await page.locator('[data-testid="interview-run-until"]').count(), 0, 'it is not a run')
+    await page.waitForSelector('[data-testid="interview-review-count"]')
     assert.match(await page.textContent('[data-testid="interview-review-count"]'), /^9 review questions/)
+    // #358: the run plan of the round: the Stage with the comments is the one on screen, nothing is its target and nothing is struck through.
+    assert.deepEqual(await planRow(page, 'shape'), ['current', 'false', 'working through comments'])
+    assert.equal(await page.locator('.runplan .rp-beyond, .runplan .rp-target').count(), 0)
     assert.match(await page.textContent('[data-testid="interview-start"]'), /Work through review comments/)
     assert.equal(await page.inputValue('[data-testid="interview-opening"]'), '', 'the same opening box as an interview\'s kickoff (#331), blank')
 
@@ -175,6 +193,8 @@ test('server workspace: the review round asks one card per unresolved thread, an
     await page.click('[data-testid="review-save"]')
     await page.getByTestId('review-saved').waitFor()
     assert.match(await page.textContent('[data-testid="review-saved-summary"]'), /9 comments logged, 2 Fields changed/)
+    // #358: the round's Save marks its Stage done in the run plan.
+    assert.deepEqual(await planRow(page, 'shape'), ['done', 'false', 'done'])
     assert.match(await page.textContent('[data-testid="review-rerender-nudge"]'), /Render again.*a Save never renders the Word documents/s, 'the nudge to render again shows after the Save')
 
     // On disk: the edit, the Module still draft, the log with the real names and the full comments, and the manifest's count.
@@ -199,6 +219,8 @@ test('server workspace: the review round asks one card per unresolved thread, an
     await page.goto(`${base}/instance/${SLUG}?interview=1&review=1`)
     await page.waitForSelector('[data-testid="interview-review-none"]')
     assert.equal(await page.isDisabled('[data-testid="interview-start"]'), true)
+    // A new page, a new round: with every comment answered the Stage on screen has none, and its row says so.
+    assert.deepEqual(await planRow(page, 'shape'), ['current', 'false', 'no comments here'])
     await page.getByTestId('interview-review-resolved').locator('summary').click()
     await page.click('[data-testid="interview-review-reopen"]')
     await page.waitForSelector('[data-testid="interview-review-count"]')
