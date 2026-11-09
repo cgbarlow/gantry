@@ -1465,8 +1465,8 @@ async function saveInstanceSettings(slug, settings) {
   return body
 }
 
-// #362: the server-hosted "Move to v<N>" I/O, over `/api/instance/definition-move` (lib/server.js). A workspace that can't say (a
-// server workspace kept in a Blob container answers no such route) offers no move, so its Version row reads as it always has.
+// #362: the server-hosted "Move to v<N>" I/O, over `/api/instance/definition-move` (lib/server.js, and lib/blobWorkspaceRoutes.js for a
+// server workspace kept in a Blob container). A server that can't say offers no move, so its Version row reads as it always has.
 async function loadDefinitionMove(slug) {
   const res = await apiFetchForInstance(slug, `/api/instance/definition-move?slug=${encodeURIComponent(slug)}`, {}, { silent: true })
   if (!res.ok) return null

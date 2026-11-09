@@ -157,7 +157,7 @@ test('an optional requirement only counts when the Field is required at that Gat
   assert.deepEqual(definitionVersionChanges(V1, V1, { stageId: 'shape' }), { removed: [], added: [], newlyRequired: [], typeChanged: [] }, 'the same version changes nothing')
 })
 
-test('the structures can be the loaded Definition (Modules in a Map) or its projection, and Gantry\'s own standard Modules are left out', () => {
+test('the structures can be the loaded Definition (Modules in a Map) or its projection, and a standard Module both versions mount is no change', () => {
   const v3 = loadDefinition('design', { version: 3 })
   const v4 = loadDefinition('design', { version: 4 })
   for (const [from, to] of [[v3, v4], [definitionVersionProjection(v3), definitionVersionProjection(v4)]]) {
@@ -167,6 +167,67 @@ test('the structures can be the loaded Definition (Modules in a Map) or its proj
     assert.deepEqual([changes.added, changes.newlyRequired, changes.typeChanged], [[], [], []])
   }
   assert.deepEqual(removedFieldModuleIds(v3, v4), ['team-and-estimates'])
+})
+
+// v2 had its own Glossary and Open questions Modules; v3 and v4 mount Gantry's standard ones (#283), which read the same files under
+// the same headings, and add the standard Key decisions. A Field's section is what holds its content, so a Field of the newer version
+// in the same Module and with the same title is the same Field, whatever its id.
+const V2_GLOSSARY = `---
+module: glossary
+status: draft
+owner: ""
+---
+
+# Glossary
+
+## Terms and definitions
+
+| Term | Definition | Avoid |
+| --- | --- | --- |
+| BIBIT | The payment gateway | — |
+`
+const V2_OPEN_QUESTIONS = `---
+module: open-questions
+status: draft
+owner: ""
+---
+
+# Open Questions
+
+## Open questions
+
+| Question | Owner | Status |
+| --- | --- | --- |
+| Which region hosts the claims store? | P. Natarajan | Open |
+`
+
+test('moving a design v2 Instance to v4 keeps its Glossary and Open questions, which v4 mounts as standard Modules, and says the SAD now asks for Key decisions', () => {
+  const v2 = loadDefinition('design', { version: 2 })
+  const v4 = loadDefinition('design', { version: 4 })
+  for (const [from, to] of [[v2, v4], [definitionVersionProjection(v2), definitionVersionProjection(v4)]]) {
+    const changes = definitionVersionChanges(from, to, { stageId: 'shape' })
+    const removed = named(changes.removed)
+    assert.ok(!removed.includes('glossary.terms-and-definitions'), 'v4\'s Terms and definitions reads the same section')
+    assert.ok(!removed.includes('open-questions.questions'), 'v4\'s Open questions has the same Field')
+    assert.ok(!named(changes.added).includes('glossary.terms'), 'the Glossary\'s Field is not new')
+    const decisions = changes.added.find((f) => f.moduleId === 'key-decisions' && f.fieldId === 'decisions')
+    assert.ok(decisions, 'Key decisions is new in v4')
+    assert.ok(decisions.requiredAt.some((s) => s.id === 'detailed-design'), 'the SAD, at the Detailed design Gate, asks for it')
+
+    assert.deepEqual(removedFieldModuleIds(from, to).filter((id) => ['glossary', 'open-questions'].includes(id)), [])
+    const plan = planDefinitionMove({ from, to, stageId: 'shape', moduleFiles: { glossary: V2_GLOSSARY, 'open-questions': V2_OPEN_QUESTIONS } })
+    assert.deepEqual(plan.files.filter((f) => /glossary|open-questions/.test(f.path)), [], 'neither file changes')
+    assert.ok(!named(plan.removed).some((key) => /^(glossary|open-questions)\./.test(key)))
+  }
+})
+
+test('a Field renamed in the same Module under the same title is the same Field: its type and requirements are compared, and its section stays', () => {
+  const renamed = { ...V2, modules: V2.modules.map((m) => (m.id === 'summary' ? { ...m, fields: [...m.fields, field('references', 'Links', 'markdown', { requiredAt: ['detailed'] })] } : m)) }
+  const changes = definitionVersionChanges(V1, renamed, { stageId: 'detail' })
+  assert.ok(!named(changes.removed).includes('summary.links'))
+  assert.ok(!named(changes.added).includes('summary.references'))
+  assert.deepEqual(changes.typeChanged.find((f) => f.fieldId === 'references'), { moduleId: 'summary', moduleTitle: 'Summary', fieldId: 'references', fieldTitle: 'Links', fromType: 'list', toType: 'markdown' })
+  assert.deepEqual(changes.newlyRequired.find((f) => f.fieldId === 'references')?.stages, [{ id: 'detail', title: 'Detail' }])
 })
 
 test('a Field\'s section is found as the parser finds it, and removing it leaves every other byte as it was', () => {
@@ -298,6 +359,8 @@ test('the User Guide says how to move an Instance, and design v4\'s CHANGELOG po
   assert.match(versions, /If any part fails, nothing is changed/)
   assert.match(versions, /"Moved from v\*n\* to v\*N\*", naming the fields removed/)
   assert.match(versions, /awaiting approval/)
+  assert.match(versions, /one save on a server workspace \(on the server's disk or in a Blob container\)/)
+  assert.match(versions, /moving a `design` version 2 instance keeps its Glossary and Open questions/)
   const design = guide.split('\n').find((line) => line.startsWith('The worked example throughout this guide remains the `design` definition'))
   assert.match(design, /choose \*\*Move to v4…\*\* under its Version/)
 

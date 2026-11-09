@@ -18,14 +18,17 @@
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 import { applyDecisionsDelta, decisionsLogPath, parseDecisionsLog, serializeDecisionsLog } from './decisionsLog.js'
 import { normalizeHeadingText } from './localInstanceFiles.js'
+import { modulesWithStandard } from './standardModules.js'
 
 // ---------- what changes between two versions ----------
 
-// A structure is a loaded Definition (`modules` a Map) or its projection (`modules` an array); either way Gantry's own mounted
-// standard Modules (#283) are Gantry's, not the Definition's, so they never count as a change.
+// A structure is a loaded Definition (`modules` a Map, the standard Modules it mounts (#283) among them) or its projection (`modules`
+// an array of its own, the mounts under `standardModules`). A mounted standard Module counts like any other: a Definition can swap
+// its own Glossary for Gantry's (design v2 to v3), and the Instance's file then holds the same sections under the same headings.
+// A standard Module both versions mount, at the same version, has the same Fields in both, so it is no change.
 function modulesOf(structure) {
-  const modules = structure?.modules instanceof Map ? [...structure.modules.values()] : structure?.modules ?? []
-  return modules.filter((m) => m && !m.standard)
+  const modules = structure?.modules instanceof Map ? [...structure.modules.values()] : modulesWithStandard(structure?.modules, structure?.standardModules)
+  return modules.filter(Boolean)
 }
 
 /** Every Field of a structure, keyed `module.field`, in the Definition's order. */
@@ -40,6 +43,24 @@ function fieldsOf(structure) {
 }
 
 const describe = ({ moduleId, moduleTitle, fieldId, fieldTitle }) => ({ moduleId, moduleTitle, fieldId, fieldTitle })
+
+/**
+ * Each Field of `after` that `before` has too, as a Map from its key to the key it has in `before`. A Field reads its content from
+ * its `## <title>` section of the Module's file, so a Field in the same Module under the same title is the same Field even when its
+ * id changed (v2's glossary.terms-and-definitions is the standard Glossary's glossary.terms): its content stays where it is.
+ */
+function counterparts(before, after) {
+  const pairs = new Map([...after.keys()].filter((key) => before.has(key)).map((key) => [key, key]))
+  const taken = new Set(pairs.values())
+  for (const [key, f] of after) {
+    if (pairs.has(key)) continue
+    const same = [...before].find(([k, b]) => !taken.has(k) && !after.has(k) && b.moduleId === f.moduleId && b.fieldTitle === f.fieldTitle)
+    if (!same) continue
+    pairs.set(key, same[0])
+    taken.add(same[0])
+  }
+  return pairs
+}
 
 // A select that took `multiple` stores a list where it stored one value, so it is a change of type too.
 const typeLabel = (f) => (f.type === 'select' && f.multiple === true ? 'select (multiple)' : f.type)
@@ -86,7 +107,7 @@ function stagesAhead(structure, stageId) {
 /**
  * What changes from `from` to `to` for an Instance on `stageId`: `{ removed, added, newlyRequired, typeChanged }`, each a list of
  * `{ moduleId, moduleTitle, fieldId, fieldTitle }` in the Definition's order. `added` carries `requiredAt`, the Stages ahead whose Gate
- * asks for the new Field; `newlyRequired` (Fields both versions have) carries `stages`, the Stages ahead whose Gate asks for it now
+ * asks for the new Field; `newlyRequired` (Fields both versions have, under the same id or, in the same Module, the same title) carries `stages`, the Stages ahead whose Gate asks for it now
  * and did not before; `typeChanged` carries `fromType` and `toType`. Titles are the version that has the Field: `from` for a removed
  * one, `to` otherwise.
  */
@@ -97,17 +118,19 @@ export function definitionVersionChanges(from, to, { stageId } = {}) {
     const was = (from?.stages ?? []).find((s) => s.id === stage.id)
     return { stage: { id: stage.id, title: stage.title ?? stage.id }, now: gateRequiredKeys(to, stage), was: was ? gateRequiredKeys(from, was) : new Set() }
   })
-  const removed = [...before.entries()].filter(([key]) => !after.has(key)).map(([, f]) => describe(f))
+  const pairs = counterparts(before, after)
+  const kept = new Set(pairs.values())
+  const removed = [...before.entries()].filter(([key]) => !kept.has(key)).map(([, f]) => describe(f))
   const added = [...after.entries()]
-    .filter(([key]) => !before.has(key))
+    .filter(([key]) => !pairs.has(key))
     .map(([key, f]) => ({ ...describe(f), requiredAt: ahead.filter((a) => a.now.has(key)).map((a) => a.stage) }))
   const newlyRequired = [...after.entries()]
-    .filter(([key]) => before.has(key))
-    .map(([key, f]) => ({ ...describe(f), stages: ahead.filter((a) => a.now.has(key) && !a.was.has(key)).map((a) => a.stage) }))
+    .filter(([key]) => pairs.has(key))
+    .map(([key, f]) => ({ ...describe(f), stages: ahead.filter((a) => a.now.has(key) && !a.was.has(pairs.get(key))).map((a) => a.stage) }))
     .filter((f) => f.stages.length > 0)
   const typeChanged = [...after.entries()]
-    .filter(([key, f]) => before.has(key) && typeLabel(before.get(key).field) !== typeLabel(f.field))
-    .map(([key, f]) => ({ ...describe(f), fromType: typeLabel(before.get(key).field), toType: typeLabel(f.field) }))
+    .filter(([key, f]) => pairs.has(key) && typeLabel(before.get(pairs.get(key)).field) !== typeLabel(f.field))
+    .map(([key, f]) => ({ ...describe(f), fromType: typeLabel(before.get(pairs.get(key)).field), toType: typeLabel(f.field) }))
   return { removed, added, newlyRequired, typeChanged }
 }
 

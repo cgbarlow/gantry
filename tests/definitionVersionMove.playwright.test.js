@@ -42,11 +42,15 @@ async function withPage(fn) {
   }
 }
 
+// A page load on a busy host can take far longer than DEFAULT_TIMEOUT, so the waits for Settings to load and for the move to land
+// allow a minute.
+const LOAD_TIMEOUT = Math.max(DEFAULT_TIMEOUT, 60_000)
+
 const versionRow = (page) => page.locator('.result-row').filter({ has: page.locator('.k', { hasText: /^Version$/ }) })
 
 async function openDialog(page) {
   const row = page.getByTestId('definition-move')
-  await row.waitFor({ timeout: 15_000 })
+  await row.waitFor({ timeout: LOAD_TIMEOUT })
   assert.match(await row.textContent(), /v4 is available/)
   await row.getByRole('button', { name: 'Move to v4…' }).click()
   const dialog = page.getByRole('dialog', { name: 'Move to v4' })
@@ -64,12 +68,12 @@ test('a server-hosted design v3 Instance moves to v4 from its Settings: the dial
   withV3Server(async ({ base, dir }) => {
     await withPage(async (page, pageErrors) => {
       await page.goto(`${base}/settings/instance?slug=${SLUG}`)
-      await versionRow(page).waitFor({ timeout: 15_000 })
+      await versionRow(page).waitFor({ timeout: LOAD_TIMEOUT })
       assert.equal(await versionRow(page).locator('.v').textContent(), 'v3')
       const dialog = await openDialog(page)
       assert.match(await dialog.textContent(), /one save/)
       await dialog.getByRole('button', { name: 'Move to v4', exact: true }).click()
-      await page.getByTestId('definition-move-status').getByText('Moved to v4.').waitFor({ timeout: 15_000 })
+      await page.getByTestId('definition-move-status').getByText('Moved to v4.').waitFor({ timeout: LOAD_TIMEOUT })
       assert.equal(await dialog.count(), 0, 'the dialog closes')
       assert.equal(await versionRow(page).locator('.v').textContent(), 'v4')
       assert.equal(await page.getByTestId('definition-move').count(), 0, 'nothing more to move to')
@@ -105,7 +109,7 @@ test('a failed move keeps the dialog open with the reason, and a Stage awaiting 
         await route.fulfill({ response: res, json: { ...(await res.json()), blocked } })
       })
       await page.reload()
-      await page.getByTestId('definition-move-blocked').waitFor({ timeout: 15_000 })
+      await page.getByTestId('definition-move-blocked').waitFor({ timeout: LOAD_TIMEOUT })
       assert.equal(await page.getByTestId('definition-move-blocked').textContent(), blocked)
       assert.equal(await page.getByRole('button', { name: 'Move to v4…' }).isDisabled(), true)
     })
@@ -143,7 +147,7 @@ test('a Local workspace\'s design v3 Instance moves to v4 in its own folder', ()
       const dialog = await openDialog(page)
       assert.match(await dialog.textContent(), /in this workspace's folder/)
       await dialog.getByRole('button', { name: 'Move to v4', exact: true }).click()
-      await page.getByTestId('definition-move-status').getByText('Moved to v4.').waitFor({ timeout: 15_000 })
+      await page.getByTestId('definition-move-status').getByText('Moved to v4.').waitFor({ timeout: LOAD_TIMEOUT })
       assert.equal(await versionRow(page).locator('.v').textContent(), 'v4')
 
       assert.equal(await readLocal(`gantry-workspace/${SLUG}/${MODULE}`), readFileSync(join(V4_EXAMPLE, MODULE), 'utf8'))
