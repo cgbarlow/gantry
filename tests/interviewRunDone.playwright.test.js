@@ -73,9 +73,13 @@ async function assertDoneBar(page, { stageTitle = 'Shape', reopen = true } = {})
   assert.match(line, /saved and the run is done/)
   if (reopen) assert.match(line, new RegExp(`Re-open ${stageTitle}`), 'the line says how to change something')
   assert.equal(await page.getAttribute('[data-testid="interview-chat"]', 'aria-describedby'), 'interview-done-line', 'the chat box is described by the line')
-  // The done state is announced once, in the thread's status region.
+  // The done state is announced once, in the thread's status region: no card on the page is a live region saying so too.
   assert.equal(await page.locator('.interview-status [data-testid="interview-done-announce"]').count(), 1)
   assert.match(await page.textContent('[data-testid="interview-done-announce"]'), /The run is done/)
+  const liveSayingDone = await page
+    .locator('[role="status"], [role="alert"], [aria-live]')
+    .evaluateAll((els) => els.filter((el) => /run is done/i.test(el.textContent) && !el.parentElement?.closest('[role="status"], [role="alert"], [aria-live]')).length)
+  assert.equal(liveSayingDone, 1, 'one live region says the run is done')
 }
 
 test('local workspace: a run done at its target offers Open in the editor and Re-open, the same after a reload, and Re-open starts the Stage again', async () => {
@@ -143,6 +147,7 @@ test('local workspace: a run paused before a later Stage keeps Resume the run an
     await page.waitForSelector('[data-testid="interview-stage-end"]')
     await page.click('[data-testid="interview-save"]')
     await page.waitForSelector('[data-testid="interview-run-paused"]')
+    assert.equal(await page.getAttribute('[data-testid="interview-saved"]', 'role'), 'status', 'a paused run is announced by its card')
     assert.equal(await count(page, 'interview-resume'), 1)
     assert.equal(await count(page, 'interview-done-bar'), 0)
     assert.equal(await count(page, 'interview-done-announce'), 0)
@@ -166,11 +171,13 @@ test('remote workspace: a run done at its target whose approval is refused keeps
     // The card's own action stays; the bar has no run controls, and Re-open waits for approval to settle the Stage.
     await assertDoneBar(page, { stageTitle: 'Scope', reopen: false })
     assert.match(await page.textContent('[data-testid="interview-done-line"]'), /approval/)
+    assert.equal(await page.getAttribute('[data-testid="interview-saved"]', 'role'), null, 'the status region announces the done run, not the card too')
 
     // Asked again, the Pull Request opens: the card says it is awaiting approval, and the bar still has no run controls.
     await page.unroute('**/api/instance/request-approval*')
     await page.click('[data-testid="interview-request-approval"]')
     await page.waitForSelector('[data-testid="interview-awaiting-approval"]')
     await assertDoneBar(page, { stageTitle: 'Scope', reopen: false })
+    assert.equal(await page.getAttribute('[data-testid="interview-awaiting-approval"]', 'role'), null)
   })
 })

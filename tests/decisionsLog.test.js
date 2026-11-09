@@ -134,6 +134,16 @@ test('#331 a status entry keeps the architect\'s opening message word for word, 
   assert.equal(parseDecisionsLog(serializeDecisionsLog(log), 'shape').status[0].opening, words, 'it survives the file')
 })
 
+test('#355 a status entry says when its session was a Bring up to date or review comments round, and nothing else gets in there', () => {
+  assert.equal(sessionStatus({ session: 's-1', state: 'done', round: 'update' }).round, 'update')
+  assert.equal(sessionStatus({ session: 's-1', state: 'done', round: 'review' }).round, 'review')
+  for (const round of [undefined, '', 'interview', 'sk-ant-SECRET0123456789', { kind: 'update' }]) {
+    assert.equal('round' in sessionStatus({ session: 's-1', state: 'done', round }), false, String(round))
+  }
+  const log = applyDecisionsDelta(emptyDecisionsLog('shape'), { status: { session: 's-1', who: 'Alex', state: 'done', round: 'update' } }, 'shape')
+  assert.equal(parseDecisionsLog(serializeDecisionsLog(log), 'shape').status[0].round, 'update', 'it survives the file')
+})
+
 test('an outside agent\'s model is recorded with its tokens as "not reported"', () => {
   const status = sessionStatus({ session: 's-2', models: [{ type: 'outside-agent', model: 'claude-opus', reported: false }] })
   assert.deepEqual(status.models, [{ type: 'outside-agent', model: 'claude-opus', tokens: 'not reported' }])

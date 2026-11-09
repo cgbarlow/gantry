@@ -1222,7 +1222,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
 
   // Saves what Bring up to date settled (#298): the answers in the decisions log, with any re-cited or redrafted Fields, as one stage Save through
   // the Save check. It is not the end of a Stage: no run, no advance, no request for approval. The session's status line is written only when the
-  // AI was used (its tokens are kept there); an answer that needed no AI leaves the Stage's status exactly as it was.
+  // AI was used (its tokens are kept there); an answer that needed no AI leaves the Stage's status exactly as it was. The line names its round
+  // (#355), so a reload of the interview still reads the run from the run's own line: paused before its target, say, not done.
   async function saveUpdate(kind = 'source-update') {
     setSaving({ phase: 'saving' })
     const keys = Object.keys(drafts)
@@ -1231,8 +1232,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     const before = Array.isArray(committedLog?.status) && committedLog.status.length ? committedLog.status[committedLog.status.length - 1] : null
     const keepsState = ['approval-queued', 'awaiting-approval', 'head-start'].includes(before?.state)
     const delta = keepsState
-      ? sessionRef.current?.decisionsDelta({ runState: before.state, saving: usedAi, target: before.target ?? instance.stage.id, stages: before.stages ?? { [instance.stage.id]: before.state } }) ?? null
-      : sessionRef.current?.decisionsDelta({ runState: 'done', saving: usedAi, target: instance.stage.id, stages: { [instance.stage.id]: 'done' } }) ?? null
+      ? sessionRef.current?.decisionsDelta({ runState: before.state, saving: usedAi, target: before.target ?? instance.stage.id, stages: before.stages ?? { [instance.stage.id]: before.state }, round: roundMode }) ?? null
+      : sessionRef.current?.decisionsDelta({ runState: 'done', saving: usedAi, target: instance.stage.id, stages: { [instance.stage.id]: 'done' }, round: roundMode }) ?? null
     const decisions = delta && !usedAi ? { ...delta, status: undefined } : delta
     // Every Field was left flagged: nothing was answered, so there is nothing to write (and no empty log file or commit to make).
     if (keys.length === 0 && (decisions?.entries ?? []).length === 0) {
@@ -2024,10 +2025,11 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
 
   // #295: the Pull Request is open and the Owner has not approved it yet. The session waits here: nothing checks on its own, so the card
   // and the Stage's row in the run plan both offer Check status. The Provider's word puts this card up, so it is the same after a reload.
+  // #355: when the Save that finished the run put it up, the status region announces that the run is done, so the card is not a live region too.
   const awaitingCard = () => {
     const checking = approval.phase === 'checking'
     const goesOn = target !== instance.stage.id && Boolean(followingStage)
-    return html`<div class="qcard stage-end awaiting" data-testid="interview-awaiting-approval" role="status">
+    return html`<div class="qcard stage-end awaiting" data-testid="interview-awaiting-approval" role=${runDone ? undefined : 'status'}>
       <div class="qchip">Awaiting approval</div>
       <p class="qhead">${stage?.title ?? instance.stage.title} is waiting for approval</p>
       <p>
@@ -2388,7 +2390,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     if (saving?.phase === 'saved' && remote) {
       // A remote Save that is not (yet) awaiting a Pull Request: queued behind an earlier Stage, refused by the Provider, or "Save and stop here".
-      return html`<div class="qcard stage-end saved" data-testid="interview-saved" role="status">
+      // #355: a Save that finished the run is announced once, by the status region, so this card is not a live region too.
+      return html`<div class="qcard stage-end saved" data-testid="interview-saved" role=${runDone ? undefined : 'status'}>
         <p class="qhead">${approval.phase === 'requesting' ? 'Saved. Asking for approval…' : 'Saved'}</p>
         <p>${stage?.title ?? instance.stage.title} is saved as one Stage Save. The Modules stay <strong>draft</strong>: a person marks them agreed.</p>
         ${returnedList(saving.returned)}

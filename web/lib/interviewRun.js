@@ -187,7 +187,9 @@ export function resumableRun({ stages, currentStageId, logs = {}, openPullReques
  *   3. The run this tab holds, when it is on this Stage (back on the page in the same tab): `done` there, else not. A run carrying on into
  *      the Stage is starting it, whatever an earlier run's log says.
  *   4. Otherwise only a page at its kickoff (a reload, or another browser) on a Local or Server-hosted workspace reads the decisions log: the
- *      newest status line says `done`. A remote workspace's Provider, not the log, says where approval stands, and its cards say so.
+ *      newest status line a run wrote says `done`. A Bring up to date or review comments Save writes a `done` line of its own (with its
+ *      `round`), which says nothing about the run: a run paused before its target, or a session left part-way, stays so once the Stage is
+ *      brought up to date. A remote workspace's Provider, not the log, says where approval stands, and its cards say so.
  *
  * Bring up to date, review comments and a revision are not runs; the page asks this only of an interview.
  *
@@ -207,7 +209,8 @@ export function runIsDone({ stageId, saving = null, run = null, reopened = false
   if (run?.carryOn === stageId) return false
   if (run?.at === stageId) return run.phase === 'done'
   if (started || remote) return false
-  return latestStatus(log)?.state === 'done'
+  const runs = Array.isArray(log?.status) ? log.status.filter((s) => !s?.round) : []
+  return runs.at(-1)?.state === 'done'
 }
 
 /**

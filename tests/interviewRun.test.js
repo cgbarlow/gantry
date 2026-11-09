@@ -248,6 +248,21 @@ test('#355 with no Save on this page, the run in this tab says, else (at the kic
   assert.equal(runIsDone({ stageId: 'two', remote: true, log: doneLog('done') }), false)
 })
 
+test('#355 a Bring up to date or review comments Save is not a run: a reload reads the newest status line a run wrote', () => {
+  // Bring up to date (or review comments) with the AI writes its own status line, `done`, to keep its tokens. It says nothing about the run.
+  const update = (round = 'update') => ({ session: 's-9', target: 'two', state: 'done', stages: { two: 'done' }, round })
+  // Run until three, two saved and stopped: the run is paused before a later Stage, and stays paused after the Stage is brought up to date.
+  const stopped = { session: 's-1', target: 'three', state: 'paused', stages: { two: 'paused', three: 'waiting' } }
+  assert.equal(runIsDone({ stageId: 'two', log: { status: [stopped, update()] } }), false, 'paused before its target')
+  assert.equal(runIsDone({ stageId: 'two', log: { status: [stopped, update('review')] } }), false, 'review comments too')
+  // A session left part-way by Pause, then brought up to date: still part-way.
+  const paused = { session: 's-1', target: 'two', state: 'paused', stages: { two: 'in-progress' } }
+  assert.equal(runIsDone({ stageId: 'two', log: { status: [paused, update()] } }), false, 'paused mid-session')
+  // A done run brought up to date is still done; a Stage that only ever had a round has had no run to be done.
+  assert.equal(runIsDone({ stageId: 'two', log: { status: [...doneLog('done').status, update()] } }), true)
+  assert.equal(runIsDone({ stageId: 'two', log: { status: [update()] } }), false)
+})
+
 test('#355 Re-open <Stage> ends the done state until the next Save finishes the run again', () => {
   assert.equal(runIsDone({ stageId: 'two', reopened: true, log: doneLog('done') }), false)
   assert.equal(runIsDone({ stageId: 'two', reopened: true, run: { phase: 'done', at: 'two' } }), false)
@@ -257,7 +272,7 @@ test('#355 Re-open <Stage> ends the done state until the next Save finishes the 
 test("#355 the user guide's The AI interview section says what you can do when the run is done", () => {
   const guide = readFileSync('docs/user-guide/index.md', 'utf8')
   const section = guide.slice(guide.indexOf('## The AI interview'), guide.indexOf('## Settings'))
-  for (const phrase of ['**When the run is done.**', '**Open in the editor**', '**Re-open <Stage>**', 'Saved. The run is done.', 'paused, not done']) {
+  for (const phrase of ['**When the run is done.**', '**Open in the editor**', '**Re-open <Stage>**', 'Saved. The run is done.', 'paused, not done', 'they are not a run', 'shows where approval stands instead']) {
     assert.ok(section.includes(phrase), `the guide's AI interview section says ${phrase}`)
   }
 })

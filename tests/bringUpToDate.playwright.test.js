@@ -201,6 +201,7 @@ test('server workspace: the banner opens the round on the first Stage that has f
     assert.ok(alpha.entries.some((e) => e.kind === 'saved-content' && e.choice === 'replace'))
     assert.ok(alpha.fields['ma.body'], 'the redrafted Field has its record')
     assert.equal(alpha.status[0].state, 'done')
+    assert.equal(alpha.status[0].round, 'update', "#355: the line is the round's, not a run's")
     assert.equal(readYaml(join(folder, 'instance.yaml')).stage, 'b', 'the Instance has not moved')
 
     // Next, Beta: its Field is asked about on its own page. Keep it: no AI, and the Stage's status line is left alone.

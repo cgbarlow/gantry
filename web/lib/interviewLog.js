@@ -409,7 +409,7 @@ export function createSessionLog(config = {}) {
 
     /**
      * What the stage Save sends for the log. `fieldInputs` is the session's `module.field -> inputs` and `fieldKeys` the Fields in
-     * this Save (the drafts plus those already saved by this session); `handEdited` are those the architect edited by hand. `status` is `{ who, target, state, stages, artefact, artefacts, instructions, opening }` (`stages`: each Stage of the run and its state, #293; `artefacts`: the Artefact chosen for each Stage of the run, #332; `opening`: the architect's opening message, #331).
+     * this Save (the drafts plus those already saved by this session); `handEdited` are those the architect edited by hand. `status` is `{ who, target, state, stages, artefact, artefacts, instructions, opening }` (`stages`: each Stage of the run and its state, #293; `artefacts`: the Artefact chosen for each Stage of the run, #332; `opening`: the architect's opening message, #331; `round`: `update` or `review` for a Bring up to date or review comments round, #355).
      */
     delta({ fieldInputs = {}, fieldKeys = [], status = {}, saving = false, handEdited = [] } = {}) {
       if (saving) lastAiSave = now()
@@ -440,6 +440,8 @@ export function createSessionLog(config = {}) {
           models: [...usage.values()],
           instructions: status.instructions,
           ...(status.opening ? { opening: status.opening } : {}),
+          // #355: the session was a Bring up to date or review comments round, not a run.
+          ...(status.round ? { round: status.round } : {}),
           skills: skillVersions,
         },
         // #348: the sessions Start this stage over ended, each with all it used. A line already in the log takes only the tokens and the state.
