@@ -24,7 +24,7 @@ const SECURITY_FENCE = '```mermaid {caption="Security architecture"}\nflowchart 
 const PLAIN_FENCE = '```mermaid\nflowchart LR\n  Claim --> Assessor\n```'
 const WITHOUT_PLAYWRIGHT = pathToFileURL(resolve('tests/helpers/withoutPlaywright.js')).href
 
-// A scratch copy of the bundled example (design v3, so every Artefact numbers its diagrams), with
+// A scratch copy of the bundled example (design v4, which numbers every Artefact's diagrams as v3 does, #359), with
 // `fences` added to the Problem statement ahead of the example's two captioned images.
 async function withExample(fences, fn) {
   const root = mkdtempSync(join(tmpdir(), 'gantry-cli-mermaid-'))
@@ -32,7 +32,7 @@ async function withExample(fences, fn) {
     const workspacesDir = join(root, 'workspace')
     cpSync(EXAMPLE, join(workspacesDir, SLUG), { recursive: true })
     rmSync(join(workspacesDir, SLUG, 'out'), { recursive: true, force: true })
-    assert.match(readFileSync(join(workspacesDir, SLUG, 'instance.yaml'), 'utf8'), /^definitionVersion: 3$/m)
+    assert.match(readFileSync(join(workspacesDir, SLUG, 'instance.yaml'), 'utf8'), /^definitionVersion: 4$/m)
     if (fences.length) {
       const path = join(workspacesDir, SLUG, 'modules', 'background.md')
       const before = readFileSync(path, 'utf8')

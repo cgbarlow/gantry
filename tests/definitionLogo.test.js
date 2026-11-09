@@ -10,6 +10,7 @@ import { LOGO_ALT_TEXT, logoImageInfo, readHeaderLogo, replaceHeaderLogo } from 
 import { docxPart } from './helpers/wordDocx.js'
 import { jpegImage, pngImage } from './helpers/logoImages.js'
 import { markDesignV3Draft } from './helpers/designDraft.js'
+import { designV3Examples } from './helpers/designExamples.js'
 
 // #222 (docs/adr/0059): a Definition's logo is the picture in its reference documents' page header.
 // The Logo control on the Definitions page replaces it in every reference document of a draft at
@@ -297,8 +298,9 @@ describe('a render after the logo is replaced (#222)', () => {
       const logo = pngImage(100, 100)
       await writeDefinitionLogo('design', 3, logo, { definitionsDir })
       withScratchDir((instancesDir) => {
-        // The bundled design v3 example has every Module filled in, so every Artefact renders.
-        cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'kiwi-cover-mutual'), { recursive: true })
+        // The bundled design example has every Module filled in, so every Artefact renders. It is on v4
+        // now (#359), so this reads it as it was on v3.
+        cpSync(join(designV3Examples(), 'kiwi-cover-mutual'), join(instancesDir, 'kiwi-cover-mutual'), { recursive: true })
         rmSync(join(instancesDir, 'kiwi-cover-mutual', 'out'), { recursive: true, force: true })
         for (const artefact of ['soap', 'soap-full', 'hld', 'sad', 'ssad', 'as-built']) {
           const { docxBytes } = renderArtefact('kiwi-cover-mutual', artefact, { instancesDir, definitionsDir, deliverToClient: true })

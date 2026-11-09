@@ -17,6 +17,7 @@ import { keyDecisionsSettings } from '../web/lib/standardModules.js'
 import { exampleModuleText } from './helpers/fixtureModules.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { bodyParagraphs, bodyTables, docxPart, expectedTableOfContents, headerRowFormat, headingBookmarks, headingNumbers, keepsWithNext, numberingLevels, rowsCantSplit, styleFontSize, styleNumbering, tableOfContents, wordStyles } from './helpers/wordDocx.js'
+import { designV3Examples } from './helpers/designExamples.js'
 
 // #193 (spec #192): the harness every design v3 ticket extends. `definitions/design/3` starts as a
 // draft copy of v2, and the two bundled design examples in workspaces/examples move onto it — the
@@ -40,7 +41,9 @@ import { bodyParagraphs, bodyTables, docxPart, expectedTableOfContents, headerRo
 
 const DEFINITION = 'design'
 const VERSION = 3
-const EXAMPLES_DIR = 'workspaces/examples'
+// #359: the bundled examples moved on to design v4, which drops References. These tests pin v3, so
+// they read a copy of the examples as they were on v3: pinned to it, References and all.
+const EXAMPLES_DIR = designV3Examples()
 
 // The Gates each bundled example passes on v3, and the classification its documents carry (#196).
 // Kiwi Cover Mutual is the full worked design, filled in at every Stage; the gantry instance is
@@ -168,9 +171,11 @@ describe('design v3 started as a copy of v2 (#193) and is published (#308)', () 
     assert.equal(loadDefinition(DEFINITION, { version: 2 }).status, 'published')
   })
 
-  test('a new design Instance pins v3, the latest published version, and one on v2 stays on v2', () => {
+  // A new design Instance pinned v3 while it was the latest published version; since #359 it pins v4
+  // (tests/designV4.test.js). One created on v3 or v2 stays there.
+  test('a design Instance created on v3 pins v3, and one on v2 stays on v2', () => {
     withScratchDir((instancesDir) => {
-      createInstance(DEFINITION, 'new-initiative', { instancesDir })
+      createInstance(DEFINITION, 'new-initiative', { instancesDir, version: VERSION })
       assert.equal(readInstance('new-initiative', { instancesDir }).definitionVersion, 3)
       createInstance(DEFINITION, 'older-initiative', { instancesDir, version: 2 })
       assert.equal(readInstance('older-initiative', { instancesDir }).definitionVersion, 2)

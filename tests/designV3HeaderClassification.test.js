@@ -9,6 +9,8 @@ import { renderArtefact } from '../lib/render.js'
 import { stripFieldTags } from '../lib/wordFieldTags.js'
 import { bodyParagraphs, docxPart } from './helpers/wordDocx.js'
 import { classificationField, coverClassificationStyle, headerVisibleText, paragraphStyleFormat, sectionHeaders } from './helpers/wordHeaders.js'
+// #359: the bundled example is on design v4, so the v3 renders below read it as it was on v3.
+import { designV3Examples } from './helpers/designExamples.js'
 
 // #207 (spec #192 follow-up): a design v3 document carries its classification in the page header
 // of every page, centred, as Word does for a marked document. The cover keeps its classification
@@ -103,7 +105,7 @@ describe('design v3 prints the classification in the page header of every page (
 
   test('the rendered v3 SAD keeps the field in every page type\'s header, with the cover\'s classification paragraph for it to read', () => {
     withScratchDir((dir) => {
-      cpSync('workspaces/examples/kiwi-cover-mutual', join(dir, 'kiwi-cover-mutual'), { recursive: true })
+      cpSync(join(designV3Examples(), 'kiwi-cover-mutual'), join(dir, 'kiwi-cover-mutual'), { recursive: true })
       rmSync(join(dir, 'kiwi-cover-mutual', 'out'), { recursive: true, force: true })
       const { docxBytes } = renderArtefact('kiwi-cover-mutual', 'sad', { instancesDir: dir, deliverToClient: true })
       assertClassificationHeaders(docxBytes, 'rendered SAD')
@@ -197,7 +199,7 @@ describe('design v3 shows the classification only in the page header, not above 
 
   test('the rendered v3 SAD keeps IN-CONFIDENCE in its Cover Classification paragraph, in the reference document\'s invisible style', () => {
     withScratchDir((dir) => {
-      cpSync('workspaces/examples/kiwi-cover-mutual', join(dir, 'kiwi-cover-mutual'), { recursive: true })
+      cpSync(join(designV3Examples(), 'kiwi-cover-mutual'), join(dir, 'kiwi-cover-mutual'), { recursive: true })
       rmSync(join(dir, 'kiwi-cover-mutual', 'out'), { recursive: true, force: true })
       const { docxBytes } = renderArtefact('kiwi-cover-mutual', 'sad', { instancesDir: dir, deliverToClient: true })
       const [first] = bodyParagraphs(docxPart(docxBytes, 'word/document.xml'))

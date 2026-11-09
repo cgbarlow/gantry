@@ -20,12 +20,12 @@ const EXAMPLE = 'workspaces/examples/kiwi-cover-mutual'
 const SECURITY_FENCE = '```mermaid {caption="Security architecture"}\nflowchart LR\n  Member --> Portal --> CRM\n```'
 const PLAIN_FENCE = '```mermaid\nflowchart LR\n  Claim --> Assessor\n```'
 
-// A scratch copy of the bundled example (design v3: every Artefact numbers its diagrams) with a
+// A scratch copy of the bundled example (design v4, #359: every Artefact numbers its diagrams, as in v3) with a
 // captioned and an uncaptioned Mermaid block added ahead of its two captioned images.
 function seedExample(instanceDir) {
   cpSync(EXAMPLE, instanceDir, { recursive: true })
   rmSync(join(instanceDir, 'out'), { recursive: true, force: true })
-  assert.match(readFileSync(join(instanceDir, 'instance.yaml'), 'utf8'), /^definitionVersion: 3$/m)
+  assert.match(readFileSync(join(instanceDir, 'instance.yaml'), 'utf8'), /^definitionVersion: 4$/m)
   const path = join(instanceDir, 'modules', 'background.md')
   const before = readFileSync(path, 'utf8')
   const after = before.replace(/\n## Affected domains/, `\n${SECURITY_FENCE}\n\n${PLAIN_FENCE}\n\n## Affected domains`)

@@ -29,6 +29,7 @@ import { sectionHeaders } from './helpers/wordHeaders.js'
 import { jpegImage, pngImage } from './helpers/logoImages.js'
 import { withRunningServer, withRunningServerForProvider, withScratchInstances, basicAuthHeader } from './helpers/lifecycle.js'
 import { markDesignV3Draft } from './helpers/designDraft.js'
+import { designV3Examples } from './helpers/designExamples.js'
 
 // #224 (spec #223, ADR-0058 and ADR-0059 amendments for #224): an Instance can have its own header
 // logo, chosen in the "+ New Workspace" wizard and changed in Instance Settings. It overrides the
@@ -87,7 +88,8 @@ async function withDesignExample(fn) {
   try {
     cpSync('definitions/design', join(definitionsDir, 'design'), { recursive: true })
     markDesignV3Draft(definitionsDir)
-    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'kiwi-cover-mutual'), { recursive: true })
+    // #359: the bundled example is on v4, so this reads it as it was on v3.
+    cpSync(join(designV3Examples(), 'kiwi-cover-mutual'), join(instancesDir, 'kiwi-cover-mutual'), { recursive: true })
     rmSync(join(instancesDir, 'kiwi-cover-mutual', 'out'), { recursive: true, force: true })
     return await fn({ definitionsDir, instancesDir, slug: 'kiwi-cover-mutual' })
   } finally {

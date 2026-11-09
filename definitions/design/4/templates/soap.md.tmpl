@@ -1,0 +1,62 @@
+<%
+  /* WI #318 (design v2): background.problem/opportunity replaces v1's context/
+     problem-statement framing (already consolidated into `background` before v2).
+     Blank-field guard `na()` is injected once as an Eta functionHeader by
+     lib/render.js (WI #273 / R2). It renders the heading with a literal "— n/a —"
+     line when a bare (gate-blocking) `requires` field is blank, rather than an
+     empty section; non-blank output is byte-identical. A `module.field?` entry in
+     `requires` is in scope but not gate-blocking, so it stays a
+     suppress-when-blank `<% if %>` section, as `assumptions?` does below
+     (WI #276), and as v3's `references?` did. WI #331: `introduction.assumptions` ->
+     `design-basis.assumptions` (module split).
+     #232 (ADR-0060): the SOAP follows the Full SOAP's reading order and heading
+     names wherever the two render the same Field, rather than the SAMPLE SOAP
+     reference's. Each shared Field is a chapter, as in the Full SOAP, except
+     Problem statement and Assumptions, which are sections of its "# Overview"
+     and "# Design basis" there too. The SOAP-only Fields sit beside their
+     nearest shared neighbour: Affected domains after Problem statement; Process
+     flow and Feature breakdown inside the High-level solution overview, where
+     the Full SOAP puts its own Alternatives sketch.
+     v4 (#359): "# References" is gone, so the document ends with Estimates. */
+%>
+# Overview
+
+## Problem statement
+
+<%~ na(it.modules.background.problem) %>
+
+## Affected domains
+
+<% it.modules.background['affected-domains'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+<% if (it.modules['design-basis'].assumptions) { %>
+# Design basis
+
+## Assumptions
+
+<%~ it.modules['design-basis'].assumptions %>
+<% } %>
+# High-level requirements
+
+<%~ na(it.modules['solution-definition']['high-level-requirements']) %>
+
+# High-level solution overview
+
+<%~ na(it.modules['solution-definition']['high-level-solution-overview']) %>
+
+## Process flow
+
+<%~ na(it.modules['solution-definition']['process-flow']) %>
+
+## Feature breakdown and involved teams
+
+<%~ na(it.modules['solution-definition']['feature-breakdown']) %>
+
+# Teams required
+
+<% it.modules['team-and-estimates']['teams-required'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+# Estimates
+
+<%~ na(it.modules['team-and-estimates'].estimates) %>

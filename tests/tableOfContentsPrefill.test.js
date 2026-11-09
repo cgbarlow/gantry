@@ -8,6 +8,7 @@ import { loadDefinition } from '../lib/definition.js'
 import { readModule, writeModule } from '../lib/instance.js'
 import { renderArtefact } from '../lib/render.js'
 import { docxPart, expectedTableOfContents, headingBookmarks, tableOfContents, wordStyles } from './helpers/wordDocx.js'
+import { designV3Examples } from './helpers/designExamples.js'
 
 // #206 (ADR-0052 amendment): the Word TOC field a `table-of-contents: true` Artefact gets is filled
 // in when the document is rendered, so a viewer that never updates fields (a preview, a web viewer,
@@ -18,7 +19,8 @@ import { docxPart, expectedTableOfContents, headingBookmarks, tableOfContents, w
 // paragraph, in order, in the TOC 1–3 styles, numbered as the document numbers its headings, each
 // linking to a bookmark on its heading. Page numbers are left to Word.
 
-const EXAMPLES_DIR = 'workspaces/examples'
+// #359: the bundled example is on design v4; these tests pin the v3 SAD, so they read it as it was on v3.
+const EXAMPLES_DIR = designV3Examples()
 const EXAMPLE = 'kiwi-cover-mutual'
 const PLACEHOLDER = 'Open this document in Word, or update this field, to build the table of contents.'
 

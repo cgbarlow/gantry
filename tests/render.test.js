@@ -165,10 +165,11 @@ test('renders the Full SOAP with the reference sections, metadata, static caveat
       'Sequencing',
       'Open questions',
       'Caveats',
-      'References',
     ]) {
       assert.match(result.markdown, new RegExp(`# ${heading}`))
     }
+    // #359: the example is on design v4, whose Full SOAP has no References; Sources lists what it cites.
+    assert.doesNotMatch(result.markdown, /^# References$/m)
     assert.match(result.markdown, /\| Section \| Requirement \|/)
     assert.match(result.markdown, /\| Requirement \| Team \| Estimate \| Notes \|/)
     assert.match(result.markdown, /The actual effort will differ once the IT requirements are elaborated/)
@@ -377,8 +378,8 @@ test('a local render injects a Document Control table immediately after the titl
 
     assert.match(result.markdown, /## Document Control/)
     assert.match(result.markdown, /## Review & sign-off/)
-    // Version: design v3 · SOAP (stage title for that gate) — the examples fixture is pinned to v3 (#193)
-    assert.match(result.markdown, /\| Version \| design v3 · SOAP \|/)
+    // Version: design v4 · SOAP (stage title for that gate) — the examples fixture is pinned to v4 (#359)
+    assert.match(result.markdown, /\| Version \| design v4 · SOAP \|/)
     assert.match(result.markdown, new RegExp(`\\| Date \\| ${escapeRegExp(expectedDate)} \\|`))
     // Local commit: plain code span, not a hyperlink
     assert.match(result.markdown, new RegExp(`\\| Commit \\| \`${escapeRegExp(expectedHash)}\` \\|`))
@@ -434,7 +435,7 @@ test('a definition other than "design" also gets a Document Control block — it
     assert.match(result.markdown, /## Document Control/)
     assert.match(result.markdown, /## Review & sign-off/)
     assert.match(result.markdown, /\| Commit \| `[0-9a-f]+`/)
-    assert.match(result.markdown, /\| Version \| another-definition v3/)
+    assert.match(result.markdown, /\| Version \| another-definition v4/)
     assert.doesNotMatch(result.markdown, /Rendered from commit/)
   } finally {
     rmSync(instancesDir, { recursive: true, force: true })
