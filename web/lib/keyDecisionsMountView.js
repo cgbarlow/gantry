@@ -3,12 +3,7 @@
 // prefix its numbers carry (AD01, AD02, …) and the decision style it is written in. The rules for what is
 // valid live in web/lib/keyDecisions.js (and standardModuleProblems for the Definition as a whole).
 import { html } from 'htm/preact'
-import { DECISION_STYLES, STYLE_TITLES, DEFAULT_PREFIX, DEFAULT_STYLE, decisionReference } from './keyDecisions.js'
-
-const STYLE_HINTS = {
-  default: 'Title, context, decision, why, considered options, consequences.',
-  why: 'A title, the "In the context of… facing… we decided for… and neglected… to achieve… accepting that…" statement, and links to other Key decisions.',
-}
+import { DECISION_STYLES, STYLE_TITLES, DEFAULT_PREFIX, DEFAULT_STYLE, decisionReference, decisionStyleSummary } from './keyDecisions.js'
 
 /**
  * @param {{ mount: { prefix?: unknown, style?: unknown }, editable: boolean, onChange: (change: { prefix?: string, style?: string }) => void }} props
@@ -18,6 +13,7 @@ export function KeyDecisionsMountSettings({ mount, editable, onChange }) {
   const prefix = typeof mount.prefix === 'string' ? mount.prefix : DEFAULT_PREFIX
   const style = DECISION_STYLES.includes(mount.style) ? mount.style : mount.style === undefined ? DEFAULT_STYLE : mount.style
   const shown = prefix || DEFAULT_PREFIX
+  // #356: what the style holds is described from its own parts and links (decisionStyleSummary), as the editor and the reader see them.
   return html`
     <div class="defn-focus-section defn-key-decisions-settings" data-testid="key-decisions-settings">
       <span class="kicker">Numbering and style</span>
@@ -36,7 +32,7 @@ export function KeyDecisionsMountSettings({ mount, editable, onChange }) {
               ${DECISION_STYLES.map((s) => html`<option value=${s} selected=${s === style}>${STYLE_TITLES[s]}</option>`)}
             </select>`
           : html`<span data-testid="key-decisions-style">${STYLE_TITLES[style] ?? style}</span>`}
-        <span class="muted">${STYLE_HINTS[style] ?? ''}</span>
+        <span class="muted">${decisionStyleSummary(style)}</span>
       </div>
     </div>
   `

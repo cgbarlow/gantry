@@ -34,7 +34,7 @@
 // Pure and dependency-free, like web/lib/instanceSettings.js, so `lib/` imports it directly. Fields
 // are the camelCase in-memory shape (`targetWords`), the same as a loaded Module's.
 
-import { KEY_DECISIONS_ID, DEFAULT_PREFIX, DEFAULT_STYLE, DECISION_STYLES, PREFIX_RE, keyDecisionProblems } from './keyDecisions.js'
+import { KEY_DECISIONS_ID, DEFAULT_PREFIX, DEFAULT_STYLE, DECISION_STYLES, PREFIX_RE, decisionStyleGuidance, keyDecisionProblems } from './keyDecisions.js'
 
 const deepFreeze = (value) => {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -87,8 +87,10 @@ export const STANDARD_MODULES = deepFreeze({
     },
   },
   // #284 (ADR-0065): significant decisions only, numbered. The Field is Markdown to everything else;
-  // web/lib/keyDecisions.js owns the text inside it. `styleGuidance` is added after `guidance`, by the
-  // decision style the Definition mounts it with.
+  // web/lib/keyDecisions.js owns the text inside it. #356: how to write a decision in the style the
+  // Definition mounts it with (and under its prefix) is added after `guidance` when the mount resolves,
+  // built from that style's parts by `decisionStyleGuidance`, so it always says what the reader reads.
+  // It is how to write the Field, not its shape, so it is not part of what this version pins.
   'key-decisions': {
     title: 'Key decisions',
     versions: {
@@ -105,12 +107,6 @@ export const STANDARD_MODULES = deepFreeze({
               'Record only a decision that is hard to reverse, surprising without its context, and the result of a real trade-off; routine choices belong elsewhere. Add a decision with Add decision. Its number is given once and never changes, so other documents and decisions can refer to it by number.',
           },
         ],
-        styleGuidance: {
-          default:
-            'Write each decision as: Context (the situation and forces), Decision (what was decided), Why (the reasons), Considered options (what else was weighed) and Consequences (what follows, good and bad).',
-          why:
-            'Write each decision as one statement: "In the context of …, facing …, we decided for … and neglected …, to achieve …, accepting that …." Then link it to the decisions it depends on, supersedes or relates to.',
-        },
       },
     },
   },
@@ -204,7 +200,7 @@ export function resolveStandardModule(mount, catalogue = STANDARD_MODULES) {
   if (!shape) return undefined
   const added = typeof mount.guidance === 'string' && mount.guidance.trim() !== '' ? mount.guidance.trim() : null
   const keyDecisions = mount.id === KEY_DECISIONS_ID ? keyDecisionsSettings(mount) : undefined
-  const styleGuidance = keyDecisions ? shape.styleGuidance?.[keyDecisions.style] : undefined
+  const styleGuidance = keyDecisions ? decisionStyleGuidance(keyDecisions.style, keyDecisions.prefix) : undefined
   const resolved = {
     id: mount.id,
     title: shape.title,

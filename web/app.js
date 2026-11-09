@@ -137,7 +137,7 @@ import {
   keyDecisionProblems,
   STYLE_PARTS,
   STYLE_TITLES,
-  LINK_TYPES,
+  STYLE_LINKS,
 } from './lib/keyDecisions.js'
 import {
   changedEntryFor,
@@ -2520,6 +2520,8 @@ function DecisionsField({ field, moduleId, keyDecisions, onRegister }) {
 
   const blocked = isEditingBlocked()
   const parts = STYLE_PARTS[style]
+  // #356: whether the cards have links is the style's own (STYLE_LINKS), not a test for WH(Y).
+  const styleLinks = STYLE_LINKS[style] ?? []
   const otherStyle = style === 'why' ? 'default' : 'why'
   const headingIdForField = moduleId ? headingId(moduleId, field.title) : null
   const text = textOf(parsed)
@@ -2582,7 +2584,7 @@ function DecisionsField({ field, moduleId, keyDecisions, onRegister }) {
                   </details>
                 `
               : null}
-            ${style === 'why'
+            ${styleLinks.length > 0
               ? html`
                   <div class="decision-links" data-testid="decision-links">
                     ${decision.links.map(
@@ -2594,7 +2596,7 @@ function DecisionsField({ field, moduleId, keyDecisions, onRegister }) {
                             value=${link.type}
                             onChange=${(e) => setDecision(decision.number, { links: decision.links.map((l, i) => (i === linkIndex ? { ...l, type: e.currentTarget.value } : l)) })}
                           >
-                            ${LINK_TYPES.map((t) => html`<option value=${t.type}>${t.label}</option>`)}
+                            ${styleLinks.map((t) => html`<option value=${t.type}>${t.label}</option>`)}
                           </select>
                           <select
                             aria-label=${`Link target of ${reference}`}

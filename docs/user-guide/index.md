@@ -388,7 +388,25 @@ standard-modules:
     style: why        # "default" or "why" (WH(Y))
 ```
 
-Save, Publish and `gantry validate` refuse a prefix that isn't 1 to 6 capital letters and a style that isn't `default` or `why`. Prefix and style belong to Key decisions only; the other standard modules still refuse them. In the instance file the Field is ordinary text, one bold line per decision (`**AD01: Use PostgreSQL**`) followed by its labelled parts, so it reads well in a pull request; an AI agent writing over MCP can write the same text.
+Save, Publish and `gantry validate` refuse a prefix that isn't 1 to 6 capital letters and a style that isn't `default` or `why`. Prefix and style belong to Key decisions only; the other standard modules still refuse them.
+
+**In the instance file.** The Field is ordinary text, so it reads well in a pull request. Each decision is a bold header line, then each of its parts on a line of its own, starting with the part's label:
+
+```markdown
+**AD01: Use PostgreSQL for the ledger**
+
+**In the context of:** the payments ledger
+
+**Facing:** the need to never lose or double-count a payment
+
+**We decided for:** PostgreSQL 16
+
+**Relates to:** AD02
+```
+
+Gantry and the editor always write it that way. When the AI interview or an AI agent writing over MCP lays a label out differently, Gantry still reads it, for every part and link of the Definition's style: a plain label (`Facing: …`), bold with the colon inside or outside (`**Facing**: …`), italic, or as a `-`, `*` or `+` bullet. A header can also be a Markdown heading with the two-digit number (`### AD01: Use PostgreSQL`). A line such as `AD01: Use PostgreSQL` on its own is not a header, because that is how a part refers to another decision. The next time the Field is saved from the editor, it is written in the standard form. A line of your own words in the editor that happens to start like a label, such as "Decision: revisit this yearly", stays part of the words you typed and comes back exactly as you wrote it.
+
+**What the AI is told.** The Field's guidance shows the AI this exact layout for the Definition's style and prefix, with an example decision. If a draft has a decision with none of the style's parts in it, the interview's warning shows the layout again, with that decision's number.
 
 ### Target size and word targets
 

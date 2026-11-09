@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { parse as parseYAML } from 'yaml'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
-import { createInstance, readModule } from '../lib/instance.js'
+import { createInstance, readModule, writeModule } from '../lib/instance.js'
 import { loadDefinition } from '../lib/definition.js'
 import { renderArtefact } from '../lib/render.js'
 import { parseKeyDecisions } from '../web/lib/keyDecisions.js'
@@ -134,6 +134,8 @@ test('Definitions page: a published version shows its prefix and style read-only
     const settings = page.locator('[data-testid="key-decisions-settings"]')
     assert.equal((await settings.locator('[data-testid="key-decisions-prefix"]').textContent()).trim(), 'AD')
     assert.equal((await settings.locator('[data-testid="key-decisions-style"]').textContent()).trim(), 'WH(Y)')
+    // #356: the style is described from its own parts and links.
+    assert.match(await settings.textContent(), /A title, then In the context of, Facing, We decided for, And neglected, To achieve and Accepting that, and links to other Key decisions \(Depends on, Supersedes, Relates to\)\./)
     assert.equal(await settings.locator('input, select').count(), 0)
   }))
 })
@@ -301,4 +303,38 @@ test('Local Workspace editor: mounts Key decisions with a prefix and a style, an
       assert.doesNotMatch(await editorRoot.locator('.local-def-validation').textContent(), /no such module|prefix/)
     })
   })
+})
+
+// #356: a Field the AI wrote with plain labels shows every part on its card, and a line of the architect's own words that
+// starts with a label comes back as typed through Save and a reload.
+test('Stage editor, WH(Y): a plain-label Field shows its parts, and a line that looks like a label survives Save as typed', async () => {
+  await withFixture({ mount: '  - id: key-decisions\n    version: 1\n    prefix: AD\n    style: why\n' }, (base, dirs) => withPage(async (page) => {
+    const plain = '**AD01: Use PostgreSQL for the ledger**\n\nIn the context of: the payments ledger\nFacing: lost payments\n- **We decided for**: PostgreSQL 16\nAnd neglected: DynamoDB\nTo achieve: consistency\nAccepting that: we run a cluster\n\n**AD02: Cache balances**\n\nIn the context of: balance look-ups\nDepends on: AD01'
+    writeModule(loadDefinition('dec', { definitionsDir: dirs.definitionsDir }), 'harbour', 'key-decisions', { status: 'draft', owner: 'a.person', fields: { decisions: plain } }, { instancesDir: dirs.instancesDir })
+
+    await page.goto(`${base}/instance/harbour`)
+    const field = page.locator('[data-testid="key-decisions-field"]')
+    await field.waitFor({ state: 'visible' })
+    const cards = field.locator('[data-testid="decision"]')
+    assert.deepEqual(await cards.locator('[data-testid="decision-number"]').allTextContents(), ['AD01', 'AD02'])
+    const first = cards.nth(0)
+    assert.equal(await first.locator('[data-testid="decision-inContext"]').inputValue(), 'the payments ledger')
+    assert.equal(await first.locator('[data-testid="decision-decided"]').inputValue(), 'PostgreSQL 16')
+    assert.equal(await first.locator('[data-testid="decision-accepting"]').inputValue(), 'we run a cluster')
+    assert.equal(await first.locator('.decision-lead').count(), 0, 'nothing left over as unread text')
+    assert.equal(await cards.nth(1).getByLabel('Link type of AD02').inputValue(), 'depends-on')
+    assert.equal(await cards.nth(1).getByLabel('Link target of AD02').inputValue(), '1')
+
+    const typed = 'lost payments\nFacing: a line of my own words\n- Why: and another'
+    await first.locator('[data-testid="decision-facing"]').fill(typed)
+    await saveStage(page)
+    const text = storedDecisions(dirs)
+    assert.match(text, /^\*\*In the context of:\*\* the payments ledger$/m, 'written in the standard form')
+    assert.equal(parseKeyDecisions(text).decisions[0].facing, typed)
+
+    await page.reload()
+    await field.waitFor({ state: 'visible' })
+    assert.equal(await cards.nth(0).locator('[data-testid="decision-facing"]').inputValue(), typed)
+    assert.equal(await cards.nth(0).locator('[data-testid="decision-achieve"]').inputValue(), 'consistency')
+  }))
 })

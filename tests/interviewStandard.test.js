@@ -178,6 +178,30 @@ describe('checks on a draft of a standard module', () => {
     assert.match(check('key-decisions.decisions', '**AD01: x**\n\n**Facing:** y\n\n**AD01: again**\n\n**Facing:** z').map((p) => p.message).join(' '), /AD01 is used by more than one decision/)
   })
 
+  // #356: the AI wrote every WH(Y) part with a plain label and was warned, round after round, that it had written none of them.
+  test('Key decisions: a part read in any common layout clears the warning, and the warning shows the exact layout', () => {
+    const plain = '**AD01: Use PostgreSQL for the ledger**\n\nIn the context of: the payments ledger\nFacing: lost payments\nWe decided for: PostgreSQL 16\nAnd neglected: DynamoDB\nTo achieve: consistency\nAccepting that: we run a cluster\nRelates to: AD02\n\n**AD02: Cache balances**\n\n- **In the context of**: balance look-ups\n- **Facing**: slow reads\n- **We decided for**: a cache\n- **And neglected**: the ledger\n- **To achieve**: fast pages\n- **Accepting that**: stale balances\n- **Depends on**: AD01'
+    assert.deepEqual(check('key-decisions.decisions', plain), [])
+
+    const [empty] = check('key-decisions.decisions', '**AD03: Cache reads**\n\nWe chose a cache in front of the ledger.')
+    assert.match(empty.message, /AD03 has none of the WH\(Y\) parts written/)
+    assert.ok(empty.message.includes('**AD03: Cache reads**, **In the context of:** …, **Facing:** …, **We decided for:** …, **And neglected:** …, **To achieve:** …, **Accepting that:** …, **Relates to:** AD01'), empty.message)
+    assert.doesNotMatch(empty.message, /\n/, 'one line, as the preview and the tool result show it')
+
+    const [none] = check('key-decisions.decisions', 'We chose PostgreSQL.')
+    assert.ok(none.message.includes('**AD01: Short title**, **In the context of:** …'), none.message)
+
+    // A Markdown heading is a header too, so its prefix is checked like a bold one.
+    assert.match(check('key-decisions.decisions', '### KD01: x\n\nFacing: y')[0].message, /prefix AD/)
+  })
+
+  test('Key decisions in the default style: the warning shows that style\'s parts, under the Definition\'s prefix, and no links', () => {
+    const roles = standardRoles({ ...definition(), modules: modulesWithStandard([{ id: 'details', title: 'Details', fields: [{ id: 'summary', title: 'Summary', type: 'markdown', required: true }] }], [{ id: 'key-decisions', version: 1, prefix: 'DEC' }]) }, 's1')
+    const [problem] = standardDraftProblems({ roles, key: 'key-decisions.decisions', value: '**DEC01: x**\n\nFacing: y' })
+    assert.ok(problem.message.includes('**DEC01: x**, **Context:** …, **Decision:** …, **Why:** …, **Considered options:** …, **Consequences:** ….'), problem.message)
+    assert.deepEqual(standardDraftProblems({ roles, key: 'key-decisions.decisions', value: '**DEC01: x**\n\n* Context: y' }), [])
+  })
+
   test('Open questions: a row for each logged question', () => {
     const table = '| Question | Who resolves | By when | Status |\n| --- | --- | --- | --- |\n| One? | — | — | Open |'
     assert.equal(tableRowCount(table), 1)

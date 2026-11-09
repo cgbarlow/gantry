@@ -13,7 +13,7 @@
 // Everything here is pure (no DOM, no network, no clock), like web/lib/interviewBrief.js, so the unit tests drive all of it and the
 // browser and Node read the log the same way.
 import { currentLogEntries } from './decisionsLog.js'
-import { KEY_DECISIONS_ID, STYLE_PARTS, STYLE_TITLES, decisionReference, hasStyleText, keyDecisionProblems, nextDecisionNumber, parseKeyDecisions } from './keyDecisions.js'
+import { KEY_DECISIONS_ID, STYLE_PARTS, STYLE_TITLES, decisionLayout, decisionReference, hasStyleText, keyDecisionProblems, nextDecisionNumber, parseKeyDecisions, readDecisionHeader } from './keyDecisions.js'
 import { moduleKeyDecisions } from './standardModules.js'
 
 export const GLOSSARY_ID = 'glossary'
@@ -160,13 +160,16 @@ export function standardDraftProblems({ roles, key, value, terms = [], openCount
   if (roles.keyDecisions.inScope && key === roles.keyDecisions.key) {
     const { prefix, style } = roles.keyDecisions
     const parsed = parseKeyDecisions(text)
+    // #356: the AI is shown the exact form, built from the Definition's style and prefix, not just the parts' names: one line each,
+    // in order, and the header with the decision's own number and title.
+    const layout = (decision) => decisionLayout(style, prefix, decision).join(', ')
     if (parsed.decisions.length === 0) {
-      problems.push({ kind: 'decisions', message: `${key}: no numbered decision found. Write each Key decision under a heading such as **${decisionReference(prefix, 1)}: Short title**, then its parts in the ${STYLE_TITLES[style]} style (${STYLE_PARTS[style].map((p) => p.label).join(', ')}).` })
+      problems.push({ kind: 'decisions', message: `${key}: no numbered decision found. Write each Key decision as its header, then each part of the ${STYLE_TITLES[style]} style on a line of its own, like this: ${layout({ number: 1 })}.` })
     } else {
-      const others = [...text.matchAll(/^\*\*([A-Za-z]{1,6})\d+(?:\s*:[^\n]*?)?\*\*\s*$/gm)].map((m) => m[1]).filter((p) => p !== prefix)
+      const others = text.split('\n').map(readDecisionHeader).filter((h) => h && h.prefix !== prefix).map((h) => h.prefix)
       if (others.length) problems.push({ kind: 'decisions', message: `${key}: decisions are numbered with the prefix ${prefix} (${decisionReference(prefix, 1)}, ${decisionReference(prefix, 2)}, …), not ${[...new Set(others)].join(', ')}.` })
       for (const decision of parsed.decisions) {
-        if (!hasStyleText(decision, style)) problems.push({ kind: 'decisions', message: `${key}: ${decisionReference(prefix, decision.number)} has none of the ${STYLE_TITLES[style]} parts written (${STYLE_PARTS[style].map((p) => p.label).join(', ')}). Write the decision in that style.` })
+        if (!hasStyleText(decision, style)) problems.push({ kind: 'decisions', message: `${key}: ${decisionReference(prefix, decision.number)} has none of the ${STYLE_TITLES[style]} parts written (${STYLE_PARTS[style].map((p) => p.label).join(', ')}). Write each part on a line of its own that starts with its label in bold, like this: ${layout({ number: decision.number, title: decision.title })}.` })
       }
       for (const problem of keyDecisionProblems(text, { prefix, style })) problems.push({ kind: 'decisions', message: `${key}: ${problem}.` })
     }
