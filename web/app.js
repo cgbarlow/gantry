@@ -78,7 +78,7 @@ import { wrap } from './lib/editorWrap.js'
 import { SourceDocumentsPanel } from './lib/sourceDocumentsPanel.js'
 import { citedCommits, citedSourceIds } from './lib/sourceCitations.js'
 import { repositoryReaderFor } from './lib/sourceRepositoryClient.js'
-import { InterviewPage, clearInterviewSessions, unsavedDraftModules } from './lib/interviewView.js'
+import { InterviewPage, clearInterviewSessions, startRoundAfresh, unsavedDraftModules } from './lib/interviewView.js'
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
 import { createLocalDecisionsStore, createServerDecisionsStore, planLocalDecisions } from './lib/decisionsStore.js'
 import { approvalStatusLine } from './lib/interviewApproval.js'
@@ -137,7 +137,8 @@ import {
   keyDecisionProblems,
   STYLE_PARTS,
   STYLE_TITLES,
-  LINK_TYPES,
+  STYLE_LINKS,
+  withoutStyleGuidance,
 } from './lib/keyDecisions.js'
 import {
   changedEntryFor,
@@ -2520,11 +2521,15 @@ function DecisionsField({ field, moduleId, keyDecisions, onRegister }) {
 
   const blocked = isEditingBlocked()
   const parts = STYLE_PARTS[style]
+  // #356: whether the cards have links is the style's own (STYLE_LINKS), not a test for WH(Y).
+  const styleLinks = STYLE_LINKS[style] ?? []
   const otherStyle = style === 'why' ? 'default' : 'why'
   const headingIdForField = moduleId ? headingId(moduleId, field.title) : null
   const text = textOf(parsed)
   const words = field.targetWords ? countWords(text) : 0
   const problems = keyDecisionProblems(text, { prefix, style })
+  // #356 review: the layout added to the guidance is for the AI; the architect fills the cards, so it is left out here.
+  const guidance = withoutStyleGuidance(field.guidance, style, prefix)
   const setDecision = (number, change) => update({ ...parsed, decisions: parsed.decisions.map((d) => (d.number === number ? { ...d, ...change } : d)) })
 
   return html`
@@ -2532,7 +2537,7 @@ function DecisionsField({ field, moduleId, keyDecisions, onRegister }) {
       ${headingIdForField
         ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
         : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
-      ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      ${guidance ? html`<p class="guidance">${guidance}</p>` : null}
       <p class="decisions-style muted" data-testid="decision-style">Decision style: ${STYLE_TITLES[style]}</p>
       ${field.targetWords ? html`<${FieldTargetWords} field=${field} words=${words} />` : null}
       ${parsed.decisions.length === 0 ? html`<p class="muted decisions-empty">No decisions recorded yet.</p>` : null}
@@ -2582,7 +2587,7 @@ function DecisionsField({ field, moduleId, keyDecisions, onRegister }) {
                   </details>
                 `
               : null}
-            ${style === 'why'
+            ${styleLinks.length > 0
               ? html`
                   <div class="decision-links" data-testid="decision-links">
                     ${decision.links.map(
@@ -2594,7 +2599,7 @@ function DecisionsField({ field, moduleId, keyDecisions, onRegister }) {
                             value=${link.type}
                             onChange=${(e) => setDecision(decision.number, { links: decision.links.map((l, i) => (i === linkIndex ? { ...l, type: e.currentTarget.value } : l)) })}
                           >
-                            ${LINK_TYPES.map((t) => html`<option value=${t.type}>${t.label}</option>`)}
+                            ${styleLinks.map((t) => html`<option value=${t.type}>${t.label}</option>`)}
                           </select>
                           <select
                             aria-label=${`Link target of ${reference}`}
@@ -4961,6 +4966,7 @@ function ReviewCommentsPanel({ instance }) {
   function workThrough(event) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
+    startRoundAfresh(instance.slug, 'review')
     location.route(`${goHere.pathname}${goHere.search}`)
   }
   // #304 (ADR-0066): the Review response list, made on demand from the decisions logs. Nothing is written to the Reviewed copy or committed.
@@ -5293,6 +5299,7 @@ function OutOfDatePanel({ instance }) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
     // The Instance loads again for that Stage when it differs from the one on screen; the Interview page for it replaces this one.
+    startRoundAfresh(instance.slug, 'update')
     if (instance.workspaceBacked) {
       if (instance.stage.id !== instance.currentStageId) viewedStage.value = null
     } else if (startStage !== instance.stage.id) {
@@ -5352,6 +5359,7 @@ function InterviewScreen({ instance, editorHref, onSaveDrafts, onAdvance, onRequ
     }
   }, [instance.slug, reviewVersion])
   function openReviewRound() {
+    startRoundAfresh(instance.slug, 'review')
     const here = new URL(window.location.href)
     here.searchParams.set('interview', '1')
     here.searchParams.set('review', '1')
@@ -6711,7 +6719,10 @@ function ModuleEditorPage({ slug: routeRef }) {
   // "Back to the run": the Interview page of the current Stage, which is awaiting approval again.
   const leaveRevision = () => goToInterview(null)
   // After a revision: the Interview page on a later Stage, in Bring up to date, for the Fields drafted from content the revision changed (keep or redraft each).
-  const updateInterviewStage = (stageId) => goToInterview(stageId, { update: '1' })
+  const updateInterviewStage = (stageId) => {
+    startRoundAfresh(instanceData.peek()?.slug, 'update') // #358: a Bring up to date of its own, with nothing saved in it yet
+    return goToInterview(stageId, { update: '1' })
+  }
 
   // #293: "Save, advance, carry on" moves the Instance on to its next Stage once the Save has worked. The Gate is checked again here,
   // on what was just saved, by the same code as the editor's "Advance to next stage".

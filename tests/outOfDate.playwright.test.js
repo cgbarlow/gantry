@@ -164,6 +164,20 @@ test('server workspace: a replaced, re-read or removed Source document flags exa
         assert.match(rowFlags.shape, /^3 Out of date$/)
         assert.match(rowFlags['hld-define'], /^1 Out of date$/)
         assert.equal(rowFlags['detailed-design'], '')
+
+        // #358: in Bring up to date the plan lists the Stages to work through, with their counts, and the one on screen as current. Nothing is
+        // a target, and the Stages after it are not struck through as beyond one. HLD define's flagged Field is in a Module Shape mounts too, so
+        // it is asked about on Shape, the first Stage that can edit it: HLD define has nothing of its own to bring up to date.
+        await page.goto(`${base}/instance/${SLUG}?interview=1&update=1`)
+        await page.waitForSelector('[data-testid="run-plan-row"][data-stage-id="shape"][data-state="current"]', { timeout: 15_000 })
+        await page.waitForFunction(() => document.querySelector('[data-testid="run-plan-row"][data-stage-id="shape"] .rp-note')?.textContent === 'bringing up to date')
+        const plan = await page.locator('[data-testid="run-plan-row"]').evaluateAll((rows) =>
+          Object.fromEntries(rows.map((row) => [row.dataset.stageId, [row.dataset.state, row.dataset.target, row.querySelector('.rp-note').textContent, row.querySelector('[data-testid="run-plan-out-of-date"]')?.textContent ?? '']]))
+        )
+        assert.deepEqual(plan.shape, ['current', 'false', 'bringing up to date', '3 Out of date'])
+        assert.deepEqual(plan['hld-define'], ['plain', 'false', '', ''])
+        assert.deepEqual(plan['detailed-design'], ['plain', 'false', '', ''])
+        assert.equal(await page.locator('.runplan .rp-beyond, .runplan .rp-target').count(), 0)
       })
     )
   } finally {

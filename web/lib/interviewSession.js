@@ -2698,9 +2698,10 @@ ${reviewAnswers.text}` : '',
 
     /**
      * What the stage Save writes into the decisions log (#288): the entries not yet committed, the inputs of every Field in this Save
-     * and this session's status. `runState` is `in-progress`, `ready`, `saved`, `paused` or `done`; `saving` stamps the time of the AI save. `target` and `stages` (#293) are the run's target Stage and each Stage's state.
+     * and this session's status. `runState` is `in-progress`, `ready`, `saved`, `paused` or `done`; `saving` stamps the time of the AI save. `target` and `stages` (#293) are the run's target Stage and each Stage's state. `round` (#355) is `update`
+     * or `review` when the Save is of a Bring up to date or review comments round, which is not a run: its status line is left out of whether the run is done.
      */
-    decisionsDelta({ runState = 'in-progress', saving = false, target, stages } = {}) {
+    decisionsDelta({ runState = 'in-progress', saving = false, target, stages, round } = {}) {
       const context = getContext()
       noteReturnedToDraft()
       const keys = [...new Set([...Object.keys(state.drafts), ...state.savedKeys])]
@@ -2709,7 +2710,7 @@ ${reviewAnswers.text}` : '',
         fieldKeys: keys,
         handEdited: keys.filter((key) => state.drafts[key]?.handEdited === true),
         saving,
-        status: { who: context.actor, target: target ?? context.targetStageId ?? context.stageId, state: runState, stages: stages ?? context.runStages, artefact: context.artefactId, artefacts: context.runArtefacts, instructions: context.instructionsVersion, opening: state.opening },
+        status: { who: context.actor, target: target ?? context.targetStageId ?? context.stageId, state: runState, stages: stages ?? context.runStages, artefact: context.artefactId, artefacts: context.runArtefacts, instructions: context.instructionsVersion, opening: state.opening, round },
       })
     },
 

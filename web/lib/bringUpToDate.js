@@ -9,6 +9,10 @@
 //   * `updateCards`      one card per Field: keep / redraft for a changed or replaced document, keep / re-cite / redraft without it for a
 //                        removed one, and a card that says why for a Field that cannot be changed from here.
 //   * `resolveUpdateCard`, `updateAnswersText`  what an answer means, and what the AI is told.
+//   * `isStaleUpdateSession`, `checkingFlagsNote`  (#357) that the page always has something to do: a session left with nothing open or unsaved
+//                        starts afresh, and while the flags are worked out the kickoff says so rather than that nothing is Out of date.
+//   * `roundPlanRows`    (#358) the run plan in Bring up to date: the Stages it works through, each with its count, the one on screen marked
+//                        current, in place of the normal run's target and the Stages struck through beyond it.
 //
 // Only answering a card clears a flag (a `source-update` entry in the decisions log, see web/lib/interviewLog.js `addSourceUpdate`). Redrafting
 // saved content still goes through keep / use the AI's version / merge (web/lib/interviewSession.js), and an accepted change to an `agreed`
@@ -404,4 +408,85 @@ export function firstFlaggedStage(flags, stageIds) {
       .filter((id) => order.includes(id))
       .sort((a, b) => order.indexOf(a) - order.indexOf(b))[0] ?? null
   )
+}
+
+/**
+ * #357: whether a Bring up to date session the Interview page finds (still in this tab, or restored from the browser's working copy) is stale:
+ * it has nothing open (no round of cards, no keep / use / merge card), the AI is not at work on it, and no answer or draft waits to be saved.
+ * A stale session would leave the page with nothing to press, so the page drops it and starts afresh at the kickoff, from the flags as they
+ * are now. One that is still at its kickoff is not stale: it is already fresh.
+ */
+export function isStaleUpdateSession(snapshot) {
+  if (!snapshot || snapshot.phase === 'kickoff') return false
+  if (snapshot.round || snapshot.clash) return false
+  if (['working', 'testing', 'asking', 'error'].includes(snapshot.phase)) return false
+  // Answers waiting for "Save the round?": that card is there to press. Without an answered round, the card isn't shown, so nothing is.
+  const unsaved = (snapshot.decisions?.pending ?? 0) > 0 || Object.keys(snapshot.drafts ?? {}).length > 0
+  return !(snapshot.update?.answered && unsaved)
+}
+
+/**
+ * #357: what the Bring up to date kickoff says while the flags for its Stage are still being worked out, in place of a count (or of "Nothing
+ * on <Stage> is Out of date", which isn't known yet). A code repository is compared by the Gantry server, which can take a while, so it is named.
+ * `rereadingInstance`: the flags are in, and an Azure DevOps or GitHub workspace's Instance is being read again (whether its current Stage has
+ * a branch decides where each change can be saved, ADR-0026), so that is what it says, not that a repository is being compared.
+ */
+export function checkingFlagsNote(stageTitle, repositories = [], { rereadingInstance = false } = {}) {
+  if (rereadingInstance) return `Checking where the changes to the Out of date Fields on ${stageTitle} would be saved: reading the Instance again…`
+  const names = asList(repositories).filter(Boolean)
+  const base = `Checking which Fields on ${stageTitle} are Out of date`
+  if (!names.length) return `${base}…`
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+  return `${base}: the Gantry server is comparing the files they drew on in ${list} with ${names.length === 1 ? 'its branch' : 'their branches'} now…`
+}
+
+// ---------- the run plan (#358) ----------
+
+// What a row of the run plan says in a round: the Stage on screen, a Stage still to work through, and the Stage on screen with nothing to do.
+// Review comments (#303) work through Stages the same way, so they have the same plan in their own words.
+const ROUND_WORDS = Object.freeze({
+  update: Object.freeze({ current: 'bringing up to date', toDo: 'to bring up to date', none: 'nothing Out of date' }),
+  review: Object.freeze({ current: 'working through comments', toDo: 'comments to work through', none: 'no comments here' }),
+})
+// A Provider's word about a Stage (#295) is a fact whatever the page is doing, so a row that says it keeps it.
+const PROVIDER_STATES = new Set(['awaiting-approval', 'approval-queued'])
+const providerNote = (row) => row.note.replace(/ · target$/, '')
+
+/**
+ * #358: the run plan while the page brings Fields up to date. Bring up to date is not a run: it has no target, and it works through every
+ * Stage with Out of date Fields in order, so the rows say that instead of the normal run's "target" and the Stages struck through after it.
+ *
+ * @param {object} input
+ * @param {object[]} input.rows  the normal run plan (web/lib/interviewRun.js `planRows`), whose Pull Request links and Check status are kept.
+ *   The page builds it aimed at the last Stage (a round has no target of its own), so a later Stage the Provider queued is not struck through.
+ * @param {string} input.pageStageId  the Stage on screen, marked `current`
+ * @param {{stageId: string, count: number}[]} [input.toDo]  `stagesToUpdate`, the page's own Stage included: each is `to-do` with its count
+ * @param {boolean} [input.saved]  the page's round has been saved, so its Stage is `done` (a Field left flagged on purpose still counts)
+ * @param {string[]} [input.done]  the Stages whose round was saved earlier in this round: `done`, unless flagged again since
+ * @param {boolean} [input.checking]  what the page's Stage has to do is not known yet: the Definition, the Out of date check (#357) or the
+ *   Reviewed copies are still loading. Its row says it is checking, never that it has nothing, and is not taken as done from an earlier save.
+ * @param {'update'|'review'} [input.words]
+ * @returns {object[]} the rows, each with `count` and `target: false`. A row in none of these is `plain` with no note, unless the Provider
+ *   says it is awaiting approval or queued for it. The page's own row says that too, after what the page is doing.
+ */
+export function roundPlanRows({ rows, pageStageId, toDo = [], saved = false, done = [], checking = false, words = 'update' }) {
+  const say = ROUND_WORDS[words] ?? ROUND_WORDS.update
+  const counts = new Map(toDo.map((st) => [st.stageId, st.count]))
+  const doneHere = new Set(done)
+  return (rows ?? []).map((row) => {
+    const count = counts.get(row.id) ?? 0
+    let state
+    let note
+    if (row.id === pageStageId) {
+      state = saved || (!checking && !count && doneHere.has(row.id)) ? 'done' : 'current'
+      note = state === 'done' ? 'done' : checking ? 'checking…' : count ? say.current : say.none
+      // The Stage on screen may be awaiting approval (an Azure DevOps or GitHub workspace): it still is, whatever the round does, and its row
+      // keeps its Pull Request link and Check status, so it says so too.
+      if (PROVIDER_STATES.has(row.state)) note = `${note} · ${providerNote(row)}`
+    } else if (count) [state, note] = ['to-do', say.toDo]
+    else if (doneHere.has(row.id)) [state, note] = ['done', 'done']
+    else if (PROVIDER_STATES.has(row.state)) [state, note] = [row.state, providerNote(row)]
+    else [state, note] = ['plain', '']
+    return { ...row, state, note, count, target: false }
+  })
 }

@@ -14,7 +14,11 @@ import {
   stagesToUpdate,
   updateAnswersText,
   updateCards,
+  checkingFlagsNote,
+  isStaleUpdateSession,
+  roundPlanRows,
 } from '../web/lib/bringUpToDate.js'
+import { planRows } from '../web/lib/interviewRun.js'
 import { SOURCE_UPDATE_KIND, findOutOfDateFields } from '../web/lib/outOfDate.js'
 import { fingerprintText } from '../web/lib/sourceDocuments.js'
 import { choose } from '../web/lib/interviewRounds.js'
@@ -377,4 +381,156 @@ describe('the decisions log shows what was decided', () => {
 
 test('UPDATE_CHOICES are the labels the cards use', () => {
   assert.deepEqual(Object.values(UPDATE_CHOICES), ['Keep', 'Redraft', 'Redraft without it', 'Log an open question', 'Leave it flagged'])
+})
+
+// #357: Bring up to date from the editor's banner always lands on a page with something to do.
+describe('#357: Bring up to date always gives a way to answer every flagged Field', () => {
+  const codeChanged = (field, stage) => ({ field, cause: 'source', source: 'gantry', sourceTitle: 'gantry', change: 'code-changed', paths: ['package.json'], head: 'h2', via: ['drafted'], stages: [stage] })
+
+  test('a local workspace asks about code-changed Fields of an earlier, done Stage on that Stage, in place: none is deferred or sent elsewhere', () => {
+    // The Instance is on Build; Shape's and Design's Fields drew on files of a code repository that have since changed.
+    const flags = [codeChanged('background.problem', 'shape'), codeChanged('background.goals', 'design'), codeChanged('solution.overview', 'design'), codeChanged('plan.body', 'build')]
+    const shape = planUpdateRound({ flags, definition, pageStageId: 'shape', currentStageId: 'build', saved })
+    assert.deepEqual(shape.items.map((i) => [i.key, i.landing.kind]), [['background.problem', 'in-place'], ['background.goals', 'in-place']])
+    assert.deepEqual(shape.deferred, [])
+    assert.deepEqual(shape.elsewhere.map((e) => [e.key, e.stageId]), [['solution.overview', 'design'], ['plan.body', 'build']])
+    const design = planUpdateRound({ flags: flags.filter((f) => !f.field.startsWith('background.')), definition, pageStageId: 'design', currentStageId: 'build', saved })
+    assert.deepEqual(design.items.map((i) => i.key), ['solution.overview'])
+    // And the Stages to work through, in order, cover every one of them.
+    assert.deepEqual(stagesToUpdate({ flags, definition, currentStageId: 'build' }), [{ stageId: 'shape', count: 2 }, { stageId: 'design', count: 1 }, { stageId: 'build', count: 1 }])
+  })
+
+  test('isStaleUpdateSession: a session with nothing open and nothing unsaved is stale, so the page starts afresh from the flags as they are now', () => {
+    const snap = (over) => ({ phase: 'waiting', round: null, clash: null, drafts: {}, decisions: { pending: 0 }, update: { answered: true }, ...over })
+    // Answered and saved (still in this tab), or every card left flagged: nothing to do here any more.
+    assert.equal(isStaleUpdateSession(snap()), true)
+    // A working copy with no round and no record of the round at all (the AI's turn ended, or an older copy): nothing to press.
+    assert.equal(isStaleUpdateSession(snap({ update: null })), true)
+    assert.equal(isStaleUpdateSession(snap({ update: { answered: false }, decisions: { pending: 2 } })), true)
+    // Something to carry on: a round or a keep / use / merge card open, the AI at work, or answers waiting to be saved.
+    assert.equal(isStaleUpdateSession(snap({ phase: 'kickoff', update: null })), false)
+    assert.equal(isStaleUpdateSession(snap({ phase: 'asking', round: { id: 1, cards: [] } })), false)
+    assert.equal(isStaleUpdateSession(snap({ clash: { field: 'a.b' } })), false)
+    assert.equal(isStaleUpdateSession(snap({ phase: 'working' })), false)
+    assert.equal(isStaleUpdateSession(snap({ phase: 'error' })), false)
+    assert.equal(isStaleUpdateSession(snap({ decisions: { pending: 3 } })), false)
+    assert.equal(isStaleUpdateSession(snap({ drafts: { 'a.b': { value: 'x' } } })), false)
+    assert.equal(isStaleUpdateSession(null), false)
+  })
+
+  test('checkingFlagsNote says what is being checked, naming the code repositories being compared', () => {
+    assert.equal(checkingFlagsNote('SOAP'), 'Checking which Fields on SOAP are Out of date…')
+    assert.equal(checkingFlagsNote('SOAP', ['gantry']), 'Checking which Fields on SOAP are Out of date: the Gantry server is comparing the files they drew on in gantry with its branch now…')
+    assert.equal(checkingFlagsNote('SOAP', ['gantry', 'billing-api']), 'Checking which Fields on SOAP are Out of date: the Gantry server is comparing the files they drew on in gantry and billing-api with their branches now…')
+  })
+
+  test('checkingFlagsNote: once the flags are in and only the Instance is being read again (an Azure DevOps or GitHub workspace), it says that, and names no repository compare', () => {
+    const want = 'Checking where the changes to the Out of date Fields on Beta would be saved: reading the Instance again…'
+    assert.equal(checkingFlagsNote('Beta', [], { rereadingInstance: true }), want)
+    assert.equal(checkingFlagsNote('Beta', ['gantry'], { rereadingInstance: true }), want)
+  })
+})
+
+describe('#358: in Bring up to date the run plan lists the Stages to work through, not a target and beyond it', () => {
+  const stages = [
+    { id: 'shape', title: 'Shape' },
+    { id: 'soap', title: 'SOAP' },
+    { id: 'hld', title: 'High-level Design' },
+    { id: 'dd', title: 'Detailed Design' },
+    { id: 'build', title: 'Build' },
+  ]
+  // What the normal run plan says on SOAP, whose target is itself: SOAP is "waiting · target" and everything after it is struck through.
+  const normal = planRows({ stages, currentStageId: 'soap', targetStageId: 'soap', instanceStageId: 'soap' })
+  const toDo = [{ stageId: 'soap', count: 2 }, { stageId: 'hld', count: 15 }, { stageId: 'dd', count: 6 }]
+  const view = (rows) => rows.map((r) => [r.id, r.state, r.note, r.count, r.target])
+
+  test('every Stage with Out of date Fields is part of the round, with its count; the one on screen is current; the rest are plain', () => {
+    assert.equal(normal.find((r) => r.id === 'soap').note, 'waiting · target')
+    assert.equal(normal.find((r) => r.id === 'hld').state, 'beyond')
+    assert.deepEqual(view(roundPlanRows({ rows: normal, pageStageId: 'soap', toDo })), [
+      ['shape', 'plain', '', 0, false],
+      ['soap', 'current', 'bringing up to date', 2, false],
+      ['hld', 'to-do', 'to bring up to date', 15, false],
+      ['dd', 'to-do', 'to bring up to date', 6, false],
+      ['build', 'plain', '', 0, false],
+    ])
+  })
+
+  test("once the page's round is saved it reads done, and on the next Stage's page the earlier one stays done and the next is current", () => {
+    // Saved on SOAP: its flags have cleared, so it is no longer in the list to work through.
+    const saved = roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: toDo.slice(1), saved: true })
+    assert.deepEqual(saved.find((r) => r.id === 'soap').state, 'done')
+    assert.deepEqual(saved.find((r) => r.id === 'soap').note, 'done')
+    assert.deepEqual(saved.find((r) => r.id === 'hld').state, 'to-do')
+    // Next: High-level Design, opened from SOAP's saved card.
+    const onHld = planRows({ stages, currentStageId: 'hld', targetStageId: 'hld', instanceStageId: 'soap' })
+    assert.deepEqual(view(roundPlanRows({ rows: onHld, pageStageId: 'hld', toDo: toDo.slice(1), done: ['soap'] })), [
+      ['shape', 'plain', '', 0, false],
+      ['soap', 'done', 'done', 0, false],
+      ['hld', 'current', 'bringing up to date', 15, false],
+      ['dd', 'to-do', 'to bring up to date', 6, false],
+      ['build', 'plain', '', 0, false],
+    ])
+    // A Stage saved earlier that has been flagged again since is back in the list to work through.
+    assert.equal(roundPlanRows({ rows: onHld, pageStageId: 'hld', toDo, done: ['soap'] }).find((r) => r.id === 'soap').state, 'to-do')
+    // The page's own Stage, saved earlier and opened again with nothing flagged, is done too.
+    assert.equal(roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: toDo.slice(1), done: ['soap'] }).find((r) => r.id === 'soap').state, 'done')
+  })
+
+  test('the page on a Stage with nothing flagged says so, rather than that it is bringing it up to date', () => {
+    const row = roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: toDo.slice(1) }).find((r) => r.id === 'soap')
+    assert.deepEqual([row.state, row.note, row.count], ['current', 'nothing Out of date', 0])
+    // #357: until the check for the page's Stage has answered, nothing is known, so the row says it is checking.
+    const checking = roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: toDo.slice(1), checking: true }).find((r) => r.id === 'soap')
+    assert.deepEqual([checking.state, checking.note], ['current', 'checking…'])
+    // While the Definition or the flags are still loading nothing is known yet, so there are no counts at all: the row still says it is checking,
+    // never "nothing Out of date", and the same goes for review comments while the Reviewed copies are read.
+    const loading = roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: [], checking: true })
+    assert.deepEqual(view(loading).slice(1, 3), [['soap', 'current', 'checking…', 0, false], ['hld', 'plain', '', 0, false]])
+    assert.equal(roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: [], checking: true, words: 'review' }).find((r) => r.id === 'soap').note, 'checking…')
+    // A Stage saved earlier in this tab is not taken as done while the check for it has not answered: it may have been flagged again since.
+    assert.deepEqual(view(roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: [], done: ['soap'], checking: true })).slice(1, 2), [['soap', 'current', 'checking…', 0, false]])
+  })
+
+  test("a Provider's Pull Request is still shown: a Stage awaiting approval or queued for it keeps that state, its link and Check status", () => {
+    const remote = { pullRequests: { soap: { id: 7, url: 'https://example.test/pr/7' } }, queued: { hld: true } }
+    const rows = planRows({ stages, currentStageId: 'hld', targetStageId: 'dd', instanceStageId: 'soap', remote })
+    const round = roundPlanRows({ rows, pageStageId: 'hld', toDo: [{ stageId: 'hld', count: 4 }] })
+    const soap = round.find((r) => r.id === 'soap')
+    assert.deepEqual([soap.state, soap.note, soap.pullRequest, soap.checkable], ['awaiting-approval', 'awaiting approval', { id: 7, url: 'https://example.test/pr/7' }, true])
+    assert.deepEqual(view(round).slice(2), [
+      ['hld', 'current', 'bringing up to date · approval queued', 4, false],
+      ['dd', 'plain', '', 0, false],
+      ['build', 'plain', '', 0, false],
+    ])
+  })
+
+  test("the Stage on screen awaiting approval still says so, beside what the page is doing, with its link and Check status", () => {
+    const remote = { pullRequests: { soap: { id: 7, url: 'https://example.test/pr/7' } } }
+    const rows = planRows({ stages, currentStageId: 'soap', targetStageId: 'build', instanceStageId: 'soap', remote })
+    const soap = (round) => round.find((r) => r.id === 'soap')
+    const current = soap(roundPlanRows({ rows, pageStageId: 'soap', toDo: [{ stageId: 'soap', count: 2 }] }))
+    assert.deepEqual([current.state, current.note, current.pullRequest, current.checkable], ['current', 'bringing up to date · awaiting approval', { id: 7, url: 'https://example.test/pr/7' }, true])
+    assert.equal(soap(roundPlanRows({ rows, pageStageId: 'soap', toDo: [], saved: true })).note, 'done · awaiting approval')
+    assert.equal(soap(roundPlanRows({ rows, pageStageId: 'soap', toDo: [], checking: true })).note, 'checking… · awaiting approval')
+    assert.equal(soap(roundPlanRows({ rows, pageStageId: 'soap', toDo: [{ stageId: 'soap', count: 1 }], words: 'review' })).note, 'working through comments · awaiting approval')
+  })
+
+  test('a later Stage the Provider queued for approval says so, since a round aims its plan at the last Stage and strikes nothing through', () => {
+    // The page builds the rows aimed at the last Stage (a round has no target of its own), so a Stage after the page's is not "beyond".
+    const remote = { pullRequests: {}, queued: { hld: true } }
+    const rows = planRows({ stages, currentStageId: 'soap', targetStageId: 'build', instanceStageId: 'soap', remote })
+    const hld = roundPlanRows({ rows, pageStageId: 'soap', toDo: [{ stageId: 'soap', count: 2 }] }).find((r) => r.id === 'hld')
+    assert.deepEqual([hld.state, hld.note, hld.target], ['approval-queued', 'approval queued', false])
+  })
+
+  test('review comments use the same plan, in their own words', () => {
+    const rows = roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: [{ stageId: 'soap', count: 1 }, { stageId: 'dd', count: 2 }], words: 'review' })
+    assert.deepEqual(view(rows).slice(1, 4), [
+      ['soap', 'current', 'working through comments', 1, false],
+      ['hld', 'plain', '', 0, false],
+      ['dd', 'to-do', 'comments to work through', 2, false],
+    ])
+    assert.equal(roundPlanRows({ rows: normal, pageStageId: 'soap', toDo: [], words: 'review' }).find((r) => r.id === 'soap').note, 'no comments here')
+  })
 })

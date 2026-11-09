@@ -5,7 +5,8 @@
 //   * `status`   one entry per session: who, the run's target Stage, this Stage's state (and, in a run, each Stage's state), the Artefact aimed for
 //                (and, in a run, the one chosen for each Stage, #332), the last AI save,
 //                each AI Provider type and model used (with its tokens), the Interview instructions version, the skill versions, and the
-//                architect's opening message (#331), word for word. Never a key, an address or a custom name: `sessionStatus` builds an entry
+//                architect's opening message (#331), word for word, and (#355) whether the session was a Bring up to date or review comments
+//                round rather than a run. Never a key, an address or a custom name: `sessionStatus` builds an entry
 //                from a short list of known keys only.
 //   * `fields`   one record per drafted Field: what it was drafted from (Source documents and pages, earlier-Stage Fields), each
 //                with a fingerprint, and the ids of the entries that fed it. Overwritten when the Field is redrafted.
@@ -17,6 +18,9 @@
 import { parse as parseYAML, stringify as stringifyYAML } from 'yaml'
 
 export const DECISIONS_LOG_VERSION = 1
+
+/** #355: what a status entry's `round` may say: the session was a Bring up to date round or a review comments round, not a run. */
+export const ROUNDS = Object.freeze(['update', 'review'])
 
 /**
  * #307 (ADR-0067): what an entry and a session status are stamped with when an **outside agent** over MCP recorded them. The agent's account of
@@ -117,6 +121,9 @@ export function sessionStatus(input = {}) {
   // to every Stage, and a run or a paused session resumed in another browser takes it from here. Free text, so it is not held to `safeToken`.
   const opening = typeof input.opening === 'string' ? input.opening.trim().slice(0, OPENING_MAX) : ''
   if (opening) status.opening = opening
+  // #355: the session was a Bring up to date (`update`) or review comments (`review`) round, not a run, so its line says nothing about whether
+  // the run is done. Those two words only.
+  if (ROUNDS.includes(input.round)) status.round = input.round
   const skills = isObject(input.skills) ? input.skills : {}
   status.skills = Object.fromEntries(Object.entries(skills).map(([id, version]) => [safeToken(id, 60), safeToken(version, 60)]).filter(([id, version]) => id && version))
   return status

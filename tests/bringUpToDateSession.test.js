@@ -217,7 +217,10 @@ test('redraft sends the AI only the Field to redraft; its draft meets the keep /
   session.choose(change.id, CHANGE_OPTIONS.use)
   await session.submitRound()
   assert.match(session.snapshot().drafts['details.summary'].value, /11 days/)
-  const delta = session.decisionsDelta({ runState: 'done', saving: true })
+  const delta = session.decisionsDelta({ runState: 'done', saving: true, round: 'update' })
+  // #355: the status line says it is a Bring up to date round, so a reload of the interview doesn't read it as the end of a run.
+  assert.equal(delta.status.round, 'update')
+  assert.equal('round' in session.decisionsDelta({ runState: 'done' }).status, false, "an interview's Save names no round")
   assert.ok(delta.entries.some((e) => e.kind === 'source-update' && e.fields[0] === 'details.summary' && e.outcome === 'redraft'))
   assert.ok(delta.entries.some((e) => e.kind === 'saved-content' && e.choice === 'replace'))
   assert.ok(delta.fields['details.summary'], 'the redrafted Field’s record is rewritten, which also clears the flag')
