@@ -17,6 +17,70 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.16.3 — 2026-11-09
+
+Key decisions are read the way the AI actually writes them, so the interview stops looping on a warning nobody can
+clear. A finished AI interview run says it is finished, and Bring up to date always leaves you with a next step and a
+run plan that lists the Stages you are working through.
+
+### Fixed
+
+- **Key decisions read a part's label however it is laid out** (#356).
+  - **What went wrong.** Gantry only recognised a decision's parts, such as *Facing* or *Decision*, when they were
+    written exactly as `**Facing:** …`. An AI that wrote plain labels (`Facing: …`) had every part ignored, was warned
+    that none of the parts were written, rewrote the decision the same way and was warned again.
+  - **What it does now.** A part's or link's label at the start of a line counts whether it is plain, bold with the
+    colon inside or outside, italic, or a `-`, `*` or `+` bullet, in any letter case. This works for every part and
+    link of whichever decision style the Definition uses (default or WH(Y)). A decision header can also be a Markdown
+    heading such as `### AD01: Title`, as long as it uses the Field's own prefix and two-digit number, so an ordinary
+    heading inside a decision stays text.
+  - **The AI is told the exact form.** The Field's guidance now shows a header line and one line per part, in the
+    style's order and under the Definition's prefix, with an example decision. The *none of the parts written* warning
+    shows the same layout, using the decision's own number and title.
+  - **What stays the same.** Gantry and the editor still write the one standard `**Label:** …` form. A line of your own
+    words that happens to start like a label, such as *Decision: revisit it every year.*, comes back as you typed it,
+    in the editor and in Word. The Stage editor shows the decision cards without the AI's layout instructions above
+    them.
+- **When the AI interview's run is done, the bar says so** (#355).
+  - **What went wrong.** After the run's last Stage was saved, the bar under the thread still offered *Pause* and
+    *Finish with your recommendations*, as if there were more to do.
+  - **What it does now.** Once the run is done the bar offers **Open in the editor** and **Re-open <Stage>**. The chat
+    box is greyed out with a line saying the Stage is saved and the run is done, and that Re-open is how to change
+    something. This also applies to a run of a single Stage. On a Local or Server-hosted workspace, reloading the page
+    shows the same bar with a *Saved. The run is done.* card. On Azure DevOps and GitHub the bar shows Open in the
+    editor, and the page shows where approval stands, as before.
+  - **What stays the same.** A run saved and stopped before its last Stage still offers *Resume the run*. Bringing a
+    Stage up to date or answering review comments with the AI no longer makes a paused run look done.
+- **Bring up to date always gives you a way to answer every Out of date Field** (#357).
+  - **What went wrong.** Bring up to date could open on a page with nothing to press: a session kept from earlier with
+    nothing left to answer or save hid the kickoff, and while a code repository was still being compared the page said
+    *Nothing on <Stage> is Out of date* with the button greyed out.
+  - **What it does now.** A kept session with nothing left to do is dropped and the page starts afresh from the current
+    flags. A session with answers waiting for *Save the round?* is kept. While the flags load, the page says it is
+    checking and names the repository, and the button comes on when they arrive. On Azure DevOps and GitHub it says it
+    is reading the Instance again. When a Stage has nothing flagged, the main button is **Go to <Stage>** for the next
+    Stage that does, or **Back to the editor** if none does. Code-changed Fields on an earlier, finished Stage are
+    asked about on that Stage, Stage by Stage.
+- **In Bring up to date, the run plan lists the Stages to work through** (#358).
+  - **What went wrong.** The run plan showed a run's *target* and struck later Stages through as *beyond target*, which
+    means nothing in Bring up to date.
+  - **What it does now.** Every Stage with Out of date Fields is listed in order with its count. The Stage on screen
+    reads *bringing up to date*, other flagged Stages read *to bring up to date*, and a Stage whose round is saved reads
+    *done*, also on the next Stage's page. While the check is still running the Stage on screen reads *checking…*. On
+    Azure DevOps and GitHub a Stage awaiting approval, or queued for it, still says so with its Pull Request link.
+    Review comments get the same plan, worded *working through comments* and *comments to work through*. Starting a new
+    round from the editor starts the plan afresh.
+  - **What stays the same.** A normal AI interview run's plan, and a Stage sent back for revision, still show the run's
+    target.
+
+### Notes
+
+- A Key decisions Field saved before 0.16.3 that has a plain-label line inside a part, such as *Decision: …* in the
+  middle of a part's words, may now read that line as a new part. One pass through the editor's decision cards puts it
+  right. The bundled example reads and renders as before.
+- A Stage brought up to date with the AI before 0.16.3 may still open its interview showing *Saved. The run is done.*
+  even if the run was paused. **Re-open** puts it right.
+
 ## 0.16.2 — 2026-11-08
 
 Word stops repeating the same footnote. A Source document reference cited more than once in a document now has one
