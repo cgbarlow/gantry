@@ -30,7 +30,7 @@ import { planUpdateRound, stagesToUpdate } from './bringUpToDate.js'
 import { answeredCounts, assignChoices, planReview, reviewerLabels } from './reviewRound.js'
 import { ReviewContext, ReviewInputs, ReviewSection } from './reviewView.js'
 import { downloadReviewResponseList, hasReviewResponses, reviewResponseRows } from './reviewResponse.js'
-import { artefactRows, beginRun, chosenArtefacts, clearRun, interviewRuns, nextStage, planRows, resumableRun, resumedArtefacts, runArtefacts, runOpening, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
+import { artefactRows, beginRun, chosenArtefacts, clearRun, interviewRuns, nextStage, planRows, resumableRun, resumedArtefacts, runArtefacts, runIsDone, runOpening, runStartStage, runTargets, saveOutcome, updateRun } from './interviewRun.js'
 import { EMPTY_TOKENS, formatContext, formatTokens, hasTokens, stageTokenFigures, tokenBreakdown, tokensOfLog, totalTokens } from './tokenUsage.js'
 import { describeSaved, resumeInfo } from './interviewResume.js'
 import { isRemoteInstance, lastSavedBy, openApproval, pullRequestLink, remoteRecord } from './interviewApproval.js'
@@ -419,6 +419,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const [confirmRestart, setConfirmRestart] = useState(false)
   const [handEditing, setHandEditing] = useState(null) // { key, error? }: the drafted Field open for a hand edit (#289)
   const [generation, setGeneration] = useState(0) // bumped to open the page afresh after a Pause (#290)
+  // #355: Re-open <Stage> (or Start this stage over) was chosen on a done run, so the Stage is open for another session and its kickoff shows.
+  const [reopened, setReopened] = useState(false)
   const [flagsWaited, setFlagsWaited] = useState(false) // the wait for the Out of date check ran out (#298)
   const [reopenedThreads, setReopenedThreads] = useState(() => new Set()) // threads resolved in Word that the architect asked to have asked after all (#303)
   const [joinWanted, setJoinWanted] = useState(() => reviewJoinWanted.has(instance.slug)) // the review questions join the interview (#303)
@@ -800,6 +802,22 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const runStart = run?.startStageId ?? instance.stage.id // the Stage this run began on
   const multiStage = stagesList.findIndex((st) => st.id === target) > stagesList.findIndex((st) => st.id === runStart) // more than one Stage in the run
   const stageEndReady = !update && !review && phase === 'waiting' && draftKeys.length > 0 && Boolean(readiness?.ready) && !snap?.round && !finishing
+  // #355: the run is done here (web/lib/interviewRun.js `runIsDone`): the bar under the thread offers Open in the editor and Re-open <Stage>
+  // in place of Pause and Finish with your recommendations, and the chat box is disabled. Bring up to date, review comments and a revision are not runs.
+  const runDone = !update && !review && !revise && runIsDone({ stageId: instance.stage.id, saving, run, reopened, started, remote, log: committedLog })
+  // What the bar's line says, and the status region after "The run is done": how to go on, and how to change something.
+  const doneStageTitle = stage?.title ?? instance.stage.title
+  const doneApproval = 'A Stage moves on only when its Pull Request is approved; the card says where its approval stands.'
+  const doneNextSteps = remote ? doneApproval : `Open it in the editor, or choose Re-open ${doneStageTitle} to change something.`
+  const doneLine = `${doneStageTitle} is saved and the run is done. ${remote ? doneApproval : `To change something, choose Re-open ${doneStageTitle}.`}`
+  // The Save button that finished the run goes with its card, so the focus moves to the first next step. Not on a remote workspace, where the
+  // card may have its own action (Request approval), and not when the page opens on a done run.
+  const openEditorRef = useRef(null)
+  const wasDone = useRef(runDone)
+  useEffect(() => {
+    if (runDone && !wasDone.current && saving?.phase === 'saved' && !remote) openEditorRef.current?.focus()
+    wasDone.current = runDone
+  }, [runDone])
   // #296: nothing draftable is left on a Stage drafted ahead, but Modules an earlier Stage also mounts are still held: the Waiting card offers
   // Check approval now or Stop here. Either saves the head start. A Stage whose every Module is held has nothing to draft at all, so the card
   // comes before the AI would start.
@@ -845,6 +863,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   else if (stageEndReady) planCurrent = 'awaiting-confirmation'
   else if (waitingNow || (headStart?.stopped && ahead && held.length > 0)) planCurrent = 'waiting-for-approval'
   else if (settled && draftKeys.length === 0) planCurrent = settled
+  else if (runDone) planCurrent = 'done' // #355: a done run the page opened on (a reload, or another browser)
   else if (started || phase === 'testing') planCurrent = ahead ? 'drafting-ahead' : 'drafting'
   const outOfDateByStage = outOfDateCountByStage(outOfDate)
   // #295: the Provider's word about the Pull Requests, which overrides the log's (a Stage with one open is awaiting approval; a later Stage the log queued shows Approval queued).
@@ -1303,6 +1322,16 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     setSaving(null)
     setSubmitMessage('')
     setGeneration((n) => n + 1)
+  }
+
+  // #355: Re-open <Stage> on a done run. On a Local or Server-hosted workspace the Stage the run finished on is still the Instance's own (no
+  // Pull Request signed it off), so there is nothing to re-open on the workspace: the page opens afresh, as after a Pause, and its kickoff comes
+  // back to interview the Stage again from what is saved and its decisions log (Resume interview, Run until). Nothing changes until that
+  // session's own Save. The focus goes to the thread, where the kickoff is.
+  function reopenDoneStage() {
+    setReopened(true)
+    resumeAfterPause()
+    threadRef.current?.focus()
   }
 
   // #295: asks for the Stage's approval (a Pull Request into main) and waits for it. The AI never passes a gate and has no part in Request
@@ -1851,7 +1880,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         ? confirmRestart
           ? html`<div class="dl-restart" data-testid="interview-restart-confirm" role="group" aria-labelledby="interview-restart-question">
               <p class="kick-note" id="interview-restart-question">Start over: the AI ignores every earlier answer from now on. Saved content is not touched, and the log keeps what was said before.</p>
-              <button type="button" class="btn small" data-testid="interview-restart-yes" ref=${restartYes} onClick=${() => { sessionRef.current?.startOver(); clearRun(instance.slug); startedOver.current = true; setOpening(''); setConfirmRestart(false); setSaving(null) }}>Start this stage over</button>
+              <button type="button" class="btn small" data-testid="interview-restart-yes" ref=${restartYes} onClick=${() => { sessionRef.current?.startOver(); clearRun(instance.slug); startedOver.current = true; setOpening(''); setConfirmRestart(false); setSaving(null); setReopened(true) }}>Start this stage over</button>
               <button type="button" class="btn small ghost" data-testid="interview-restart-no" onClick=${() => setConfirmRestart(false)}>Keep going</button>
             </div>`
           : html`<button type="button" class="btn small ghost dl-restart" data-testid="interview-restart" disabled=${busy} onClick=${() => setConfirmRestart(true)}>Start this stage over</button>`
@@ -2292,6 +2321,15 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     if (waitingNow || (headStart?.stopped && ahead && held.length > 0)) return waitingCard()
     if (remote && awaiting && !revise) return awaitingCard()
+    // #355: the page opened on a done run (a reload, another browser, or back here in this tab): no Save of its own to report, so the card
+    // says the run is done in place of the kickoff. The bar under the thread has the next steps, and the status region announces it. On a
+    // remote workspace the Provider's word about approval decides the card, as before.
+    if (runDone && !saving && !remote) {
+      return html`<div class="qcard stage-end saved" data-testid="interview-done">
+        <p class="qhead">Saved. The run is done.</p>
+        <p>${stage?.title ?? instance.stage.title} is saved, and it was the run's target. The Modules stay <strong>draft</strong>: a person marks them agreed.</p>
+      </div>`
+    }
     if (saving?.phase === 'saved' && remote) {
       // A remote Save that is not (yet) awaiting a Pull Request: queued behind an earlier Stage, refused by the Provider, or "Save and stop here".
       return html`<div class="qcard stage-end saved" data-testid="interview-saved" role="status">
@@ -2316,7 +2354,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       </div>`
     }
     if (saving?.phase === 'saved') {
-      return html`<div class="qcard stage-end saved" data-testid="interview-saved" role="status">
+      // #355: a Save that finished the run is announced once, by the status region (with what to do next), so this card is not a live region too.
+      return html`<div class="qcard stage-end saved" data-testid="interview-saved" role=${runDone ? undefined : 'status'}>
         <p class="qhead">${saving.finished && multiStage ? 'Saved. The run is done.' : 'Saved'}</p>
         <p>${stage?.title ?? instance.stage.title} is saved as one Stage Save. The Modules stay <strong>draft</strong>: a person marks them agreed.</p>
         ${returnedList(saving.returned)}
@@ -2501,7 +2540,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           <div class="inner">
             ${setup.status === 'loading' ? html`<p class="loading">Loading…</p>` : null}
             ${setup.status === 'error' ? html`<p class="inline-error" role="alert">${setup.message}</p>` : null}
-            ${setup.status === 'ready' && !started && !(remote && awaiting && !revise) && !(waitingNow && phase === 'kickoff') && !(sentBack && sentBack.stageId === instance.currentStageId && !revise) ? kickoff() : null}
+            ${setup.status === 'ready' && !started && !runDone && !(remote && awaiting && !revise) && !(waitingNow && phase === 'kickoff') && !(sentBack && sentBack.stageId === instance.currentStageId && !revise) ? kickoff() : null}
             ${setup.status === 'ready' && started ? thread() : null}
             ${setup.status === 'ready' && started ? compactOfferCard() : null}
             ${setup.status === 'ready' && started ? roundView() : null}
@@ -2535,7 +2574,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                   <span class="muted"> or switch AI Provider above.</span>
                 </div>`
               : null}
-            ${started
+            ${started || runDone
               ? html`<div class="interview-status" role="status" aria-live="polite" aria-atomic="false">
                   ${status
                     ? html`<p class="msg sys" data-testid="interview-status" data-activity=${status.kind}>
@@ -2545,7 +2584,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                       ? html`<span class="visually-hidden" data-testid="interview-carry-on-announce">${carryOnNow.text} Choose Carry on to let it continue.</span>`
                       : notReadyNow
                         ? html`<span class="visually-hidden" data-testid="interview-not-ready-announce">${stage?.title ?? instance.stage.title} isn't ready yet. The Not ready yet card says what's outstanding.</span>`
-                        : null}
+                        : runDone
+                          ? html`<span class="visually-hidden" data-testid="interview-done-announce">The run is done: ${stage?.title ?? instance.stage.title} is saved. ${doneNextSteps}</span>`
+                          : null}
                 </div>`
               : null}
             ${reopening.message && !update ? html`<p class="inline-error" role="alert" data-testid="interview-reopen-error">${reopening.message}</p>` : null}
@@ -2554,23 +2595,32 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           </div>
         </div>
         <div class="interview-composer">
-          ${started && phase !== 'paused' && !update && !review && !revise
-            ? html`<div class="inner composer-actions">
-                <button type="button" class="btn small ghost" data-testid="interview-pause" disabled=${busy || phase === 'kickoff' || saving?.phase === 'saving' || Boolean(blockedReason) || Boolean(snap?.clash)} title="Save the decisions log and the drafts so far, then carry on later in this browser or any other. The Modules stay draft." onClick=${pauseInterview}>
-                  ${saving?.phase === 'saving' && saving.pause ? 'Pausing…' : 'Pause'}
-                </button>
-                <button type="button" class="btn small ghost" data-testid="interview-finish" disabled=${busy || phase === 'kickoff'} title="Accept every recommendation, then answer one last round about only what the AI can't responsibly propose." onClick=${finishNow}>
-                  Finish with your recommendations
-                </button>
+          ${runDone
+            ? // #355: the run is done, so the bar has the next steps, not the run's controls. On a remote workspace Re-open waits for the
+              // Owner: the Stage is signed off (and can be re-opened) only once its Pull Request merges, and the card has approval's actions.
+              html`<div class="inner composer-actions composer-done" data-testid="interview-done-bar">
+                <p class="composer-done-line" id="interview-done-line" data-testid="interview-done-line">${doneLine}</p>
+                <a class="btn small primary" href=${editorHref} ref=${openEditorRef} data-testid="interview-open-editor">Open in the editor</a>
+                ${remote ? null : html`<button type="button" class="btn small ghost" data-testid="interview-reopen" onClick=${reopenDoneStage}>Re-open ${doneStageTitle}</button>`}
               </div>`
-            : null}
+            : started && phase !== 'paused' && !update && !review && !revise
+              ? html`<div class="inner composer-actions">
+                  <button type="button" class="btn small ghost" data-testid="interview-pause" disabled=${busy || phase === 'kickoff' || saving?.phase === 'saving' || Boolean(blockedReason) || Boolean(snap?.clash)} title="Save the decisions log and the drafts so far, then carry on later in this browser or any other. The Modules stay draft." onClick=${pauseInterview}>
+                    ${saving?.phase === 'saving' && saving.pause ? 'Pausing…' : 'Pause'}
+                  </button>
+                  <button type="button" class="btn small ghost" data-testid="interview-finish" disabled=${busy || phase === 'kickoff'} title="Accept every recommendation, then answer one last round about only what the AI can't responsibly propose." onClick=${finishNow}>
+                    Finish with your recommendations
+                  </button>
+                </div>`
+              : null}
           <div class="inner chatbox">
             <textarea
               ref=${chatRef}
               data-testid="interview-chat"
               aria-label="Tell the AI anything"
-              placeholder=${started ? 'Tell the AI anything — "the budget is capped at $1.2M", "leave out Finance"…' : 'Start the interview to chat with the AI.'}
-              disabled=${!started || busy || phase === 'paused'}
+              aria-describedby=${runDone ? 'interview-done-line' : undefined}
+              placeholder=${runDone ? 'The run is done.' : started ? 'Tell the AI anything — "the budget is capped at $1.2M", "leave out Finance"…' : 'Start the interview to chat with the AI.'}
+              disabled=${!started || busy || phase === 'paused' || runDone}
               value=${chat}
               onInput=${(e) => setChat(e.currentTarget.value)}
               onKeyDown=${(e) => {
@@ -2580,7 +2630,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                 }
               }}
             ></textarea>
-            <button type="button" class="btn small" data-testid="interview-send" disabled=${!started || busy || phase === 'paused' || !chat.trim()} onClick=${sendChat}>Send</button>
+            <button type="button" class="btn small" data-testid="interview-send" disabled=${!started || busy || phase === 'paused' || runDone || !chat.trim()} onClick=${sendChat}>Send</button>
           </div>
         </div>
       </section>

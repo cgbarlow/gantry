@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { artefactRows, beginRun, chosenArtefacts, clearRun, getRun, interviewRuns, nextStage, planRows, resumableRun, resumedArtefacts, runArtefacts, runOpening, runTargets, saveOutcome, updateRun } from '../web/lib/interviewRun.js'
+import { artefactRows, beginRun, chosenArtefacts, clearRun, getRun, interviewRuns, nextStage, planRows, resumableRun, resumedArtefacts, runArtefacts, runIsDone, runOpening, runTargets, saveOutcome, updateRun } from '../web/lib/interviewRun.js'
 import { applyDecisionsDelta, emptyDecisionsLog, sessionStatus } from '../web/lib/decisionsLog.js'
 import { createInterviewSession } from '../web/lib/interviewSession.js'
 
@@ -204,6 +204,62 @@ test('#332 Resume the run keeps the Artefact the run chose for each Stage, unles
   const further = resumedArtefacts({ definition: { ...CHOICE_DEFINITION, artefacts: [...CHOICE_DEFINITION.artefacts, { id: 'last', gate: 'g4' }] }, stages, currentStageId: 'two', targetStageId: 'four', log, fromStageId: 'one' })
   assert.deepEqual(further, { one: 'brief', two: 'full', four: 'last' })
   assert.deepEqual(resumedArtefacts({ definition: CHOICE_DEFINITION, stages, currentStageId: 'two', targetStageId: 'two', log: null, fromStageId: 'one' }), { two: 'light' }, 'no log: the lightest')
+})
+
+// #355: the one rule for "the run is done" on the Interview page, which swaps Pause and Finish with your recommendations for Open in the
+// editor and Re-open <Stage>, and disables the chat box.
+const doneLog = (state, extra = {}) => ({ status: [{ session: 's-1', target: 'two', state, stages: { two: state }, ...extra }] })
+
+test('#355 a Save made on this page says whether the run is done: at its target, single-Stage runs included', () => {
+  // A run of one Stage: the start is its target, so the one Save finishes it.
+  const single = saveOutcome({ stages: STAGES, currentStageId: 'two', targetStageId: 'two', startStageId: 'two', action: 'stop' })
+  assert.equal(single.finished, true)
+  assert.equal(runIsDone({ stageId: 'two', saving: { phase: 'saved', finished: single.finished } }), true, 'a run of one Stage is done after its Save')
+  // A run to a later Stage, saved and stopped before it: paused, not done (Resume the run is the way on).
+  const before = saveOutcome({ stages: STAGES, currentStageId: 'two', targetStageId: 'three', startStageId: 'two', action: 'stop' })
+  assert.equal(runIsDone({ stageId: 'two', saving: { phase: 'saved', finished: before.finished } }), false)
+  // A remote Save at the target is done whether approval was asked for, queued behind an earlier Stage, or failed: the card's own actions stay.
+  for (const saved of [{ approval: 'requested' }, { approval: 'queued' }, { approval: null }, { approval: 'requested', approvalError: 'no' }]) {
+    assert.equal(runIsDone({ stageId: 'two', remote: true, saving: { phase: 'saved', finished: true, ...saved } }), true)
+  }
+  // Anything else this page is doing is not a done run: a Save going, a Pause, a Save that failed, moving on or drafting ahead.
+  for (const phase of ['saving', 'paused', 'error', 'advancing', 'drafting-ahead']) {
+    assert.equal(runIsDone({ stageId: 'two', saving: { phase }, log: doneLog('done') }), false, phase)
+  }
+})
+
+test('#355 with no Save on this page, the run in this tab says, else (at the kickoff, after a reload) the decisions log', () => {
+  // Back on the page in the same tab: the run this tab holds finished here.
+  assert.equal(runIsDone({ stageId: 'two', run: { phase: 'done', at: 'two' }, started: true }), true)
+  assert.equal(runIsDone({ stageId: 'two', run: { phase: 'running', at: 'two' }, started: true, log: doneLog('done') }), false, 'a new run on the Stage is going')
+  assert.equal(runIsDone({ stageId: 'two', run: { phase: 'paused', at: 'two' }, log: doneLog('done') }), false)
+  // A run carrying on into this Stage starts it, whatever an earlier run's log said.
+  assert.equal(runIsDone({ stageId: 'two', run: { phase: 'running', at: 'one', carryOn: 'two' }, log: doneLog('done') }), false)
+  // A reload: the tab holds no run, the page is at the kickoff, and the log's newest status line is the done one.
+  assert.equal(runIsDone({ stageId: 'two', log: doneLog('done') }), true)
+  assert.equal(runIsDone({ stageId: 'two', run: { phase: 'done', at: 'one' }, log: doneLog('done') }), true, "a run elsewhere in the tab doesn't change this Stage's")
+  for (const state of ['paused', 'saved', 'in-progress', 'awaiting-approval', 'approval-queued', 'head-start']) {
+    assert.equal(runIsDone({ stageId: 'two', log: doneLog(state) }), false, state)
+  }
+  assert.equal(runIsDone({ stageId: 'two', log: null }), false, 'a Stage never interviewed')
+  assert.equal(runIsDone({ stageId: 'two', log: { status: [...doneLog('done').status, { session: 's-2', state: 'paused', stages: { two: 'in-progress' } }] } }), false, 'a later session paused part-way')
+  // A session going without a run here, and a remote workspace, whose Provider (not the log) says where approval stands, do not read the log.
+  assert.equal(runIsDone({ stageId: 'two', started: true, log: doneLog('done') }), false)
+  assert.equal(runIsDone({ stageId: 'two', remote: true, log: doneLog('done') }), false)
+})
+
+test('#355 Re-open <Stage> ends the done state until the next Save finishes the run again', () => {
+  assert.equal(runIsDone({ stageId: 'two', reopened: true, log: doneLog('done') }), false)
+  assert.equal(runIsDone({ stageId: 'two', reopened: true, run: { phase: 'done', at: 'two' } }), false)
+  assert.equal(runIsDone({ stageId: 'two', reopened: true, saving: { phase: 'saved', finished: true } }), true, "the re-opened Stage's own Save at the target")
+})
+
+test("#355 the user guide's The AI interview section says what you can do when the run is done", () => {
+  const guide = readFileSync('docs/user-guide/index.md', 'utf8')
+  const section = guide.slice(guide.indexOf('## The AI interview'), guide.indexOf('## Settings'))
+  for (const phrase of ['**When the run is done.**', '**Open in the editor**', '**Re-open <Stage>**', 'Saved. The run is done.', 'paused, not done']) {
+    assert.ok(section.includes(phrase), `the guide's AI interview section says ${phrase}`)
+  }
 })
 
 test('the run held in the tab is replaced, changed and cleared by Instance', () => {
