@@ -7,7 +7,7 @@
 // #319 (docs/adr/0072): a citation of a code repository may carry the file and the commit it was read at after the id, as a query
 // (web/lib/sourceRepository.js): `[orders service](source:billing-api?path=src/orders.ts&commit=3f2a9c1…)`. Every other citation is unchanged.
 //
-// In the editor the link is clickable and opens the document (web/lib/markdownPreview.js). Word readers usually have no repo access, so the Word render makes it a real footnote reading "Client brief, p. 4", with no hyperlink (#351, sourceCitationsForWord below). The exported `.md` keeps the link as written, as it keeps a diagram caption's syntax. Only a link is a citation: an image (`![…](source:…)`) is not, and neither is anything inside a code span or a fenced code block.
+// In the editor the link is clickable and opens the document (web/lib/markdownPreview.js). Word readers usually have no repo access, so the Word render makes it a real footnote reading "Client brief, p. 4", with no hyperlink (#351, sourceCitationsForWord below), and a later citation of the same reference shows that footnote's number (#353). The exported `.md` keeps the link as written, as it keeps a diagram caption's syntax. Only a link is a citation: an image (`![…](source:…)`) is not, and neither is anything inside a code span or a fenced code block.
 //
 // An Artefact whose Definition sets `source-appendix: true` ends with a Sources list of the documents it cites: each with its title, original filename and upload date (or, #318, for a page fetched from a web address, its address and "retrieved <date>"). A removed document is still listed, marked removed. With the key off (its default) there is no list.
 //
@@ -19,11 +19,20 @@ import { isRepositorySource, normalizeSourceRepository, parseSourceAddress, repo
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/
 
-// Either a code span (kept as it is) or a citation. A code span's backtick run is matched with its own length, so ``a `b` c`` is one span. The link text may hold backslash escapes (`\]`) and may not span a line.
+// A code span as Pandoc reads one: a run of backticks closed by the next run of exactly as many, so ``a `b` c`` is one span.
+// #353: as in Pandoc, a span ends with its paragraph (a blank line), and a run with no run to close it is matched alone, being
+// the backticks Pandoc prints as they are, so what comes after it is read on (one stray backtick in "Don`t" is no span).
+const CODE_SPAN = String.raw`(\`+)(?:(?:[^\`\n]|\n(?![ \t]*\n)|\`+(?!\`))*?(?<!\`)\1(?!\`))?`
+
+// Either a code span or a stray run of backticks (group 1; kept as they are), an escaped character (kept as it is), or a
+// citation. The link text may hold backslash escapes (`\]`) and may not span a line.
 // #319: the id may be followed by `?path=…&commit=…` (a repository's file and commit).
 // #351: a `[` in the text must be escaped or closed within it (`[see [x]](source:a)`), as in Pandoc, so a bracket of the writer's
 // before a citation, `[[a](source:a); [b](source:b)]`, is not taken for part of its text.
-const CITATION_OR_CODE = /(`+)(?:(?!\1)[\s\S])*?\1(?!`)|(?<!!)\[((?:[^[\]\\\n]|\\.|\[(?:[^[\]\\\n]|\\.)*\])*)\]\(source:([A-Za-z0-9][A-Za-z0-9_-]*)((?:\?[^\s)]*)?)\)/g
+const CITATION_OR_CODE = new RegExp(
+  CODE_SPAN + String.raw`|\\[\s\S]|(?<!!)\[((?:[^[\]\\\n]|\\.|\[(?:[^[\]\\\n]|\\.)*\])*)\]\(source:([A-Za-z0-9][A-Za-z0-9_-]*)((?:\?[^\s)]*)?)\)`,
+  'g'
+)
 
 /** Runs `change(segment)` over the parts of `markdown` that are not fenced code blocks, and leaves the fenced blocks alone. */
 function mapOutsideFences(markdown, change) {
@@ -63,7 +72,7 @@ const locationOf = (id, query) => {
 
 function replaceCitations(markdown, replace) {
   return mapOutsideFences(markdown, (segment) =>
-    segment.replace(CITATION_OR_CODE, (match, tick, text, id, query) => (tick ? match : replace({ match, text, id, ...locationOf(id, query) })))
+    segment.replace(CITATION_OR_CODE, (match, tick, text, id, query) => (id === undefined ? match : replace({ match, text, id, ...locationOf(id, query) })))
   )
 }
 
@@ -122,6 +131,41 @@ const escapeCarets = (text) => text.replace(/\\[\s\S]|\^/g, (m) => (m === '^' ? 
 // An unescaped `^`: with no whitespace between it and a note's `^`, Pandoc 2 reads the two as a superscript.
 const CARET = /(?<!\\)\^/
 
+// #353: one footnote per reference. A citation whose footnote would read exactly as an earlier one's (the same words, after
+// the fallback on the document's title, and for a repository the same file and commit) makes no footnote of its own: it
+// prints that footnote's number, as Word's Insert Cross-reference does, a NOTEREF field to a bookmark around the first
+// footnote's mark. `\f` gives it the Footnote Reference style, and `\h` makes it a link to the footnote. The field carries
+// the number as its shown result (numberCitationCrossReferences below), so it is right when the document opens, with no
+// update of fields, and Word keeps it right when it renumbers. The ids are clear of Pandoc's own, the table of contents'
+// (1000000 on) and the Field tags' (2000000 on, lib/wordFieldTags.js). A reference cited once is the plain note it was.
+//
+// Each is a raw inline between two backticks on either side: Pandoc closes a run of backticks with the next run of exactly as
+// many, so a stray single backtick of the author's earlier in the paragraph ("Don`t") is not closed by one of these, and
+// prints as it is. Two at the start of a line are no code fence, which takes three.
+const CITATION_BOOKMARK_ID_BASE = 3000000
+const citationBookmarkName = (n) => `_RefCitation${n}`
+const bookmarkedNote = (n, words) =>
+  '``<w:bookmarkStart w:id="' + (CITATION_BOOKMARK_ID_BASE + n) + '" w:name="' + citationBookmarkName(n) + '"/>``{=openxml}' +
+  `^[${words}]` +
+  '``<w:bookmarkEnd w:id="' + (CITATION_BOOKMARK_ID_BASE + n) + '"/>``{=openxml}'
+const FOOTNOTE_REFERENCE_RUN_PROPERTIES = '<w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr>'
+const noteCrossReference = (n, shown = '') =>
+  '``' +
+  `<w:r>${FOOTNOTE_REFERENCE_RUN_PROPERTIES}<w:fldChar w:fldCharType="begin"/></w:r>` +
+  `<w:r>${FOOTNOTE_REFERENCE_RUN_PROPERTIES}<w:instrText xml:space="preserve"> NOTEREF ${citationBookmarkName(n)} \\f \\h </w:instrText></w:r>` +
+  `<w:r>${FOOTNOTE_REFERENCE_RUN_PROPERTIES}<w:fldChar w:fldCharType="separate"/></w:r>` +
+  `<w:r>${FOOTNOTE_REFERENCE_RUN_PROPERTIES}<w:t>${shown}</w:t></w:r>` +
+  `<w:r>${FOOTNOTE_REFERENCE_RUN_PROPERTIES}<w:fldChar w:fldCharType="end"/></w:r>` +
+  '``{=openxml}'
+const CITATION_BOOKMARK = /^``<w:bookmarkStart w:id="\d+" w:name="(_RefCitation\d+)"\/>``$/
+const NOTE_CROSS_REFERENCE = /^``<w:r>[^`]*?<w:instrText xml:space="preserve"> NOTEREF (_RefCitation\d+) \\f \\h <\/w:instrText>[^`]*?<w:t>(\d*)<\/w:t>[^`]*``$/
+// Any raw OpenXML inline: a bookmark (the first footnote's, or a Field tag's, which has one backtick a side) or a cross-reference.
+const RAW_INLINE = /(`{1,2})<w:[^`]*\1\{=openxml\}/g
+const LEADING_BOOKMARKS = /^(?:(`{1,2})<w:bookmarkStart [^`]*\1\{=openxml\})*/
+// `text` as Pandoc 2's superscript sees it, character for character: a raw inline is one unbroken piece (the spaces in its
+// XML are no break), and a cross-reference opens like a note, so one is kept apart from a `^` beside it as a note is.
+const asPandocSees = (text) => text.replace(RAW_INLINE, (raw) => (NOTE_CROSS_REFERENCE.test(raw.slice(0, -'{=openxml}'.length)) ? '^' + '_'.repeat(raw.length - 1) : raw.replace(/\s/g, '_')))
+
 /** The run of non-whitespace characters `text` ends with. */
 function trailingWord(text) {
   let i = text.length
@@ -137,17 +181,20 @@ function inPipeTable(segment, pos) {
   return block.split('\n').some((line) => line.includes('|') && TABLE_DELIMITER_ROW.test(line))
 }
 
-function wordCitations(segment, titleFor) {
+// `noteFor(words, inNote)` writes the note for a citation in running text whose footnote reads `words` (#353: a note, a
+// bookmarked note, or a cross-reference to one), `inNote` saying it sits in a footnote of the author's own.
+function wordCitations(segment, titleFor, noteFor) {
   const lineStartOf = (pos) => segment.lastIndexOf('\n', pos - 1) + 1
   const lineEndOf = (pos) => (segment.indexOf('\n', pos) < 0 ? segment.length : segment.indexOf('\n', pos))
+  const { inNote } = scanNotes(segment)
   const citations = []
   for (const m of segment.matchAll(CITATION_OR_CODE)) {
-    if (m[1]) continue
+    if (m[3] === undefined) continue
     const start = m.index
     const lineStart = lineStartOf(start)
     const prefix = segment.slice(lineStart, start).replace(RAW_BOOKMARK, '')
     const plain = HEADING.test(segment.slice(lineStart, lineEndOf(start))) || LIST_ITEM_LABEL.test(prefix) || (CELL_LABEL.test(prefix) && inPipeTable(segment, start))
-    citations.push({ start, end: start + m[0].length, text: m[2], id: m[3], ...locationOf(m[3], m[4]), plain })
+    citations.push({ start, end: start + m[0].length, text: m[2], id: m[3], ...locationOf(m[3], m[4]), plain, inNote: inNote(start) })
   }
   if (!citations.length) return segment
 
@@ -159,7 +206,7 @@ function wordCitations(segment, titleFor) {
     // The words Copy citation writes for a repository already name the file, so it isn't said twice.
     if (c.path && !(c.text.trim() ? unescapeText(c.text.trim()) : titleOf(c)).includes(c.path)) text += `, ${escapeNote(c.path)}`
     if (c.commit) text += `, at commit ${escapeNote(shortCommit(c.commit))}`
-    return `^[${text}]`
+    return noteFor(text, c.inNote)
   }
 
   // Runs of notes with nothing but separators between them: each run may be all that a bracket holds.
@@ -186,13 +233,22 @@ function wordCitations(segment, titleFor) {
     let gap = segment.slice(at, from)
     const kept = gap.replace(/[ \t]+$/, '')
     if (isNote && kept !== gap && !BLOCK_START.test(segment.slice(lineStartOf(from), from - (gap.length - kept.length)).replace(RAW_BOOKMARK, ''))) gap = kept
+    // #353: a first footnote's bookmark and a cross-reference are raw OpenXML, read here as Pandoc 2 reads them
+    // (asPandocSees); a note's own `^` comes after the bookmark it opens with, and its space goes before the bookmark.
     if (afterNote) {
-      const caret = /^\S*/.exec(gap + text)[0].search(CARET)
-      if (caret >= 0 && caret <= gap.length) gap = `${gap.slice(0, caret)} ${gap.slice(caret)}`
+      const caret = /^\S*/.exec(asPandocSees(gap + text))[0].search(CARET)
+      if (caret >= 0 && caret <= gap.length + LEADING_BOOKMARKS.exec(text)[0].length) {
+        const at = Math.min(caret, gap.length)
+        gap = `${gap.slice(0, at)} ${gap.slice(at)}`
+      }
     }
     if (isNote) {
-      const before = /\s/.test(gap) ? /\S*$/.exec(gap)[0] : trailingWord(out) + gap
+      const seen = asPandocSees(gap)
+      const before = /\s/.test(seen) ? /\S*$/.exec(seen)[0] : trailingWord(asPandocSees(out)) + seen
       if (CARET.test(before) || /(?<!\\)\[$/.test(before)) gap += ' '
+      // #353: a bookmark or a cross-reference straight after a code span would make its closing backtick and the raw inline's
+      // opening one a single run, which Pandoc reads as another delimiter; an empty Span between them prints nothing.
+      if (text.startsWith('`') && (out + gap).endsWith('`')) gap += '[]{}'
     }
     out += gap + text
     at = to
@@ -223,9 +279,143 @@ function wordCitations(segment, titleFor) {
  * The text the Word document prints for the citations in `markdown` (#351): a Pandoc inline note, `^[words]`, for each one in
  * running text, and the plain words for one that labels a list item or a table cell, or sits in a heading. An empty link text
  * falls back on `titleFor(id)` (the document's title), then on the id. `markdown` is returned unchanged where it holds no citation.
+ *
+ * #353: `markdown` is the whole Word document's text, so a reference is footnoted once in it. The first citation of a reference
+ * cited more than once in running text is a note with a bookmark around its mark, and every later one a cross-reference to it
+ * showing its number. A citation printed as plain words (a label, a heading) starts no footnote. Nor does one in a footnote of
+ * the author's own: Pandoc drops a note inside a note, so the footnote is where the reference is next cited outside one, and
+ * the citation in the author's footnote shows its number. A reference cited only in the author's footnotes is the note it was.
  */
 export function sourceCitationsForWord(markdown, titleFor) {
-  return mapOutsideFences(markdown, (segment) => wordCitations(segment, titleFor))
+  const times = new Map()
+  const firstInText = []
+  const once = mapOutsideFences(markdown, (segment) =>
+    wordCitations(segment, titleFor, (words, inNote) => {
+      times.set(words, (times.get(words) ?? 0) + 1)
+      if (!inNote && !firstInText.includes(words)) firstInText.push(words)
+      return `^[${words}]`
+    })
+  )
+  const bookmarkOf = new Map(firstInText.filter((words) => times.get(words) > 1).map((words, i) => [words, i + 1]))
+  if (!bookmarkOf.size) return once
+  const footnoted = new Set()
+  const word = mapOutsideFences(markdown, (segment) =>
+    wordCitations(segment, titleFor, (words, inNote) => {
+      const n = bookmarkOf.get(words)
+      if (n === undefined) return `^[${words}]`
+      if (inNote || footnoted.has(words)) return noteCrossReference(n)
+      footnoted.add(words)
+      return bookmarkedNote(n, words)
+    })
+  )
+  return numberCitationCrossReferences(word)
+}
+
+// What Pandoc reads around a footnote (#353), each matched whole so that a `^[` or a bracket in it isn't taken for one of its
+// own: a code span or a stray run of backticks (group 1; our bookmarks and cross-references among the spans), an HTML comment,
+// an escaped character, display and inline math, a raw HTML tag or an autolink, a link's address (from its text's closing
+// `]`), a note's definition (`[^label]:` at the start of a line), an inline note's `^[`, a reference to a note by its label
+// (group 2), a bracket, and a blank line, which ends a paragraph and any note in it. An indented code block is read as text:
+// a list item's indented paragraphs look the same, and those are far more common.
+const NOTE_TOKEN = new RegExp(
+  [
+    CODE_SPAN,
+    String.raw`<!--[\s\S]*?-->`,
+    String.raw`\\[\s\S]`,
+    String.raw`\$\$[\s\S]*?\$\$`,
+    String.raw`\$(?![\s$])(?:[^$\\\n]|\\.|\n(?![ \t]*\n))*?(?<![\s\\])\$(?!\d)`,
+    String.raw`<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>`,
+    String.raw`<[A-Za-z][A-Za-z0-9+.-]*:[^\s<>]*>`,
+    String.raw`\]\([^\s)]*`,
+    String.raw`^[ \t]{0,3}\[\^[^\]\s]+\]:`,
+    String.raw`\^\[`,
+    String.raw`\[\^([^\]\s]+)\]`,
+    String.raw`[[\]]`,
+    String.raw`\n[ \t]*\n`,
+  ].join('|'),
+  'gm'
+)
+const NOTE_DEFINITION = /^[ \t]{0,3}\[\^([^\]\s]+)\]:/gm
+
+/**
+ * #353: the footnotes Pandoc reads in `segment` (text between fenced blocks). `tokens` are, in order, each `^[` that opens an
+ * inline note (`{ kind: 'note', at }`), each reference by label (`{ kind: 'label', at, label }`) and each raw OpenXML inline
+ * (`{ kind: 'raw', at, match }`, the code span without its `{=openxml}`). `inNote(at)` says whether `at` is inside a footnote
+ * of the author's own: an inline note, `^[…]` closed in its paragraph, or a note's definition, up to its paragraph's end.
+ */
+function scanNotes(segment) {
+  const tokens = []
+  const notes = []
+  let depth = 0
+  let open = []
+  let definition = -1
+  const endParagraph = (at) => {
+    if (definition >= 0) notes.push({ start: definition, end: at })
+    depth = 0
+    open = []
+    definition = -1
+  }
+  for (const m of segment.matchAll(NOTE_TOKEN)) {
+    const [match, tick, label] = m
+    const at = m.index
+    if (tick !== undefined) {
+      if (segment.startsWith('{=openxml}', at + match.length)) tokens.push({ kind: 'raw', at, match })
+    } else if (match[0] === '\n') endParagraph(at)
+    else if (match === '^[') {
+      tokens.push({ kind: 'note', at })
+      open.push({ at, depth: ++depth })
+    } else if (label !== undefined) tokens.push({ kind: 'label', at, label })
+    else if (match === '[') depth++
+    else if (match[0] === ']') {
+      if (open.at(-1)?.depth === depth) notes.push({ start: open.pop().at, end: at + 1, inline: true })
+      if (depth) depth--
+    } else if (/^[ \t]*\[\^/.test(match)) definition = at
+  }
+  endParagraph(segment.length)
+  const inNote = (at) => notes.some((n) => n.start < at && at < n.end)
+  // A `^[` Pandoc makes no note of: never closed, or inside another note, which Pandoc drops.
+  const opensNote = (at) => notes.some((n) => n.inline && n.start === at) && !inNote(at)
+  return { tokens, inNote, opensNote }
+}
+
+/**
+ * #353: `markdown` (the Word document's whole text, as Pandoc converts it) with each citation cross-reference's shown number
+ * filled in: the number Word gives the footnote its bookmark holds, counting every footnote before it, the author's own
+ * (`^[…]`, `[^1]`) among them, and nothing that only looks like one (scanNotes). Run once more on the finished text
+ * (lib/render.js), so a footnote in what goes in front of the Fields counts too. `markdown` is returned unchanged where it
+ * holds no cross-reference.
+ */
+export function numberCitationCrossReferences(markdown) {
+  const text = String(markdown ?? '')
+  if (!text.includes(' NOTEREF _RefCitation')) return text
+  const defined = new Set()
+  mapOutsideFences(text, (segment) => {
+    for (const m of segment.matchAll(NOTE_DEFINITION)) defined.add(m[1])
+    return segment
+  })
+  // Every bookmark's number first, so a cross-reference in a footnote of the author's own may point on to a later one.
+  let footnotes = 0
+  const numbers = new Map()
+  mapOutsideFences(text, (segment) => {
+    const { tokens, inNote, opensNote } = scanNotes(segment)
+    for (const t of tokens) {
+      if (t.kind === 'note' ? opensNote(t.at) : t.kind === 'label' && defined.has(t.label) && !inNote(t.at)) footnotes++
+      const bookmark = t.kind === 'raw' && CITATION_BOOKMARK.exec(t.match)
+      if (bookmark) numbers.set(bookmark[1], footnotes + 1)
+    }
+    return segment
+  })
+  return mapOutsideFences(text, (segment) => {
+    let out = ''
+    let from = 0
+    for (const t of scanNotes(segment).tokens) {
+      const reference = t.kind === 'raw' && NOTE_CROSS_REFERENCE.exec(t.match)
+      if (!reference) continue
+      out += segment.slice(from, t.at) + t.match.replace(/<w:t>\d*<\/w:t>/, `<w:t>${numbers.get(reference[1]) ?? ''}</w:t>`)
+      from = t.at + t.match.length
+    }
+    return out + segment.slice(from)
+  })
 }
 
 /** The citation to paste into a field for a document: `[Client brief](source:client-brief)`. #319: for a repository, `at` (`{ path, commit }`) names the file and the commit it was read at, and the file is the link's text. */
