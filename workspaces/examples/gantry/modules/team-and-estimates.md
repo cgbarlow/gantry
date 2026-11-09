@@ -21,11 +21,3 @@ owner: c.barlow
 | Workspaces, pilot and cutover | S | The pilot's length is set by the practice's confidence |
 
 Four Smalls: indicatively three to five weeks for UAT and three to four more for Production, driven by team availability. No dollar figures at SOAP level.
-
-## References
-
-- README.md, "Deploying to a server (UAT / production)"
-- `azure-pipelines.release.yml`, `azure-pipelines.yml` and `ContainerFile`: how the image is built, tested and published
-- docs/adr/0005, docs/adr/0010 and docs/adr/0029: why instance data lives in Azure DevOps workspace repositories
-- Azure Container Apps documentation: ingress, storage mounts, scaling, revisions, health probes and monitoring
-- Azure DevOps work items #354 (this initiative) and #353 (Mermaid rendering)

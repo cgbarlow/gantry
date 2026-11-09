@@ -8,6 +8,7 @@ import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { docxPart } from './helpers/wordDocx.js'
 import { pngImage } from './helpers/logoImages.js'
+import { designV3Examples } from './helpers/designExamples.js'
 
 // #222 (docs/adr/0059): the Definitions page's Logo control. On a draft it shows the header logo of
 // the Definition's reference documents with Download and Replace; Replace writes a new PNG or JPEG
@@ -66,8 +67,9 @@ test('Definitions page: a draft shows the Contoso logo, Replace writes a new one
     // scratch copy turns it back into the draft the Replace control is for; v2 stays the published one.
     const v3Yaml = join(definitionsDir, 'design', '3', 'definition.yaml')
     writeFileSync(v3Yaml, readFileSync(v3Yaml, 'utf8').replace(/^status: published$/m, 'status: draft'))
-    // The bundled design v3 example, at Detailed Design so its SAD can be rendered.
-    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    // The bundled design example as it was on v3 (it is on v4 since #359), at Detailed Design so its
+    // SAD can be rendered.
+    cpSync(join(designV3Examples(), 'kiwi-cover-mutual'), join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     const instanceYaml = join(instancesDir, 'examples', 'instance.yaml')
     writeFileSync(instanceYaml, readFileSync(instanceYaml, 'utf8').replace(/^stage: .*$/m, 'stage: detailed-design'))

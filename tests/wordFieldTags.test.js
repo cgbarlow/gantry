@@ -186,7 +186,8 @@ test('a Word render has a bookmark for every printed Field and nothing is lost f
       const tagged = renderArtefact('e', artefactId, { dryRun: true, instancesDir })
       const untagged = renderArtefact('e', artefactId, { dryRun: true, instancesDir, wordTags: false })
       const names = [...tagged.docxMarkdown.matchAll(/gf_[0-9a-f]{8}(?:_\d+)?/g)].map((m) => m[0])
-      assert.ok(names.length >= 10, `${artefactId} has ${names.length} Field bookmarks`)
+      // The example is on design v4 (#359), whose SOAP prints nine Fields now that References is gone.
+      assert.ok(names.length >= 9, `${artefactId} has ${names.length} Field bookmarks`)
 
       const taggedPath = join(instancesDir, `${artefactId}-tagged.docx`)
       const untaggedPath = join(instancesDir, `${artefactId}-untagged.docx`)
@@ -223,7 +224,7 @@ test('a native Word render writes the gantry-* properties, and every render has 
     assert.equal(property('instance'), 'e')
     assert.equal(property('artefact'), 'soap')
     assert.equal(property('stage'), 'shape')
-    assert.equal(property('definition'), 'design@3')
+    assert.equal(property('definition'), 'design@4') // the version the example is pinned to (#359)
     assert.equal(property('commit'), 'abc1234def5678abc1234def5678abc1234def5')
     assert.equal(property('render-id'), idOf(first.docxMarkdown))
     assert.notEqual(property('render-id'), property('instance'))
@@ -269,7 +270,7 @@ test('a template the tagging can not compile still renders, with the properties 
   withExample('gantry', (instancesDir) => {
     // `<%~ x; y %>` is a fine statement for the plain engine but not a value for the tagged one.
     cpSync('definitions', join(instancesDir, 'definitions'), { recursive: true })
-    const templatePath = join(instancesDir, 'definitions', 'design', '3', 'templates', 'soap.md.tmpl')
+    const templatePath = join(instancesDir, 'definitions', 'design', '4', 'templates', 'soap.md.tmpl') // the example's version (#359)
     writeFileSync(templatePath, readFileSync(templatePath, 'utf8') + '\n<% const q = 1 %><%~ q; q %>\n')
     const result = renderArtefact('e', 'soap', { dryRun: true, instancesDir, definitionsDir: join(instancesDir, 'definitions') })
     assert.doesNotMatch(result.docxMarkdown, /gf_[0-9a-f]{8}/)

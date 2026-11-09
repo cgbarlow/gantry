@@ -1,0 +1,162 @@
+<%
+  /* Intentional consolidation (WI #269, carried into WI #318 / design v2): this
+     template deliberately abstracts the reference SSAD's product-scattered
+     Solution Overview deep-dive into a small set of generic support-architecture
+     modules/fields — it is NOT a 1:1 heading map to the reference, and that is
+     by design. See docs/research/design-definition-reference-reconciliation.md
+     §6 and §9, grounded in docs/reconciliation/ssad-reconciliation.md.
+     #213 (ADR-0057): the SSAD follows the SAD's reading order and heading names
+     rather than the FV Help Tool SSAD reference's. Every chapter up to
+     "# Technology architecture" is the SAD's, in the SAD's order, with only the
+     fields the SSAD renders; the support-team material then stays together
+     under one "# Support and operations" chapter. A field both documents render
+     takes the SAD's heading ("Logical components view", "Backup and archiving
+     policy"), except "Stakeholders and support contacts", which keeps its
+     support-facing name — see definition.yaml's `ssad.requires` comment.
+     Blank-field guard `na()` is injected once as an Eta functionHeader by
+     lib/render.js (WI #273 / R2). A `module.field?` requires entry is in scope
+     but not gate-blocking (WI #276), so it renders as a suppress-when-blank
+     `<% if %>` section; every other field here is bare (gate-blocking) and
+     rendered via na(). #214: the Overview chapter carries
+     `introduction.overview`, and a "# Design basis" chapter follows it when
+     `assumptions` or `constraints` is filled, inlined as in the SAD rather than
+     via `_designBasisOptional.md.tmpl` (the SSAD's scope is those two fields,
+     not the partial's five). */
+  const dsc = it.modules['data-security-controls'] || {}
+%>
+# Overview
+<% if (it.modules.introduction['executive-summary']) { %>
+## Executive summary
+
+<%~ it.modules.introduction['executive-summary'] %>
+<% } %>
+## Overview
+
+<%~ na(it.modules.introduction.overview) %>
+
+## Purpose
+
+<%~ na(it.modules.introduction.purpose) %>
+
+## In scope
+
+<%~ na(it.modules.introduction['in-scope']) %>
+
+## Out of scope
+
+<%~ na(it.modules.introduction['out-of-scope']) %>
+<% if (it.modules.introduction['content-standards']) { %>
+## Content standards
+
+<%~ it.modules.introduction['content-standards'] %>
+<% } %>
+<% if (it.modules['design-basis'].assumptions || it.modules['design-basis'].constraints) { %>
+
+# Design basis
+<% if (it.modules['design-basis'].assumptions) { %>
+## Assumptions
+
+<%~ it.modules['design-basis'].assumptions %>
+<% } %>
+<% if (it.modules['design-basis'].constraints) { %>
+## Constraints
+
+<%~ it.modules['design-basis'].constraints %>
+<% } %>
+<% } %>
+
+# Business architecture
+
+## Stakeholders and support contacts
+
+<% it.modules['support-and-operations'].stakeholders.forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+# Solution overview
+
+## Solution description
+
+<%~ na(it.modules.architecture['solution-description']) %>
+
+## Dependency list
+
+<% it.modules.dependencies['dependency-list'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## Architectural risks
+
+<%~ na(it.modules.architecture['architectural-risks']) %>
+
+# Open issues
+
+<%~ na(it.modules.risks['open-issues']) %>
+
+# Risks
+
+## Risk register
+
+<%~ na(it.modules.risks['risk-register']) %>
+
+# Logical components view
+
+<% it.modules.architecture['logical-components'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+# Technology architecture
+
+## Interfaces
+
+<%~ na(it.modules.integration.interfaces) %>
+
+# Support and operations
+
+## Environments, URLs and domains
+
+<% it.modules['support-and-operations']['environments-and-domains'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## Data classification
+
+<%~ na(it.modules.data['data-classification']) %>
+
+## Backup and archiving policy
+
+<%~ na(it.modules.nfrs['disaster-recovery-and-backup']) %>
+
+## Scalability and capacity
+
+<%~ na(it.modules.nfrs['scalability-and-capacity']) %>
+
+## Availability and continuity
+
+<%~ na(it.modules.nfrs['availability-and-continuity']) %>
+
+## Identity and access management
+
+<%~ na(it.modules.security['identity-and-access']) %>
+
+## Privacy and confidentiality concerns
+
+<%~ na(it.modules.security['privacy-and-confidentiality']) %>
+<%~ include('templates/_dataSecurityControls.md.tmpl', { dsc }) %>
+
+## Operational accounts and licences
+
+<% it.modules['support-and-operations']['operational-accounts-and-licenses'].forEach(function(item) { %>- <%~ item %>
+<% }) %>
+
+## Monitoring and alerting
+
+<%~ na(it.modules['support-and-operations']['monitoring-and-alerting']) %>
+
+## Release procedures
+
+<%~ na(it.modules['support-and-operations']['release-procedures']) %>
+
+## Operational readiness
+
+<%~ na(it.modules['support-and-operations']['support-handover-readiness']) %>
+
+# Glossary
+
+<%~ na(it.modules.glossary.terms) %>

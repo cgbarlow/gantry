@@ -1,0 +1,99 @@
+# CHANGED v2: the `questions` field is removed. The JEDI Full SOAP reference's
+# "Questions" section and the TAC HLD reference's "Open questions" section are
+# the same idea at two stages, and keeping two fields meant the same unresolved
+# question was typed twice. `open-questions` is now mounted from the `shape`
+# stage and the `soap-full` artefact references `open-questions.questions`, so a
+# question raised at SOAP carries into the HLD unchanged.
+#
+# `caveats` is kept distinct from `design-basis.caveats` (WI #331: was
+# `introduction.caveats`), and v2 verified that the two carry genuinely
+# different content rather than the same idea twice. Every one of the
+# reference Full SOAP's eight caveats qualifies the *estimate* ("the actual
+# effort will differ once the IT requirements are elaborated", "cost is based
+# on full AST team allocation"); the approved ATLAS design's Caveats section
+# instead states a fact about the *solution* ("expected to be a short-lived
+# workload, with an expected life span of up to 24 months"). Both fields stay.
+# `design-basis.caveats` is no longer scoped into `soap-full`, so only one
+# "Caveats" section renders there.
+
+id: soap-full-details
+title: Full SOAP Details
+purpose: >
+  Provide the supporting details that complete the fuller summary — dates, sequencing
+  and estimate caveats — without repeating content held elsewhere.
+
+fields:
+  - id: epic-project
+    title: Epic/Project
+    type: markdown
+    target-words: { small: 3, medium: 5, large: 10 }
+    required: false
+    guidance: >
+      Name or identifier of the Epic or project this SOAP and estimate belong
+      to.
+
+  - id: requested-lead-by
+    title: Requested/lead by
+    type: markdown
+    target-words: { small: 5, medium: 10, large: 20 }
+    required: false
+    guidance: >
+      The person or group that requested the work and, where known, the lead
+      accountable for shaping it.
+
+  - id: request-date
+    title: Request date
+    type: markdown
+    target-words: { small: 3, medium: 5, large: 10 }
+    required: false
+    guidance: >
+      The date the SOAP or estimate was requested. Use the date format your
+      organisation uses consistently.
+
+  - id: draft-agreed-date
+    title: Draft agreed date
+    type: markdown
+    target-words: { small: 5, medium: 10, large: 20 }
+    required: false
+    guidance: >
+      The date the draft SOAP or estimate was agreed for circulation or
+      review.
+
+  - id: delivered-date
+    title: SOAP/estimate delivered date
+    type: markdown
+    target-words: { small: 3, medium: 5, large: 10 }
+    required: false
+    guidance: >
+      The date the SOAP or estimate was delivered to its intended audience.
+
+  - id: sequencing
+    title: Sequencing
+    type: markdown
+    target-words: { small: 50, medium: 100, large: 170 }
+    required: false
+    guidance: >
+      A possible sequence based on the estimates, not a commitment of team
+      capacity. Use a markdown table with exactly `Requirement`, `Team`,
+      `Estimate`, and `Notes` columns.
+
+      Lay out each diagram in this order: one introductory sentence ("The
+      following diagram presents…"), the diagram, its caption (an image's alt
+      text, or `{caption="…"}` on a Mermaid fence), a paragraph interpreting it
+      ("The diagram shows how…"), then the detail, e.g. goals and then layered
+      controls as bullets. A diagram or section that isn't the enduring design
+      names its state — `current`, `interim`, `target` or `enduring` — in its
+      caption and its opening sentence, e.g. `Diagram 3. Publishing flow (interim)`.
+
+  - id: caveats
+    title: Caveats
+    type: markdown
+    target-words: { small: 50, medium: 130, large: 260 }
+    required: false
+    guidance: >
+      The standing caveats that qualify a high-level estimate — what the
+      figures do and do not account for. Defaults to the JEDI Full SOAP
+      template's eight caveat bullets; edit only if an initiative needs to
+      add or vary one. Qualifications about the design rather than the
+      estimate belong in `design-basis.caveats`, which carries forward to the
+      SAD and as-built.

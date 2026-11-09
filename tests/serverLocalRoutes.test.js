@@ -31,10 +31,10 @@ function payloadFromDiskInstance(slug = DISK_INSTANCE) {
   for (const file of readdirSync(join(dir, 'modules'))) {
     if (!file.endsWith('.md')) continue
     // Image references are stripped: a local-workspace payload carries no asset manifest (see helpers/fixtureModules.js).
-    moduleFiles[file.replace(/\.md$/, '')] = exampleModuleText(file.replace(/\.md$/, ''), { definitionVersion: 3 })
+    moduleFiles[file.replace(/\.md$/, '')] = exampleModuleText(file.replace(/\.md$/, ''), { definitionVersion: 4 })
   }
-  // The on-disk fixture is pinned to design v3 (#193; v2 before that, WI #348); the payload must say so or the local routes would evaluate it against another version.
-  return { definitionId: 'design', definitionVersion: 3, instanceYaml, moduleFiles }
+  // The on-disk fixture is pinned to design v4 (#359; v3 from #193, v2 before that, WI #348); the payload must say so or the local routes would evaluate it against another version.
+  return { definitionId: 'design', definitionVersion: 4, instanceYaml, moduleFiles }
 }
 
 function tmpSandboxes() {

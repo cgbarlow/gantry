@@ -11,13 +11,16 @@ import { checkGate } from '../lib/check.js'
 import { findLocalDefinitionProblems } from '../web/lib/localStatus.js'
 import { STANDARD_MODULES } from '../web/lib/standardModules.js'
 import { removeCitations } from './helpers/uncite.js'
+import { designV3Examples } from './helpers/designExamples.js'
 
 // #308 (v0.13.0, #258, #252): design v3 is published with Gantry's Glossary, Open questions and Key
 // decisions standard modules (ADR-0065), its own Interview instructions (ADR-0062) and the Sources
 // appendix (#281). The Key decisions' content and rendering is pinned in tests/designV3.test.js beside
 // the other v3 conventions; this file pins the mounts, the Interview instructions and the appendix.
 
-const EXAMPLES_DIR = 'workspaces/examples'
+// #359: the bundled examples moved on to design v4, which drops References. These tests pin v3, so
+// they read a copy of the examples as they were on v3: pinned to it, References and all.
+const EXAMPLES_DIR = designV3Examples()
 const EXAMPLE = 'kiwi-cover-mutual'
 const v3 = () => loadDefinition('design', { version: 3 })
 
@@ -100,10 +103,11 @@ describe('design v3 has its own Interview instructions', () => {
 })
 
 describe('design v3 and the older versions', () => {
-  test('v3 is the default for a new design Instance, and an Instance on v2 reads it as v2 with its tables and no standard modules', () => {
+  // v3 was the default for a new design Instance until v4 was published (#359, tests/designV4.test.js).
+  test('an Instance created on v3 stays on v3, and an Instance on v2 reads it as v2 with its tables and no standard modules', () => {
     const dir = mkdtempSync(join(tmpdir(), 'gantry-design-308-'))
     try {
-      createInstance('design', 'fresh', { instancesDir: dir })
+      createInstance('design', 'fresh', { instancesDir: dir, definitionVersion: 3 })
       assert.equal(readInstance('fresh', { instancesDir: dir }).definitionVersion, 3)
       createInstance('design', 'older', { instancesDir: dir, definitionVersion: 2 })
       assert.equal(readInstance('older', { instancesDir: dir }).definitionVersion, 2)

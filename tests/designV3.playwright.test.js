@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
+import { designV3Examples } from './helpers/designExamples.js'
 
 // #308: design v3 in the browser. The Definitions page shows it as published, with Glossary, Open questions and
 // Key decisions marked Gantry-provided (Key decisions with the AD prefix and the WH(Y) style), its Interview
@@ -33,7 +34,8 @@ async function withV3Server(fn) {
     const definitionsDir = join(root, 'definitions')
     const instancesDir = join(root, 'instances')
     cpSync('definitions/design/3', join(definitionsDir, 'design', '3'), { recursive: true })
-    cpSync('workspaces/examples', join(instancesDir, 'examples'), { recursive: true })
+    // #359: the bundled examples are on v4, so this v3-only server reads them as they were on v3.
+    cpSync(designV3Examples(), join(instancesDir, 'examples'), { recursive: true })
     await withRunningServer({ definitionsDir, instancesDir, migrateWorkspacesOnStart: false }, fn)
   } finally {
     rmSync(root, { recursive: true, force: true })
