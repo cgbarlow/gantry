@@ -11,7 +11,7 @@ status:
       - 2026-03-17T11:18:00.000Z
       - 2026-03-25T09:52:00.000Z
     models: []
-    instructions: design@3
+    instructions: design@4
     skills:
       grilling: 1.2.3
       domain-modeling: 1.2.3

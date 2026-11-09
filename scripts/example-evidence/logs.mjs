@@ -2,8 +2,7 @@
 // uses (web/lib/interviewLog.js builds the entries, web/lib/decisionsLog.js writes the file), so each one is a file the app could have
 // written, and a fingerprint is what the app would have recorded. The story they tell is fictitious, as everything in the pack is, and
 // no AI Provider was used: the status lines name no model.
-import { loadDefinition } from '../../lib/definition.js'
-import { readModule } from '../../lib/instance.js'
+import { loadDefinitionForInstance, readInstance, readModule } from '../../lib/instance.js'
 import { applyDecisionsDelta, emptyDecisionsLog, serializeDecisionsLog } from '../../web/lib/decisionsLog.js'
 import { createSessionLog } from '../../web/lib/interviewLog.js'
 import { reviewEntriesFor } from '../../web/lib/reviewRound.js'
@@ -11,7 +10,6 @@ import { returnedToDraftNote } from '../../web/lib/bringUpToDate.js'
 import { fingerprintText } from '../../web/lib/sourceDocuments.js'
 
 const WHO = 'p.natarajan'
-const INSTRUCTIONS = 'design@3'
 
 const asText = (value) => (Array.isArray(value) ? value.join('\n') : String(value ?? '')).trim()
 
@@ -24,7 +22,10 @@ const asText = (value) => (Array.isArray(value) ? value.join('\n') : String(valu
  * @returns {Record<string, string>}  the YAML of each Stage's log, by Stage id
  */
 export function buildDecisionsLogs({ instancesDir, slug, sources, reviewed }) {
-  const definition = loadDefinition('design', { version: 3 })
+  // #359: the logs are built on the version the example is pinned to, and name it as the interview's instructions the way a Save on
+  // that Instance records them (`design@4` since #359), so a rebuild never describes the example on a version it does not run on.
+  const definition = loadDefinitionForInstance(readInstance(slug, { instancesDir }))
+  const instructions = `${definition.id}@${definition.version}`
   const saved = {}
   for (const moduleId of definition.modules.keys()) {
     try {
@@ -83,7 +84,7 @@ export function buildDecisionsLogs({ instancesDir, slug, sources, reviewed }) {
       },
       /** A Save: the delta the app would send, applied to the file. */
       save(state = 'saved', { target = stageId, stages, keys = [...draftedKeys] } = {}) {
-        const delta = log.delta({ fieldInputs: inputs, fieldKeys: keys, saving: true, status: { who: WHO, target, state, artefact, instructions: INSTRUCTIONS, ...(stages ? { stages } : {}) } })
+        const delta = log.delta({ fieldInputs: inputs, fieldKeys: keys, saving: true, status: { who: WHO, target, state, artefact, instructions, ...(stages ? { stages } : {}) } })
         file = applyDecisionsDelta(file, delta, stageId)
         log.commit(delta)
         logs[stageId] = serializeDecisionsLog(file)

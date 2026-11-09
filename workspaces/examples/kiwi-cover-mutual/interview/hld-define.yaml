@@ -10,7 +10,7 @@ status:
     saves:
       - 2026-04-14T14:10:00.000Z
     models: []
-    instructions: design@3
+    instructions: design@4
     skills:
       grilling: 1.2.3
       domain-modeling: 1.2.3

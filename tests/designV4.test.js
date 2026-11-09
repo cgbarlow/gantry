@@ -344,4 +344,24 @@ describe('the change is recorded (#359)', () => {
     assert.match(paragraph, /from version 3 to version 4, is a per-instance step/)
     assert.match(paragraph, /definitionVersion: 4/)
   })
+
+  // The example a v3 Stage's "Populate example text" reads is the bundled one, now on v4 and without References. The server reads it
+  // through the Instance's own version, so a v3 Instance's References comes back empty while the v3 Full SOAP's Gate still asks for it.
+  // The guide says so rather than leave an architect to find it at the Gate.
+  test('the User Guide says "Populate example text" leaves References empty on a v3 Instance, which is what the example gives a v3 read', () => {
+    const v3 = loadDefinition(DEFINITION, { version: 3 })
+    assert.ok(v3.stages.every((stage) => !stage.example || stage.example === STAGE_EXAMPLE))
+    const example = readModule(v3, STAGE_EXAMPLE, 'team-and-estimates', { instancesDir: EXAMPLES_DIR })
+    assert.ok(!example.fields.references?.trim(), 'the example has no References for a v3 Stage to fill from')
+    assert.ok(v3.artefacts.find((a) => a.id === 'soap-full').requires.includes(DROPPED), 'the v3 Full SOAP still requires References')
+
+    const guide = readFileSync('docs/user-guide/index.md', 'utf8')
+    const paragraph = guide.split('\n').find((line) => line.startsWith('The worked example throughout this guide remains the `design` definition'))
+    assert.match(paragraph, /"Populate example text" button on a version 3 or version 4 stage fills from `kiwi-cover-mutual`\. That example is on version 4, so on a version 3 instance it leaves \*\*References\*\* empty/)
+  })
+
+  test('the User Guide says v4 documents number their diagram captions, as v3 ones do', () => {
+    assert.equal(loadDefinition(DEFINITION, { version: VERSION }).artefacts.every((a) => a.diagramCaptions === true), true)
+    assert.match(readFileSync('docs/user-guide/index.md', 'utf8'), /Every design v3 and v4 document does\./)
+  })
 })
