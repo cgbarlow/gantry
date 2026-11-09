@@ -17,6 +17,43 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.16.2 — 2026-11-08
+
+Word stops repeating the same footnote. A Source document reference cited more than once in a document now has one
+footnote, and every later citation of it shows that footnote's number.
+
+### Fixed
+
+- **A repeated Source document citation reuses its Word footnote number** (#353).
+  - **What went wrong.** Since 0.16.1 every citation in a Word render made a new footnote, even for the same reference.
+    One document's foot of page was mostly the same few words, with *Gantry Two pager* as fifteen different footnotes
+    and the numbers climbing into the twenties for a handful of sources.
+  - **What it does now.** The first citation of a reference makes its footnote as before. Each later citation of the
+    same reference shows that footnote's number instead of adding another. The number is a real Word cross-reference
+    to the first footnote: it is right as soon as the document opens, with no field update and no prompt, and Word
+    keeps it right if the footnotes are renumbered. The count includes footnotes you wrote yourself, in either the
+    `^[...]` or `[^1]` style.
+  - **The same reference means the same printed words.** Two citations share a footnote only when their footnotes would
+    read exactly alike. *Gantry hosting* and *Gantry hosting, Constraints* stay separate footnotes, so a different
+    section of a document still gets its own, and so does a repository file read at two different commits.
+  - **What stays the same.** A reference cited only once comes out exactly as in 0.16.1. A citation that prints as plain
+    words, in a list label, a table cell or a heading, still does, and doesn't count as the first footnote. The browser
+    and server renders give the same footnotes and numbers. The Sources appendix, the exported `.md`, the editor
+    preview and the AI interview are unchanged.
+- **A stray backtick no longer hides the citations after it** (#353).
+  - **What went wrong.** A lone backtick (`` ` ``) in a Field, such as one typed for an apostrophe, could hide every
+    Source document citation in the paragraphs after it, from Word, the editor's citation list and the Sources appendix.
+  - **What it does now.** Those citations are found and printed as usual.
+
+### Notes
+
+- The bundled example shows this: its SAD, Full SOAP and HLD reuse footnote numbers across Modules.
+- A reference first cited inside a footnote you wrote yourself gets its footnote where it is next cited in the text,
+  and your footnote shows that number. A reference cited *only* inside your own footnotes still doesn't appear in Word,
+  as before: Word has no footnote inside a footnote.
+- Rare case: a `^[` inside an indented (four-space) code block is counted as a footnote, so later repeated citations
+  can show a number one too high until Word updates its fields.
+
 ## 0.16.1 — 2026-11-06
 
 The AI interview no longer leaves you guessing. A reply cut off at the AI Provider's output limit is recovered, a turn
