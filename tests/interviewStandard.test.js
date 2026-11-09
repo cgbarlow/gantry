@@ -193,6 +193,8 @@ describe('checks on a draft of a standard module', () => {
 
     // A Markdown heading is a header too, so its prefix is checked like a bold one.
     assert.match(check('key-decisions.decisions', '### KD01: x\n\nFacing: y')[0].message, /prefix AD/)
+    // #356 review: a heading in a decision's words that only looks like a header ("### ISO27001: …") is not one, so not a wrong prefix.
+    assert.deepEqual(check('key-decisions.decisions', '**AD01: x**\n\n**Facing:** y\n\n**We decided for:** z\n\n### ISO27001: compliance'), [])
   })
 
   test('Key decisions in the default style: the warning shows that style\'s parts, under the Definition\'s prefix, and no links', () => {

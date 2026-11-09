@@ -138,6 +138,7 @@ import {
   STYLE_PARTS,
   STYLE_TITLES,
   STYLE_LINKS,
+  withoutStyleGuidance,
 } from './lib/keyDecisions.js'
 import {
   changedEntryFor,
@@ -2527,6 +2528,8 @@ function DecisionsField({ field, moduleId, keyDecisions, onRegister }) {
   const text = textOf(parsed)
   const words = field.targetWords ? countWords(text) : 0
   const problems = keyDecisionProblems(text, { prefix, style })
+  // #356 review: the layout added to the guidance is for the AI; the architect fills the cards, so it is left out here.
+  const guidance = withoutStyleGuidance(field.guidance, style, prefix)
   const setDecision = (number, change) => update({ ...parsed, decisions: parsed.decisions.map((d) => (d.number === number ? { ...d, ...change } : d)) })
 
   return html`
@@ -2534,7 +2537,7 @@ function DecisionsField({ field, moduleId, keyDecisions, onRegister }) {
       ${headingIdForField
         ? html`<h3 id=${headingIdForField} class="field-heading">${field.title}${field.required ? ' *' : ''}</h3><label class="visually-hidden" style="display:none">${field.title}${field.required ? ' *' : ''}</label>`
         : html`<label>${field.title}${field.required ? ' *' : ''}</label>`}
-      ${field.guidance ? html`<p class="guidance">${field.guidance}</p>` : null}
+      ${guidance ? html`<p class="guidance">${guidance}</p>` : null}
       <p class="decisions-style muted" data-testid="decision-style">Decision style: ${STYLE_TITLES[style]}</p>
       ${field.targetWords ? html`<${FieldTargetWords} field=${field} words=${words} />` : null}
       ${parsed.decisions.length === 0 ? html`<p class="muted decisions-empty">No decisions recorded yet.</p>` : null}

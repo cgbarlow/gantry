@@ -13,7 +13,7 @@
 // Everything here is pure (no DOM, no network, no clock), like web/lib/interviewBrief.js, so the unit tests drive all of it and the
 // browser and Node read the log the same way.
 import { currentLogEntries } from './decisionsLog.js'
-import { KEY_DECISIONS_ID, STYLE_PARTS, STYLE_TITLES, decisionLayout, decisionReference, hasStyleText, keyDecisionProblems, nextDecisionNumber, parseKeyDecisions, readDecisionHeader } from './keyDecisions.js'
+import { KEY_DECISIONS_ID, STYLE_PARTS, STYLE_TITLES, decisionHeaders, decisionLayout, decisionReference, hasStyleText, keyDecisionProblems, nextDecisionNumber, parseKeyDecisions } from './keyDecisions.js'
 import { moduleKeyDecisions } from './standardModules.js'
 
 export const GLOSSARY_ID = 'glossary'
@@ -166,7 +166,8 @@ export function standardDraftProblems({ roles, key, value, terms = [], openCount
     if (parsed.decisions.length === 0) {
       problems.push({ kind: 'decisions', message: `${key}: no numbered decision found. Write each Key decision as its header, then each part of the ${STYLE_TITLES[style]} style on a line of its own, like this: ${layout({ number: 1 })}.` })
     } else {
-      const others = text.split('\n').map(readDecisionHeader).filter((h) => h && h.prefix !== prefix).map((h) => h.prefix)
+      // #356 review: the headers as the Field reads them, so a heading such as "### ISO27001: compliance" in a decision's words is no prefix.
+      const others = decisionHeaders(text).filter((h) => h.prefix !== prefix).map((h) => h.prefix)
       if (others.length) problems.push({ kind: 'decisions', message: `${key}: decisions are numbered with the prefix ${prefix} (${decisionReference(prefix, 1)}, ${decisionReference(prefix, 2)}, …), not ${[...new Set(others)].join(', ')}.` })
       for (const decision of parsed.decisions) {
         if (!hasStyleText(decision, style)) problems.push({ kind: 'decisions', message: `${key}: ${decisionReference(prefix, decision.number)} has none of the ${STYLE_TITLES[style]} parts written (${STYLE_PARTS[style].map((p) => p.label).join(', ')}). Write each part on a line of its own that starts with its label in bold, like this: ${layout({ number: decision.number, title: decision.title })}.` })

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { loadDefinition, findDefinitionProblems, findDefinitionProblemsInStructure } from '../lib/definition.js'
 import { renderArtefact } from '../lib/render.js'
 import { getStatus } from '../lib/status.js'
@@ -29,6 +30,7 @@ import {
   decisionReference,
   decisionStyleGuidance,
   decisionStyleSummary,
+  withoutStyleGuidance,
   DECISION_STYLES,
   STYLE_PARTS,
   STYLE_LINKS,
@@ -626,4 +628,67 @@ test('#356: the Definitions page describes each style from its own parts and lin
   assert.equal(decisionStyleSummary('default'), 'A title, then Context, Decision, Why, Considered options and Consequences.')
   assert.equal(decisionStyleSummary('why'), 'A title, then In the context of, Facing, We decided for, And neglected, To achieve and Accepting that, and links to other Key decisions (Depends on, Supersedes, Relates to).')
   assert.equal(decisionStyleSummary('fancy'), '')
+})
+
+// ---------- #356 review: what the first pass got wrong ----------
+
+// Plain labels count as structure now, so an architect's line such as "Decision: revisit it every year." inside a part is
+// stored as "\\Decision: …". Pandoc reads "\\Decision" as a TeX command and drops it, so the Word render must print the
+// words as the architect typed them, not the stored text.
+test('#356 review: the default-style Word render prints a line that looks like a label as typed, and Pandoc keeps its words', () => {
+  const typed = 'The ledger needs transactions.\nDecision: revisit it every year.\nContext: the licence costs change.\n- Why: costs move.'
+  const one = addDecision(parseKeyDecisions(''))
+  const stored = serialiseKeyDecisions({ ...one, decisions: [{ ...one.decisions[0], title: 'Use PostgreSQL', context: typed, lead: 'Why: a lead line too.' }] }, { prefix: 'AD' })
+  assert.match(stored, /^\\Decision: revisit/m, 'stored escaped, so it reads back as typed')
+  for (const style of DECISION_STYLES) {
+    const printed = renderKeyDecisions(stored, { prefix: 'AD', style })
+    assert.doesNotMatch(printed, /^\\/m, `${style}: no escape reaches Word`)
+    assert.ok(printed.includes(`**Context:** ${typed}`), `${style}: ${printed}`)
+    const plain = execFileSync('pandoc', ['-f', 'markdown', '-t', 'plain', '--wrap=none'], { input: printed, encoding: 'utf8' })
+    for (const words of ['Decision: revisit it every year.', 'Context: the licence costs change.', 'Why: costs move.', 'Why: a lead line too.']) assert.ok(plain.includes(words), `${style}: ${words} in ${plain}`)
+  }
+  // A Field with no such line prints exactly as before.
+  assert.equal(renderKeyDecisions(DEFAULT_TEXT, { prefix: 'AD', style: 'default' }), DEFAULT_TEXT)
+})
+
+// The guidance tells the AI to write "**Label:**" lines, with an example; the architect fills cards instead, so the editor
+// shows the Field's guidance without it (and without its literal ** markers).
+test('#356 review: the editor shows the Field\'s guidance without the AI\'s layout instructions', () => {
+  for (const [style, prefix] of [['default', 'KD'], ['why', 'AD']]) {
+    const base = STANDARD_MODULES['key-decisions'].versions[1].fields[0].guidance
+    const plain = resolveStandardModule({ id: 'key-decisions', version: 1, prefix, style }).fields[0].guidance
+    assert.equal(withoutStyleGuidance(plain, style, prefix), base)
+    const added = resolveStandardModule({ id: 'key-decisions', version: 1, prefix, style, guidance: 'Name the ADR in the title.' }).fields[0].guidance
+    assert.equal(withoutStyleGuidance(added, style, prefix), `${base}\n\nName the ADR in the title.`)
+    assert.doesNotMatch(withoutStyleGuidance(added, style, prefix), /\*\*|For example/)
+  }
+  // Guidance without the layout in it (another style's, or none) is shown as it is.
+  assert.equal(withoutStyleGuidance('Just words.', 'why', 'AD'), 'Just words.')
+  assert.equal(withoutStyleGuidance(undefined, 'why', 'AD'), '')
+})
+
+// A Markdown heading that only looks like a header ("### ISO27001: compliance", ES2015, H264, TLS13) is read as one only
+// when its prefix is the Field's: the prefix of its bold headers, or, with none, of its first heading.
+test('#356 review: a heading inside a decision whose prefix is not the Field\'s stays the decision\'s words', () => {
+  const text = '## ISO27001: what we must meet\n\n**AD01: A**\n\n**Context:** x\n\n### ISO27001: compliance\n### ES2015 and H264\n#### TLS13: transport\n\n### AD02: B\n\nContext: y'
+  const parsed = parseKeyDecisions(text)
+  assert.deepEqual(parsed.decisions.map((d) => [d.number, d.title]), [[1, 'A'], [2, 'B']])
+  assert.equal(parsed.preamble, '## ISO27001: what we must meet')
+  assert.equal(parsed.decisions[0].context, 'x\n\n### ISO27001: compliance\n### ES2015 and H264\n#### TLS13: transport')
+  assert.equal(parsed.next, 3)
+  assert.deepEqual(keyDecisionProblems(text, { prefix: 'AD', style: 'default' }), [])
+  // Written back and read again, nothing moves.
+  const written = serialiseKeyDecisions(parsed, { prefix: 'AD' })
+  assert.deepEqual(parseKeyDecisions(written), { ...parsed })
+  assert.equal(serialiseKeyDecisions(parseKeyDecisions(written), { prefix: 'AD' }), written)
+  // A Field written only in headings takes its first heading's prefix, in any case.
+  assert.deepEqual(parseKeyDecisions('### AD01: A\n\nContext: x\n\n### ISO27001: compliance\n\n## ad02: B').decisions.map((d) => d.number), [1, 2])
+})
+
+test('#356 review: a label with no space after it keeps emphasis that starts its words', () => {
+  for (const [line, words] of [['**Facing:***really* hard', '*really* hard'], ['**Facing:**_really_ hard', '_really_ hard'], ['*Facing:***bold** start', '**bold** start'], ['**Facing**:*really*', '*really*']]) {
+    const parsed = parseKeyDecisions(`**AD01: A**\n\n${line}`)
+    assert.equal(parsed.decisions[0].facing, words, line)
+    assert.equal(parsed.decisions[0].lead, '', line)
+  }
 })

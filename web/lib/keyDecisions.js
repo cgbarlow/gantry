@@ -31,8 +31,9 @@
 // is read whether it is plain (`Facing: …`), bold with the colon inside or outside (`**Facing**: …`),
 // italic, or a `-`, `*` or `+` bullet. A decision's header can also be a Markdown heading
 // (`### AD01: Title`), as long as its number has the two digits Gantry writes, so an ordinary heading such
-// as "## Q3" stays text. A bare `AD01: Title` line is never a header: it is how a part's words would refer
-// to another decision.
+// as "## Q3" stays text, and its prefix is the Field's (that of its bold headers or, with none, of its first
+// heading), so a heading in a decision's words such as "### ISO27001: compliance" stays text too. A bare
+// `AD01: Title` line is never a header: it is how a part's words would refer to another decision.
 //
 // The number is part of the text, never worked out from a decision's position, so reordering a
 // decision moves its block and removing one leaves a gap: the others keep the numbers other documents
@@ -96,17 +97,50 @@ const HEADER_RE = /^\*\*([A-Za-z]{1,6})(\d+)(?:\s*:\s*(.*?))?\*\*\s*$/
 const HEADING_RE = /^#{1,6}[ \t]+(\*\*)?([A-Za-z]{1,6})(\d{2,})(?:[ \t]*:[ \t]*(.*?))?\1(?:[ \t]+#+)?[ \t]*$/
 // #356: an optional bullet, then the label wrapped in up to three `*` or `_` (bold, italic or both), with
 // its colon inside the wrapping or after it. `readLabel` checks the wrapping closes as it opened.
-const LABEL_RE = /^[ \t]{0,3}(?:[-*+][ \t]+)?([*_]{0,3})([^*_:\n]+?)([*_]{0,3}):([*_]{0,3})[ \t]*(.*)$/
+const LABEL_RE = /^[ \t]{0,3}(?:[-*+][ \t]+)?([*_]{0,3})([^*_:\n]+?)([*_]{0,3}):([*_]{0,3})(.*)$/
 const NEXT_RE = /^<!--\s*next:\s*(\d+)\s*-->\s*$/
 const REFERENCE_RE = /^([A-Za-z]{1,6})(\d+)$/
 
-/** A decision's header line read into `{ prefix, number, title }`, or null when the line is not one. */
-export function readDecisionHeader(line) {
+function readBoldHeader(line) {
   const bold = HEADER_RE.exec(line)
-  if (bold) return { prefix: bold[1], number: Number(bold[2]), title: (bold[3] ?? '').trim() }
+  return bold ? { prefix: bold[1], number: Number(bold[2]), title: (bold[3] ?? '').trim() } : null
+}
+
+function readHeadingHeader(line) {
   const heading = HEADING_RE.exec(line)
-  if (heading) return { prefix: heading[2], number: Number(heading[3]), title: (heading[4] ?? '').trim() }
-  return null
+  return heading ? { prefix: heading[2], number: Number(heading[3]), title: (heading[4] ?? '').trim() } : null
+}
+
+/**
+ * A line that could be a decision's header, read into `{ prefix, number, title }`, or null when it cannot be one.
+ * It reads the line alone, so it decides what is escaped when written; whether a heading is a header in a
+ * particular Field is `decisionHeaders`'s to say.
+ */
+export function readDecisionHeader(line) {
+  return readBoldHeader(line) ?? readHeadingHeader(line)
+}
+
+/**
+ * #356 review: a reader of the header lines of one Field's `lines`. A bold header always is one. A Markdown heading
+ * is one only when its prefix is the Field's, so "### ISO27001: compliance" (or ES2015, H264, TLS13) in a decision's
+ * words is not read as decision 27001. The Field's prefix is that of its bold headers (any of them, since a
+ * Definition can change its prefix) or, when it has none, that of its first heading. Prefixes compare in any case.
+ */
+function fieldHeaderReader(lines) {
+  const bold = lines.map(readBoldHeader).filter(Boolean)
+  const firstHeading = bold.length > 0 ? null : lines.map(readHeadingHeader).find(Boolean)
+  const prefixes = new Set((bold.length > 0 ? bold : firstHeading ? [firstHeading] : []).map((header) => header.prefix.toUpperCase()))
+  const ofTheField = (heading) => (heading && prefixes.has(heading.prefix.toUpperCase()) ? heading : null)
+  return (line) => readBoldHeader(line) ?? ofTheField(readHeadingHeader(line))
+}
+
+const fieldLines = (text) => String(text ?? '').replace(/\r\n?/g, '\n').split('\n')
+
+/** Every decision header in a Field's text, in order, as `parseKeyDecisions` reads them. */
+export function decisionHeaders(text) {
+  const lines = fieldLines(text)
+  const read = fieldHeaderReader(lines)
+  return lines.map(read).filter(Boolean)
 }
 
 const reversed = (marks) => [...marks].reverse().join('')
@@ -115,8 +149,14 @@ const reversed = (marks) => [...marks].reverse().join('')
 function readLabel(line) {
   const match = LABEL_RE.exec(line)
   if (!match) return null
-  const [, open, name, beforeColon, afterColon, rest] = match
-  if (beforeColon + afterColon !== reversed(open)) return null
+  const [, open, name, beforeColon, afterColon, after] = match
+  // #356 review: the marks after the colon close the label only as far as it opened; any beyond start its words,
+  // so "**Facing:***really* hard" is Facing "*really* hard".
+  const closing = reversed(open)
+  if (!closing.startsWith(beforeColon)) return null
+  const stillOpen = closing.slice(beforeColon.length)
+  if (!afterColon.startsWith(stillOpen)) return null
+  const rest = `${afterColon.slice(stillOpen.length)}${after}`.replace(/^[ \t]+/, '')
   const label = name.trim().toLowerCase()
   if (LABEL_TO_PART.has(label)) return { part: LABEL_TO_PART.get(label), rest }
   if (LABEL_TO_LINK.has(label)) return { link: LABEL_TO_LINK.get(label), rest }
@@ -171,7 +211,8 @@ export function parseKeyDecisions(text) {
   let current = null
   let target = null // { type: 'part', key } | { type: 'link', link } | { type: 'lead' } | null
 
-  const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n')
+  const lines = fieldLines(text)
+  const readHeader = fieldHeaderReader(lines)
   const buffer = { lines: [] }
   const flush = () => {
     const value = buffer.lines.join('\n').trim()
@@ -186,7 +227,7 @@ export function parseKeyDecisions(text) {
   }
 
   for (const line of lines) {
-    const header = readDecisionHeader(line)
+    const header = readHeader(line)
     if (header) {
       flush()
       current = blankDecision(header.number)
@@ -223,17 +264,27 @@ export function parseKeyDecisions(text) {
  * Definition's style never loses what was written in the other.
  */
 export function serialiseKeyDecisions(parsed, { prefix = DEFAULT_PREFIX } = {}) {
+  return writeKeyDecisions(parsed, prefix, { escape: true })
+}
+
+const decisionHeading = (prefix, decision) => `**${decisionReference(prefix, decision.number)}${decision.title.trim() === '' ? '' : `: ${decision.title.trim().replace(/\s+/g, ' ')}`}**`
+
+// #356 review: `escape` is for the Field's own text, which Gantry reads back. The Word render prints the words as typed
+// instead (`escape: false`): Pandoc reads a backslash before a letter, as in "\Decision: …", as a TeX command and drops it.
+function writeKeyDecisions(parsed, prefix, { escape }) {
+  const asTyped = (line) => line
+  const escapeLead = escape ? escapeLine : asTyped
+  const escapeValue = escape ? escapeFollowingLines : asTyped
   const blocks = []
   if (parsed.preamble && parsed.preamble.trim() !== '') blocks.push(parsed.preamble.trim())
   for (const decision of parsed.decisions ?? []) {
-    const heading = `**${decisionReference(prefix, decision.number)}${decision.title.trim() === '' ? '' : `: ${decision.title.trim().replace(/\s+/g, ' ')}`}**`
-    const lines = [heading]
-    if (decision.lead && decision.lead.trim() !== '') lines.push('', decision.lead.trim().split('\n').map(escapeLine).join('\n'))
+    const lines = [decisionHeading(prefix, decision)]
+    if (decision.lead && decision.lead.trim() !== '') lines.push('', decision.lead.trim().split('\n').map(escapeLead).join('\n'))
     const written = []
     for (const part of ALL_PARTS) {
       const value = (decision[part.key] ?? '').trim()
       // The first line follows its label, so it is never at the start of a line; only the lines after it can look like structure.
-      if (value !== '') written.push(`**${part.label}:** ${escapeFollowingLines(value)}`)
+      if (value !== '') written.push(`**${part.label}:** ${escapeValue(value)}`)
     }
     for (const link of LINK_TYPES) {
       const targets = (decision.links ?? []).filter((entry) => entry.type === link.type)
@@ -324,6 +375,20 @@ export function decisionStyleGuidance(style, prefix = DEFAULT_PREFIX) {
   return `${sentences.join(' ')} For example:\n\n${example.join('\n')}`
 }
 
+/**
+ * #356 review: the Field's guidance as the editor shows it, without the layout `decisionStyleGuidance` adds for the AI.
+ * The architect fills the cards, so "**Label:**" lines and an example in Markdown would only be noise, shown as
+ * plain text. Guidance that does not hold the layout is returned as it is.
+ */
+export function withoutStyleGuidance(guidance, style, prefix = DEFAULT_PREFIX) {
+  const text = String(guidance ?? '')
+  const layout = decisionStyleGuidance(style, prefix)
+  if (layout === '') return text
+  // resolveStandardModule adds it after the module's guidance and before the Definition's, a blank line between each.
+  const form = [`\n\n${layout}`, `${layout}\n\n`, layout].find((candidate) => text.includes(candidate))
+  return form ? text.replace(form, '') : text
+}
+
 /** What a decision in `style` holds, in a sentence, for the Definitions page. `''` for a style that isn't one. */
 export function decisionStyleSummary(style) {
   if (!STYLE_PARTS[style]) return ''
@@ -361,12 +426,12 @@ export function whySentence(decision) {
 export function renderKeyDecisions(text, { prefix = DEFAULT_PREFIX, style = DEFAULT_STYLE } = {}) {
   const parsed = parseKeyDecisions(text)
   if (parsed.decisions.length === 0) return String(text ?? '')
-  if (style !== 'why') return serialiseKeyDecisions({ ...parsed, next: 0 }, { prefix })
+  // #356 review: printed from the words as read, never the escaped text the Field stores.
+  if (style !== 'why') return writeKeyDecisions({ ...parsed, next: 0 }, prefix, { escape: false })
   const blocks = []
   if (parsed.preamble !== '') blocks.push(parsed.preamble)
   for (const decision of parsed.decisions) {
-    const heading = `**${decisionReference(prefix, decision.number)}${decision.title.trim() === '' ? '' : `: ${decision.title.trim().replace(/\s+/g, ' ')}`}**`
-    const lines = [heading]
+    const lines = [decisionHeading(prefix, decision)]
     if (decision.lead.trim() !== '') lines.push('', decision.lead.trim())
     const sentence = whySentence(decision)
     if (sentence) lines.push('', sentence)

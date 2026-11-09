@@ -317,6 +317,10 @@ test('Stage editor, WH(Y): a plain-label Field shows its parts, and a line that 
     await field.waitFor({ state: 'visible' })
     const cards = field.locator('[data-testid="decision"]')
     assert.deepEqual(await cards.locator('[data-testid="decision-number"]').allTextContents(), ['AD01', 'AD02'])
+    // #356 review: the layout the AI is told to write is not shown to the architect, who fills the cards.
+    const guidance = await field.locator('.guidance').textContent()
+    assert.match(guidance, /Record only a decision that is hard to reverse/)
+    assert.doesNotMatch(guidance, /\*\*|For example/)
     const first = cards.nth(0)
     assert.equal(await first.locator('[data-testid="decision-inContext"]').inputValue(), 'the payments ledger')
     assert.equal(await first.locator('[data-testid="decision-decided"]').inputValue(), 'PostgreSQL 16')
