@@ -1033,6 +1033,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   }, [carryingOn, setup.status, sources, snap?.phase, providerId, flagsReady, flagsWaited])
 
   // Start waits for the Out of date check, which is quick, but never for long: it is only there to know whether a round of cards opens the interview (#298).
+  // #357: Bring up to date waits until the check is in, however long it takes, since its cards are built from it (the kickoff says it is checking).
   useEffect(() => {
     if (flagsReady) return undefined
     const timer = setTimeout(() => setFlagsWaited(true), 4000)
@@ -1556,11 +1557,13 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   const updateKickoffExtras = () => {
     if (setup.status !== 'ready') return null
     // #357: until the Out of date check for this Stage has answered (a code repository is compared by the Gantry server, which takes a
-    // while), nothing is known: the kickoff says it is checking, never that nothing is Out of date, and Bring up to date waits.
+    // while), nothing is known: the kickoff says it is checking, never that nothing is Out of date, and Bring up to date waits. Flags that
+    // are in while the check is not ready mean an Azure DevOps or GitHub workspace's Instance is being read again (`stageStarted`), so the
+    // note says that instead.
     if (!flagsReady) {
       const repositories = (sources ?? []).filter((s) => !s.removedAt && isRepositorySource(s)).map((s) => s.title || s.id)
       return html`<div data-testid="interview-update-plan">
-        <p class="kick-note" data-testid="interview-update-checking" role="status">${checkingFlagsNote(instance.stage.title, repositories)}</p>
+        <p class="kick-note" data-testid="interview-update-checking" role="status">${checkingFlagsNote(instance.stage.title, repositories, { rereadingInstance: outOfDate.length > 0 })}</p>
       </div>`
     }
     const here = updatePlan?.items.length ?? 0
@@ -1825,7 +1828,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           type="button"
           class="btn primary"
           data-testid="interview-start"
-          disabled=${!providerId || phase === 'testing' || sources === null || Boolean(blockedReason) || !snap || Boolean(snap?.sessionWarning) || (update && !updatePlan?.items.length) || (review && !reviewPlan?.items.length) || (revise && prComments.status !== 'ready') || (!revise && !flagsReady && !flagsWaited)}
+          disabled=${!providerId || phase === 'testing' || sources === null || Boolean(blockedReason) || !snap || Boolean(snap?.sessionWarning) || (update && !updatePlan?.items.length) || (review && !reviewPlan?.items.length) || (revise && prComments.status !== 'ready') || (!revise && !flagsReady && (update || !flagsWaited))}
           onClick=${() => startInterview()}
         >
           ${phase === 'testing' ? PROGRESS_LABELS[snap?.testStep] ?? 'Testing the AI Provider…' : review ? 'Work through review comments' : revise ? 'Start the revision' : update ? 'Bring up to date' : resuming ? 'Resume interview' : 'Start interview'}

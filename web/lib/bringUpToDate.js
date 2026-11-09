@@ -428,8 +428,11 @@ export function isStaleUpdateSession(snapshot) {
 /**
  * #357: what the Bring up to date kickoff says while the flags for its Stage are still being worked out, in place of a count (or of "Nothing
  * on <Stage> is Out of date", which isn't known yet). A code repository is compared by the Gantry server, which can take a while, so it is named.
+ * `rereadingInstance`: the flags are in, and an Azure DevOps or GitHub workspace's Instance is being read again (whether its current Stage has
+ * a branch decides where each change can be saved, ADR-0026), so that is what it says, not that a repository is being compared.
  */
-export function checkingFlagsNote(stageTitle, repositories = []) {
+export function checkingFlagsNote(stageTitle, repositories = [], { rereadingInstance = false } = {}) {
+  if (rereadingInstance) return `Checking where the changes to the Out of date Fields on ${stageTitle} would be saved: reading the Instance again…`
   const names = asList(repositories).filter(Boolean)
   const base = `Checking which Fields on ${stageTitle} are Out of date`
   if (!names.length) return `${base}…`

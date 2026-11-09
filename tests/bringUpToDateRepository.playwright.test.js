@@ -151,6 +151,20 @@ async function bringUpToDateFromBanner(page, editor) {
   await page.click('[data-testid="bring-up-to-date"]')
 }
 
+// Back in the editor from a saved round: waits for the banner to say `gantry` and `field` Fields are flagged (the compare answers first).
+async function backToTheBanner(page, { gantry, field }) {
+  await page.click('[data-testid="update-back-to-editor"]')
+  await page.waitForSelector('.module')
+  await showSourcesAndDecisions(page)
+  await page.locator('[data-testid="source-documents"]').waitFor({ timeout: 15_000 })
+  await showFields(page)
+  const want = [`${gantry} Field${gantry === 1 ? '' : 's'} drew on gantry, whose files have since changed:`, `${field} Field${field === 1 ? '' : 's'} drew on a Field that has since changed:`]
+  await page
+    .waitForFunction((want) => JSON.stringify([...document.querySelectorAll('[data-testid="out-of-date-line"]')].map((el) => el.textContent.trim())) === JSON.stringify(want), want, { timeout: 20_000 })
+    .catch(() => {})
+  assert.deepEqual(await page.locator('[data-testid="out-of-date-line"]').evaluateAll((els) => els.map((el) => el.textContent.trim())), want)
+}
+
 // On the Stage the page is on: Start, Keep every card, save the round. Returns the cards it answered.
 async function keepEveryCard(page) {
   await page.waitForSelector('[data-testid="interview-start"]:not([disabled])', { timeout: 20_000 })
@@ -169,8 +183,10 @@ test('local workspace, code repository: Bring up to date from the banner says it
   await withLocalRepositoryWorkspace(async ({ page, editor, posts, readFile }) => {
     await bringUpToDateFromBanner(page, editor)
 
-    // It lands on SOAP, the first Stage with a flagged Field. While the repository is compared again for this Stage the page says so, and never
-    // that nothing is Out of date.
+    // It lands on SOAP, the first Stage with a flagged Field. The Interview page looks for Out of date Fields again for the Stage it opened on,
+    // which compares the repository again, and until that answers it knows of no flag at all: the run plan's counts go, as the architect saw.
+    // Before #357 the kickoff then said "Nothing on SOAP is Out of date", with Bring up to date disabled and nothing else to press, for as
+    // long as the compare took. Now it says it is checking, and never that nothing is Out of date.
     await page.waitForSelector('[data-testid="interview-update-intro"]')
     await page.waitForFunction(() => /SOAP/.test(document.querySelector('.interview-rail .interview-instance + .cite')?.textContent ?? ''))
     await page.waitForSelector('[data-testid="interview-update-checking"]')
@@ -186,14 +202,19 @@ test('local workspace, code repository: Bring up to date from the banner says it
     const soap = await keepEveryCard(page)
     assert.deepEqual(soap.sort(), ['update:background.affected-domains', 'update:background.problem'])
 
-    // Next: High-level Design, then Detailed Design, each answered the same way.
-    await page.click('[data-testid="update-next-button"]')
+    assert.match(await page.textContent('[data-testid="update-next"]'), /on High-level Design are still Out of date/)
+
+    // Back in the editor the banner's counts go down to match: SOAP's two Fields drew on gantry, and are answered. The Field drafted from
+    // SOAP's Problem statement is still flagged (keeping it changed nothing). Its Bring up to date now starts on High-level Design.
+    await backToTheBanner(page, { gantry: 3, field: 2 })
+    await page.click('[data-testid="bring-up-to-date"]')
     await page.waitForFunction(() => /High-level Design/.test(document.querySelector('.interview-rail .interview-instance + .cite')?.textContent ?? ''))
     await page.waitForSelector('[data-testid="interview-update-count"]', { timeout: 20_000 })
     assert.match(await page.textContent('[data-testid="interview-update-count"]'), /^2 Fields on High-level Design are Out of date/)
     const hld = await keepEveryCard(page)
     assert.deepEqual(hld.sort(), ['update:proposed-solution.guardrails', 'update:proposed-solution.strategy-alignment'])
 
+    // Next: Detailed Design, from the saved round.
     await page.click('[data-testid="update-next-button"]')
     await page.waitForFunction(() => /Detailed Design/.test(document.querySelector('.interview-rail .interview-instance + .cite')?.textContent ?? ''))
     await page.waitForSelector('[data-testid="interview-update-count"]', { timeout: 20_000 })
@@ -222,14 +243,21 @@ test('local workspace, code repository: Bring up to date from the banner says it
 
 test('local workspace, code repository: a working copy of an earlier Bring up to date with no open round still offers the kickoff', async () => {
   await withLocalRepositoryWorkspace(async ({ page, editor }) => {
-    // An earlier Bring up to date on SOAP left a working copy in this browser: its round was answered and the AI's turn ended, but it was
-    // never saved, and its answers name a Field that is no longer flagged.
+    // An earlier Bring up to date on SOAP left a working copy in this browser: every card was answered Leave it flagged, so the round needed
+    // no AI and left nothing to save, and the tab was closed there. Before #357 the page picked the copy up and showed only "2 Fields
+    // answered. Save the round?", whose Save writes nothing: SOAP's flagged Fields could not be answered again in this browser.
     await page.goto(editor)
     await page.waitForSelector('.module', { timeout: 15_000 })
     await page.evaluate((slug) => {
       const key = `${slug}|shape|update`
-      const update = { mode: 'only', total: 2, answered: false, reopen: [], deferred: [], elsewhere: [] }
-      const state = { sessionId: 's-old', state: { phase: 'waiting', thread: [{ who: 'ai', text: 'Done.' }], round: null, drafts: {}, update }, log: { sessionId: 's-old', pending: [] } }
+      const update = { mode: 'only', total: 2, answered: true, reopen: [], deferred: [], elsewhere: [] }
+      const thread = [
+        { who: 'sys', text: '2 Fields are Out of date because a Source document changed.', updateRound: true },
+        { who: 'sys', text: 'Left Problem statement flagged' },
+        { who: 'sys', text: 'Left Affected domains flagged' },
+        { who: 'you', text: 'Problem statement: Leave it flagged\nAffected domains: Leave it flagged', answered: 2 },
+      ]
+      const state = { sessionId: 's-old', state: { phase: 'waiting', thread, round: null, drafts: {}, update }, log: { sessionId: 's-old', pending: [] } }
       localStorage.setItem(`gantry:interview-copy:${key}`, JSON.stringify({ version: 1, savedAt: '2026-10-02T00:00:00.000Z', session: 's-old', committedIds: [], lastAiSave: null, state }))
     }, SLUG)
     await bringUpToDateFromBanner(page, editor)

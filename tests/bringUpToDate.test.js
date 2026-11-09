@@ -423,6 +423,12 @@ describe('#357: Bring up to date always gives a way to answer every flagged Fiel
     assert.equal(checkingFlagsNote('SOAP', ['gantry']), 'Checking which Fields on SOAP are Out of date: the Gantry server is comparing the files they drew on in gantry with its branch now…')
     assert.equal(checkingFlagsNote('SOAP', ['gantry', 'billing-api']), 'Checking which Fields on SOAP are Out of date: the Gantry server is comparing the files they drew on in gantry and billing-api with their branches now…')
   })
+
+  test('checkingFlagsNote: once the flags are in and only the Instance is being read again (an Azure DevOps or GitHub workspace), it says that, and names no repository compare', () => {
+    const want = 'Checking where the changes to the Out of date Fields on Beta would be saved: reading the Instance again…'
+    assert.equal(checkingFlagsNote('Beta', [], { rereadingInstance: true }), want)
+    assert.equal(checkingFlagsNote('Beta', ['gantry'], { rereadingInstance: true }), want)
+  })
 })
 
 describe('#358: in Bring up to date the run plan lists the Stages to work through, not a target and beyond it', () => {

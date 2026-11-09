@@ -629,8 +629,25 @@ for (const spec of REMOTE_PROVIDERS) {
             await page.goto(`${ctx.gantryBase}/instance/${REMOTE_SLUG}`)
             await page.waitForSelector('[data-testid="out-of-date-banner"]')
             assert.equal(await client.branchExists(stageBranchName(REMOTE_SLUG, 'b')), false, 'nothing has started Beta')
+            // #357: the flags are already known, but the page reads the Instance again before it builds the cards (whether Beta has a branch
+            // decides whether Alpha can be re-opened). That read answers slowly here. Until it does the kickoff says what it is waiting for
+            // (not a repository compare), and Bring up to date waits for it, past the few seconds a normal interview waits for its flags.
+            const reread = (url) => url.pathname === '/api/instance' && url.searchParams.get('slug') === REMOTE_SLUG && !url.searchParams.has('stage')
+            await page.route(reread, async (route) => {
+              await new Promise((resolve) => setTimeout(resolve, 6000))
+              await route.continue()
+            })
             await page.click('[data-testid="bring-up-to-date"]')
             await page.waitForSelector('[data-testid="interview-update-intro"]')
+            await page.waitForSelector('[data-testid="interview-update-checking"]')
+            const checking = await page.textContent('[data-testid="interview-update-checking"]')
+            assert.match(checking, /^Checking where the changes to the Out of date Fields on Beta would be saved: reading the Instance again…$/)
+            assert.doesNotMatch(checking, /comparing/)
+            await page.waitForTimeout(4500)
+            assert.equal(await page.locator('[data-testid="interview-update-checking"]').count(), 1)
+            assert.equal(await page.locator('[data-testid="interview-start"]').isDisabled(), true, 'Bring up to date waits until the Instance has been read again')
+            await page.unroute(reread)
+            await page.waitForSelector('[data-testid="interview-update-count"]', { timeout: 20_000 })
             await page.waitForSelector('[data-testid="interview-start"]:not([disabled])')
             await page.click('[data-testid="interview-start"]')
             await page.waitForSelector('[data-testid="interview-round"]')
