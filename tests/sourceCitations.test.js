@@ -885,6 +885,23 @@ describe('a document a newer one replaces (#360)', () => {
     assert.deepEqual(rowsOf(buildSourceAppendix('[old](source:gantry-two-pager)', [removed])), ['Gantry_Two_pager (removed)'])
   })
 
+  test('a page fetched again, whose newer copy keeps its title, reads "(replaced by a newer copy)" rather than naming itself', () => {
+    // **Fetch again** adds the new copy under the old one's title (web/lib/sourceDocuments.js's fetchAgain), so naming the
+    // replacement would read "Vendor API guide (replaced by Vendor API guide)" and not say which row is the newer.
+    const fetched = { id: 'vendor-api-guide', title: 'Vendor API guide', filename: 'vendor-api-guide.html', uploadedAt: '2026-10-01T00:00:00.000Z', origin: { address: 'https://example.com/api', fetchedAt: '2026-10-01T00:00:00.000Z' } }
+    const again = { ...fetched, id: 'vendor-api-guide-2', filename: 'vendor-api-guide-2.html', uploadedAt: '2026-11-02T00:00:00.000Z', origin: { address: 'https://example.com/api', fetchedAt: '2026-11-02T00:00:00.000Z' }, replaces: 'vendor-api-guide' }
+    const appendix = buildSourceAppendix('[old](source:vendor-api-guide) [new](source:vendor-api-guide-2)', [fetched, again])
+    assert.deepEqual(rowsOf(appendix), ['Vendor API guide (replaced by a newer copy)', 'Vendor API guide'])
+    assert.match(appendix, /\| Vendor API guide \(replaced by a newer copy\) \| https:\/\/example\.com\/api \| retrieved 1 Oct 2026 \|/)
+    // The same holds for an upload with **This replaces…** given the same title, and for titles that differ only in spacing.
+    assert.deepEqual(rowsOf(buildSourceAppendix('[old](source:gantry-two-pager)', [OLD_PAGER, { ...NEW_PAGER, title: ' Gantry_Two_pager ' }])), ['Gantry_Two_pager (replaced by a newer copy)'])
+    // A Local Workspace render, which knows the replacement only by its title, reads the same.
+    const sent = sourceEntriesForRender('[old](source:vendor-api-guide)', [fetched, again])
+    assert.equal(sent[0].replacedBy, 'Vendor API guide')
+    const scratch = [...sent.map(({ replacedBy, ...e }) => e), { id: 'vendor-api-guide.replaced-by', filename: 'x', title: sent[0].replacedBy, replaces: 'vendor-api-guide' }]
+    assert.deepEqual(rowsOf(buildSourceAppendix('[old](source:vendor-api-guide)', scratch)), ['Vendor API guide (replaced by a newer copy)'])
+  })
+
   test('a replacement\'s title holding a pipe cannot break the table', () => {
     const appendix = buildSourceAppendix('[old](source:gantry-two-pager)', [OLD_PAGER, { ...NEW_PAGER, title: 'Two | pager' }])
     assert.match(appendix, /\| Gantry_Two_pager \(replaced by Two \\\| pager\) \| Gantry_Two_pager\.docx \|/)
@@ -956,6 +973,7 @@ describe('a document a newer one replaces (#360)', () => {
     assert.match(section, /"Gantry_Two_pager \(replaced by Gantry - Two pager\)"/)
     assert.match(section, /Bring up to date/)
     assert.match(section, /"\(replaced by …\)" in place of "\(removed\)"/)
+    assert.match(section, /\*\*Fetch again\*\*[^\n]*same title[^\n]*"\(replaced by a newer copy\)"/)
     assert.match(section, /On a Local workspace, a render sends[^\n]*the newer one's title and nothing else of it/)
   })
 
