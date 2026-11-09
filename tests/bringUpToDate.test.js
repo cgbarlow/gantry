@@ -14,6 +14,8 @@ import {
   stagesToUpdate,
   updateAnswersText,
   updateCards,
+  checkingFlagsNote,
+  isStaleUpdateSession,
 } from '../web/lib/bringUpToDate.js'
 import { SOURCE_UPDATE_KIND, findOutOfDateFields } from '../web/lib/outOfDate.js'
 import { fingerprintText } from '../web/lib/sourceDocuments.js'
@@ -377,4 +379,46 @@ describe('the decisions log shows what was decided', () => {
 
 test('UPDATE_CHOICES are the labels the cards use', () => {
   assert.deepEqual(Object.values(UPDATE_CHOICES), ['Keep', 'Redraft', 'Redraft without it', 'Log an open question', 'Leave it flagged'])
+})
+
+// #357: Bring up to date from the editor's banner always lands on a page with something to do.
+describe('#357: Bring up to date always gives a way to answer every flagged Field', () => {
+  const codeChanged = (field, stage) => ({ field, cause: 'source', source: 'gantry', sourceTitle: 'gantry', change: 'code-changed', paths: ['package.json'], head: 'h2', via: ['drafted'], stages: [stage] })
+
+  test('a local workspace asks about code-changed Fields of an earlier, done Stage on that Stage, in place: none is deferred or sent elsewhere', () => {
+    // The Instance is on Build; Shape's and Design's Fields drew on files of a code repository that have since changed.
+    const flags = [codeChanged('background.problem', 'shape'), codeChanged('background.goals', 'design'), codeChanged('solution.overview', 'design'), codeChanged('plan.body', 'build')]
+    const shape = planUpdateRound({ flags, definition, pageStageId: 'shape', currentStageId: 'build', saved })
+    assert.deepEqual(shape.items.map((i) => [i.key, i.landing.kind]), [['background.problem', 'in-place'], ['background.goals', 'in-place']])
+    assert.deepEqual(shape.deferred, [])
+    assert.deepEqual(shape.elsewhere.map((e) => [e.key, e.stageId]), [['solution.overview', 'design'], ['plan.body', 'build']])
+    const design = planUpdateRound({ flags: flags.filter((f) => !f.field.startsWith('background.')), definition, pageStageId: 'design', currentStageId: 'build', saved })
+    assert.deepEqual(design.items.map((i) => i.key), ['solution.overview'])
+    // And the Stages to work through, in order, cover every one of them.
+    assert.deepEqual(stagesToUpdate({ flags, definition, currentStageId: 'build' }), [{ stageId: 'shape', count: 2 }, { stageId: 'design', count: 1 }, { stageId: 'build', count: 1 }])
+  })
+
+  test('isStaleUpdateSession: a session with nothing open and nothing unsaved is stale, so the page starts afresh from the flags as they are now', () => {
+    const snap = (over) => ({ phase: 'waiting', round: null, clash: null, drafts: {}, decisions: { pending: 0 }, update: { answered: true }, ...over })
+    // Answered and saved (still in this tab), or every card left flagged: nothing to do here any more.
+    assert.equal(isStaleUpdateSession(snap()), true)
+    // A working copy with no round and no record of the round at all (the AI's turn ended, or an older copy): nothing to press.
+    assert.equal(isStaleUpdateSession(snap({ update: null })), true)
+    assert.equal(isStaleUpdateSession(snap({ update: { answered: false }, decisions: { pending: 2 } })), true)
+    // Something to carry on: a round or a keep / use / merge card open, the AI at work, or answers waiting to be saved.
+    assert.equal(isStaleUpdateSession(snap({ phase: 'kickoff', update: null })), false)
+    assert.equal(isStaleUpdateSession(snap({ phase: 'asking', round: { id: 1, cards: [] } })), false)
+    assert.equal(isStaleUpdateSession(snap({ clash: { field: 'a.b' } })), false)
+    assert.equal(isStaleUpdateSession(snap({ phase: 'working' })), false)
+    assert.equal(isStaleUpdateSession(snap({ phase: 'error' })), false)
+    assert.equal(isStaleUpdateSession(snap({ decisions: { pending: 3 } })), false)
+    assert.equal(isStaleUpdateSession(snap({ drafts: { 'a.b': { value: 'x' } } })), false)
+    assert.equal(isStaleUpdateSession(null), false)
+  })
+
+  test('checkingFlagsNote says what is being checked, naming the code repositories being compared', () => {
+    assert.equal(checkingFlagsNote('SOAP'), 'Checking which Fields on SOAP are Out of date…')
+    assert.equal(checkingFlagsNote('SOAP', ['gantry']), 'Checking which Fields on SOAP are Out of date: the Gantry server is comparing the files they drew on in gantry with its branch now…')
+    assert.equal(checkingFlagsNote('SOAP', ['gantry', 'billing-api']), 'Checking which Fields on SOAP are Out of date: the Gantry server is comparing the files they drew on in gantry and billing-api with their branches now…')
+  })
 })

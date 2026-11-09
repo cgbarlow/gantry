@@ -26,7 +26,8 @@ import { describeInput, planSourceAccess } from './interviewSources.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 import { OPENING_MAX, logSummary } from './decisionsLog.js'
 import { outOfDateCountByStage, findOutOfDateFields, flagsForField } from './outOfDate.js'
-import { planUpdateRound, stagesToUpdate } from './bringUpToDate.js'
+import { checkingFlagsNote, isStaleUpdateSession, planUpdateRound, stagesToUpdate } from './bringUpToDate.js'
+import { isRepositorySource } from './sourceRepository.js'
 import { answeredCounts, assignChoices, planReview, reviewerLabels } from './reviewRound.js'
 import { ReviewContext, ReviewInputs, ReviewSection } from './reviewView.js'
 import { downloadReviewResponseList, hasReviewResponses, reviewResponseRows } from './reviewResponse.js'
@@ -677,6 +678,9 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   function ask(kind) {
     return (err) => new Promise((resolve) => setRecovery({ kind, message: err.message, resolve }))
   }
+  // #357: whether this page has looked at the Bring up to date session it found yet (once per session key: a reload of the setup after a
+  // Save must not drop the session that just saved).
+  const staleChecked = useRef(null)
   useEffect(() => {
     if (setup.status !== 'ready') return undefined
     let session = sessions.get(sessionKey)
@@ -708,6 +712,22 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           workingCopies.setAside(sessionKey, copy, standing)
           setAsideNotice({ savedAt: copy.savedAt })
         }
+      }
+    }
+    // #357: a Bring up to date session found with nothing open and nothing unsaved (its round saved earlier in this tab, every card left
+    // flagged, or a working copy whose AI turn ended) would leave the page with nothing to press. It is dropped, with its copy, and the page
+    // starts afresh at the kickoff, from the flags as they are now.
+    if (update && staleChecked.current !== sessionKey) {
+      staleChecked.current = sessionKey
+      if (isStaleUpdateSession(session.snapshot())) {
+        session.bind({ onChange: null })
+        session.cancel()
+        workingCopies.clear(sessionKey)
+        setCopyRestored(false)
+        session = createInterviewSession({ providerId })
+        sessions.set(sessionKey, session)
+        sessionRef.current = session
+        session.bind({ getContext: () => ctxRef.current, handlers: { askForKey: ask('key'), askToRetry: ask('retry') }, onChange: keepCopy })
       }
     }
     return () => session.bind({ onChange: null })
@@ -1510,6 +1530,14 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
   // Bring up to date (#298): what this Stage has, what waits for another Stage, and what is left flagged on purpose.
   const updateKickoffExtras = () => {
     if (setup.status !== 'ready') return null
+    // #357: until the Out of date check for this Stage has answered (a code repository is compared by the Gantry server, which takes a
+    // while), nothing is known: the kickoff says it is checking, never that nothing is Out of date, and Bring up to date waits.
+    if (!flagsReady) {
+      const repositories = (sources ?? []).filter((s) => !s.removedAt && isRepositorySource(s)).map((s) => s.title || s.id)
+      return html`<div data-testid="interview-update-plan">
+        <p class="kick-note" data-testid="interview-update-checking" role="status">${checkingFlagsNote(instance.stage.title, repositories)}</p>
+      </div>`
+    }
     const here = updatePlan?.items.length ?? 0
     const next = otherUpdateStages[0] ?? null
     return html`<div data-testid="interview-update-plan">
@@ -1520,8 +1548,12 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
       ${next && !remote
         ? html`<p class="kick-note" data-testid="interview-update-next">
             ${next.count} Field${next.count === 1 ? '' : 's'} on ${stageTitleOf(next.stageId)} ${next.count === 1 ? 'is' : 'are'} Out of date too.
-            <button type="button" class="btn small ghost" data-testid="interview-update-goto" disabled=${!onOpenStage} onClick=${() => onOpenStage?.(next.stageId)}>${here ? `Go to ${stageTitleOf(next.stageId)} first` : `Go to ${stageTitleOf(next.stageId)}`}</button>
+            <button type="button" class=${`btn small ${here ? 'ghost' : 'primary'}`} data-testid="interview-update-goto" disabled=${!onOpenStage} onClick=${() => onOpenStage?.(next.stageId)}>${here ? `Go to ${stageTitleOf(next.stageId)} first` : `Go to ${stageTitleOf(next.stageId)}`}</button>
           </p>`
+        : null}
+      ${!here && !(next && !remote)
+        ? // #357: nothing to answer here and no other Stage to go to: the one way on is back to the editor, never a page with nothing to press.
+          html`<p class="kick-note" data-testid="interview-update-done"><a class="btn small primary" href=${editorHref} data-testid="interview-update-back">Back to the editor</a></p>`
         : null}
     </div>`
   }
@@ -1638,7 +1670,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
                 : html`<p class="kick-note" data-testid="interview-revise-count">${prComments.list.length ? `${prComments.list.length} comment${prComments.list.length === 1 ? '' : 's'} on Pull Request #${prComments.pullRequestId}.` : `Pull Request #${prComments.pullRequestId} has no comment to read. The AI asks you what the Owner wants changed.`}</p>`}`
           : update
           ? html`<p class="kick-intro" data-testid="interview-update-intro">
-              <strong>Bring up to date.</strong> Some Fields drew on a Source document that has since changed. You get one card for each of them, ${instance.stage.title} first
+              <strong>Bring up to date.</strong> Some Fields drew on a Source document, or an earlier Field, that has since changed. You get one card for each of them, ${instance.stage.title} first
               and the other Stages in order. Only answering a card clears its flag, and nothing is saved until you save the round.
             </p>`
           : html`<p class="kick-intro">

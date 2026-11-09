@@ -9,6 +9,8 @@
 //   * `updateCards`      one card per Field: keep / redraft for a changed or replaced document, keep / re-cite / redraft without it for a
 //                        removed one, and a card that says why for a Field that cannot be changed from here.
 //   * `resolveUpdateCard`, `updateAnswersText`  what an answer means, and what the AI is told.
+//   * `isStaleUpdateSession`, `checkingFlagsNote`  (#357) that the page always has something to do: a session left with nothing open or unsaved
+//                        starts afresh, and while the flags are worked out the kickoff says so rather than that nothing is Out of date.
 //
 // Only answering a card clears a flag (a `source-update` entry in the decisions log, see web/lib/interviewLog.js `addSourceUpdate`). Redrafting
 // saved content still goes through keep / use the AI's version / merge (web/lib/interviewSession.js), and an accepted change to an `agreed`
@@ -404,4 +406,31 @@ export function firstFlaggedStage(flags, stageIds) {
       .filter((id) => order.includes(id))
       .sort((a, b) => order.indexOf(a) - order.indexOf(b))[0] ?? null
   )
+}
+
+/**
+ * #357: whether a Bring up to date session the Interview page finds (still in this tab, or restored from the browser's working copy) is stale:
+ * it has nothing open (no round of cards, no keep / use / merge card), the AI is not at work on it, and no answer or draft waits to be saved.
+ * A stale session would leave the page with nothing to press, so the page drops it and starts afresh at the kickoff, from the flags as they
+ * are now. One that is still at its kickoff is not stale: it is already fresh.
+ */
+export function isStaleUpdateSession(snapshot) {
+  if (!snapshot || snapshot.phase === 'kickoff') return false
+  if (snapshot.round || snapshot.clash) return false
+  if (['working', 'testing', 'asking', 'error'].includes(snapshot.phase)) return false
+  // Answers waiting for "Save the round?": that card is there to press. Without an answered round, the card isn't shown, so nothing is.
+  const unsaved = (snapshot.decisions?.pending ?? 0) > 0 || Object.keys(snapshot.drafts ?? {}).length > 0
+  return !(snapshot.update?.answered && unsaved)
+}
+
+/**
+ * #357: what the Bring up to date kickoff says while the flags for its Stage are still being worked out, in place of a count (or of "Nothing
+ * on <Stage> is Out of date", which isn't known yet). A code repository is compared by the Gantry server, which can take a while, so it is named.
+ */
+export function checkingFlagsNote(stageTitle, repositories = []) {
+  const names = asList(repositories).filter(Boolean)
+  const base = `Checking which Fields on ${stageTitle} are Out of date`
+  if (!names.length) return `${base}…`
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+  return `${base}: the Gantry server is comparing the files they drew on in ${list} with ${names.length === 1 ? 'its branch' : 'their branches'} now…`
 }
