@@ -95,6 +95,9 @@ const setStage = (folder, stage) => {
 }
 const cardIds = (page) => page.locator('[data-testid="interview-card"]').evaluateAll((els) => els.map((el) => el.dataset.cardId))
 const choose = (page, card, label) => page.locator(`[data-testid="interview-card"][data-card-id="${card}"] [data-testid="card-option"][data-option="${label}"] input`).check()
+// #358: the run plan as [Stage, state, target, note, Out of date mark] for each row.
+const plan = (page) =>
+  page.locator('[data-testid="run-plan-row"]').evaluateAll((rows) => rows.map((r) => [r.dataset.stageId, r.dataset.state, r.dataset.target, r.querySelector('.rp-note').textContent, r.querySelector('[data-testid="run-plan-out-of-date"]')?.textContent ?? '']))
 const chosen = (page, card) => page.locator(`[data-testid="interview-card"][data-card-id="${card}"] [data-testid="card-option"][data-chosen="true"]`).evaluateAll((els) => els.map((el) => el.dataset.option))
 
 // The editor of the pair at Beta, with the Brief and the Notes uploaded and cited by hand.
@@ -135,6 +138,13 @@ test('server workspace: the banner opens the round on the first Stage that has f
     assert.match(await page.textContent('.interview-rail .interview-instance + .cite'), /Alpha/)
     assert.match(await page.textContent('[data-testid="interview-update-count"]'), /^1 Field on Alpha is Out of date/)
     assert.match(await page.textContent('[data-testid="interview-update-next"]'), /1 Field on Beta is Out of date too/)
+    // #358: the run plan lists the Stages the round works through, each with its count, Alpha marked as the one on screen. It is not a run, so
+    // nothing is its target and nothing after it is struck through.
+    assert.deepEqual(await plan(page), [
+      ['a', 'current', 'false', 'bringing up to date', '1 Out of date'],
+      ['b', 'to-do', 'false', 'to bring up to date', '1 Out of date'],
+    ])
+    assert.equal(await page.locator('.runplan .rp-beyond, .runplan .rp-target').count(), 0)
     assert.equal(await page.locator('[data-testid="interview-run-until"]').count(), 0, 'it is not a run')
     assert.equal(await page.locator('[data-testid="interview-blocked"]').count(), 0, 'Alpha is not the current Stage, and that is fine here')
     assert.match(await page.textContent('[data-testid="interview-start"]'), /Bring up to date/)
@@ -177,6 +187,12 @@ test('server workspace: the banner opens the round on the first Stage that has f
     await page.click('[data-testid="update-save"]')
     await page.waitForSelector('[data-testid="update-saved"]')
     assert.match(await page.textContent('[data-testid="update-saved-summary"]'), /1 answer logged, 1 Field changed/)
+    // #358: Alpha's round is saved, so it reads done; Beta is still to do.
+    await page.waitForSelector('[data-testid="run-plan-row"][data-stage-id="a"][data-state="done"]')
+    assert.deepEqual(await plan(page), [
+      ['a', 'done', 'false', 'done', ''],
+      ['b', 'to-do', 'false', 'to bring up to date', '1 Out of date'],
+    ])
     const alpha = readYaml(join(folder, 'interview', 'a.yaml'))
     assert.match(readFileSync(join(folder, 'modules', 'ma.md'), 'utf8'), /Redrafted ma\.body from the new brief/)
     assert.match(readFileSync(join(folder, 'modules', 'ma.md'), 'utf8'), /status: draft/)
@@ -194,6 +210,11 @@ test('server workspace: the banner opens the round on the first Stage that has f
     assert.match(await page.textContent('.interview-rail .interview-instance + .cite'), /Beta/)
     assert.match(await page.textContent('[data-testid="interview-update-count"]'), /^1 Field on Beta is Out of date/)
     assert.equal(await page.locator('[data-testid="interview-update-next"]').count(), 0, 'Alpha is done')
+    // #358: on Beta's page Alpha still reads done, and Beta is the one on screen.
+    assert.deepEqual(await plan(page), [
+      ['a', 'done', 'false', 'done', ''],
+      ['b', 'current', 'false', 'bringing up to date', '1 Out of date'],
+    ])
     await page.waitForSelector('[data-testid="interview-start"]:not([disabled])')
     await page.click('[data-testid="interview-start"]')
     await page.waitForSelector('[data-testid="interview-round"]')
@@ -212,8 +233,12 @@ test('server workspace: the banner opens the round on the first Stage that has f
     assert.deepEqual(beta.status ?? [], [], 'a round that needed no AI leaves the Stage’s status alone')
     assert.match(readFileSync(join(folder, 'modules', 'mb.md'), 'utf8'), /Beta notes \[Brief\]\(source:brief\)/, 'a kept Field is exactly as it was')
 
-    // Both cards answered and saved: nothing is Out of date any more, in the editor or the run plan.
+    // Both cards answered and saved: nothing is Out of date any more, in the editor or the run plan, and both Stages read done (#358).
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="run-plan-out-of-date"]').length === 0)
+    assert.deepEqual(await plan(page), [
+      ['a', 'done', 'false', 'done', ''],
+      ['b', 'done', 'false', 'done', ''],
+    ])
     await page.click('[data-testid="update-back-to-editor"]')
     await page.waitForSelector('.module')
     const panel2 = await openPanel(page)

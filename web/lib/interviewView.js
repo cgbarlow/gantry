@@ -26,7 +26,7 @@ import { describeInput, planSourceAccess } from './interviewSources.js'
 import { effectiveTargetSize, fieldTargetWords, targetSizeLabel } from './targetSize.js'
 import { OPENING_MAX, logSummary } from './decisionsLog.js'
 import { outOfDateCountByStage, findOutOfDateFields, flagsForField } from './outOfDate.js'
-import { checkingFlagsNote, isStaleUpdateSession, planUpdateRound, stagesToUpdate } from './bringUpToDate.js'
+import { checkingFlagsNote, isStaleUpdateSession, planUpdateRound, roundPlanRows, stagesToUpdate } from './bringUpToDate.js'
 import { isRepositorySource } from './sourceRepository.js'
 import { answeredCounts, assignChoices, planReview, reviewerLabels } from './reviewRound.js'
 import { ReviewContext, ReviewInputs, ReviewSection } from './reviewView.js'
@@ -52,7 +52,12 @@ export function forgetInterviewSession(slug, stageId) {
 export function clearInterviewSessions() {
   for (const session of sessions.values()) session.cancel()
   sessions.clear()
+  roundsSaved.clear()
 }
+// #358: the Stages whose Bring up to date (or review comments) round was saved in this tab, by `<slug>|update` (`|review`), so the run plan on
+// the next Stage's page still reads done for them once their flags have cleared.
+const roundsSaved = new Map()
+const noteRoundSaved = (slug, mode, stageId) => roundsSaved.set(`${slug}|${mode}`, new Set([...(roundsSaved.get(`${slug}|${mode}`) ?? []), stageId]))
 /**
  * The Modules of this Stage that hold unsaved drafts from the interview (#289), for the editor's banner: the editor shows saved content
  * only, so it points to the Interview page, where those drafts are edited. `[]` when no interview is open for the Stage.
@@ -933,7 +938,8 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     remote && setup.status === 'ready' && !ahead
       ? stagesList.slice(0, Math.max(0, currentAtIndex)).map((st) => ({ id: st.id, title: st.title, ...reopenOffer({ stages: stagesList, currentStageId: instance.currentStageId, targetId: st.id, inProgress: startedStages }) }))
       : []
-  const otherUpdateStages = setup.status === 'ready' && outOfDate.length ? stagesToUpdate({ flags: outOfDate, definition: setup.definition, remote, currentStageId: instance.currentStageId }).filter((st) => st.stageId !== instance.stage.id) : []
+  const updateStages = setup.status === 'ready' && outOfDate.length ? stagesToUpdate({ flags: outOfDate, definition: setup.definition, remote, currentStageId: instance.currentStageId }) : []
+  const otherUpdateStages = updateStages.filter((st) => st.stageId !== instance.stage.id)
   // #303: the review comments of the kept Reviewed copies that this Stage can act on, where each change would land (the rules of Bring up to date), and the threads Word resolved.
   const reviewLabelMap = useMemo(() => reviewerLabels(reviewCopies ?? []), [reviewCopies])
   const reviewPlan =
@@ -951,6 +957,22 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
           saved: [...instance.modules, ...otherSaved],
         })
       : null
+  // #358: Bring up to date and review comments are not runs: they have no target, and they work through every Stage that has something, in
+  // order. So the run plan lists those Stages (Bring up to date with its count of Out of date Fields), marks the one on screen as current and
+  // the ones saved in this tab as done, and strikes nothing through. A revision (#299) is part of the run it was sent back from, and keeps it.
+  const roundMode = update ? 'update' : review ? 'review' : null
+  const reviewStages = reviewPlan ? [...(reviewPlan.items.length ? [{ stageId: instance.stage.id, count: reviewPlan.items.length }] : []), ...reviewPlan.stages.filter((st) => st.stageId !== instance.stage.id)] : []
+  const planShown = roundMode
+    ? roundPlanRows({
+        rows: planRowsNow,
+        pageStageId: instance.stage.id,
+        toDo: update ? updateStages : reviewStages,
+        saved: saving?.phase === 'saved' && Boolean(saving.update),
+        done: [...(roundsSaved.get(`${instance.slug}|${roundMode}`) ?? [])],
+        checking: update && !flagsReady,
+        words: roundMode,
+      }).map((row) => (update ? { ...row, outOfDate: row.count } : row))
+    : planRowsNow
   const reviewContext = (mode) => ({
     mode,
     items: reviewPlan.items,
@@ -1214,6 +1236,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     const decisions = delta && !usedAi ? { ...delta, status: undefined } : delta
     // Every Field was left flagged: nothing was answered, so there is nothing to write (and no empty log file or commit to make).
     if (keys.length === 0 && (decisions?.entries ?? []).length === 0) {
+      if (roundMode) noteRoundSaved(instance.slug, roundMode, instance.stage.id)
       setSaving({ phase: 'saved', update: true, fields: 0, answers: 0, returned: [] })
       return true
     }
@@ -1240,6 +1263,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
     }
     workingCopies.clear(sessionKey)
     const returned = (decisions?.entries ?? []).filter((e) => e.kind === 'returned-to-draft')
+    if (roundMode) noteRoundSaved(instance.slug, roundMode, instance.stage.id)
     setSaving({ phase: 'saved', update: true, fields: keys.length, answers: (decisions?.entries ?? []).filter((e) => e.kind === kind).length, returned })
     return true
   }
@@ -2516,7 +2540,7 @@ export function InterviewPage({ instance, store, actor = '', editorHref, blocked
         <div data-testid="run-plan">
           <h3 class="side">Run plan</h3>
           <ol class="runplan">
-            ${planRowsNow.map(
+            ${planShown.map(
               (row) => html`<li
                 key=${row.id}
                 class=${`rp-${row.state}${row.target ? ' rp-target' : ''}${row.checkable ? ' rp-checkable' : ''}`}

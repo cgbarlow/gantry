@@ -2376,6 +2376,10 @@ table.vgrid .vgrid-rowh { border: none; padding: 0; position: relative; backgrou
 .interview-rail .runplan .rp-done .dot { background: var(--stamp-agreed-bg); border-color: var(--stamp-agreed-bg); }
 .interview-rail .runplan .rp-beyond { color: var(--text-muted); text-decoration: line-through; }
 .interview-rail .runplan .rp-target .rp-title { font-weight: 600; }
+/* #358: Bring up to date's plan: the Stage on screen, and the Stages with Out of date Fields still to work through. */
+.interview-rail .runplan .rp-current .dot { background: var(--text); border-color: var(--text); }
+.interview-rail .runplan .rp-current .rp-title { font-weight: 600; }
+.interview-rail .runplan .rp-to-do .dot { border-color: var(--warning, #b06a00); }
 .interview-rail .runplan li:has(.rp-tokens) { flex-wrap: wrap; }
 .interview-rail .runplan .rp-tokens { order: 3; flex-basis: 100%; margin-left: 18px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); cursor: help; }
 .interview-rail .rail-tokens dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; margin: 0; font-size: 13px; }
