@@ -42,9 +42,11 @@ export const TOKENS_NOT_REPORTED = 'not reported'
  * real name and the date, the comment, its replies and any tracked change word for word, the Fields and whether each changed since the render, and the outcome with
  * the architect's words, so it stands on its own even on a branch that does not hold the file.
  * `pr-comment-answered` (#299) records that the architect answered a comment the Owner left on the Stage's Pull Request when they sent it back: who wrote it, where, an excerpt, a link, what was decided, and the ids of the entries that answered it.
+ * `definition-move` (#362) records that the Instance moved to a newer version of its Definition from its Settings: the two versions, the
+ * Fields whose content the move removed, and a `note` saying so in plain words (web/lib/definitionVersionMove.js builds it).
  * The log adds more by their own tickets, and shows any kind it does not know as it is.
  */
-export const ENTRY_KINDS = Object.freeze(['answer', 'fact', 'saved-content', 'hand-edit', 'open-question', 'artefact', 'restart', 'model-change', 'term', 'save-clash', 'source-update', 'returned-to-draft', 'review-answered', 'pr-comment-answered'])
+export const ENTRY_KINDS = Object.freeze(['answer', 'fact', 'saved-content', 'hand-edit', 'open-question', 'artefact', 'restart', 'model-change', 'term', 'save-clash', 'source-update', 'returned-to-draft', 'review-answered', 'pr-comment-answered', 'definition-move'])
 
 /** Where a Stage's log lives, relative to the Instance's folder. */
 export const decisionsLogPath = (stageId) => `interview/${stageId}.yaml`

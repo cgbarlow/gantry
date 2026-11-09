@@ -94,6 +94,7 @@ import { InstanceSettingSelect } from '../lib/instanceSettingsView.js'
 import { instanceLogoPath, instanceLogoRecordPath } from '../lib/instanceLogo.js'
 import { logoImageInfo } from '../lib/definitionLogo.js'
 import { InstanceLogoControl } from '../lib/instanceLogoControl.js'
+import { DefinitionMoveRow, localDefinitionMove, moveLocalInstance } from '../lib/definitionMoveView.js'
 
 // ---------- Shared header ----------
 // One header shape for all three Settings screens: a title (distinct per
@@ -1464,6 +1465,25 @@ async function saveInstanceSettings(slug, settings) {
   return body
 }
 
+// #362: the server-hosted "Move to v<N>" I/O, over `/api/instance/definition-move` (lib/server.js). A workspace that can't say (a
+// server workspace kept in a Blob container answers no such route) offers no move, so its Version row reads as it always has.
+async function loadDefinitionMove(slug) {
+  const res = await apiFetchForInstance(slug, `/api/instance/definition-move?slug=${encodeURIComponent(slug)}`, {}, { silent: true })
+  if (!res.ok) return null
+  return res.json()
+}
+
+async function moveDefinitionVersion(slug, to) {
+  const res = await apiFetchForInstance(slug, `/api/instance/definition-move?slug=${encodeURIComponent(slug)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.message ?? body.error ?? `Couldn't move the Instance (${res.status})`)
+  return body
+}
+
 // #224: the server-hosted Logo control's I/O, over `/api/instance/logo` (lib/server.js).
 async function loadInstanceLogo(slug) {
   const res = await apiFetchForInstance(slug, `/api/instance/logo?slug=${encodeURIComponent(slug)}`)
@@ -1552,8 +1572,9 @@ function InstanceSettingsSection({ settings, disabled = false, onSave, logo = nu
 }
 
 // Read-only — slug, definition, and the instance's own current stage. Not
-// a form: nothing here is editable from this screen.
-function InstanceInfoSection({ instance }) {
+// a form: nothing here is editable from this screen, except (#362) the move to a newer published version
+// of its Definition, offered under the Version row when there is one.
+function InstanceInfoSection({ instance, move = null }) {
   return html`
     <section class="settings-section">
       <h2>Instance info</h2>
@@ -1561,6 +1582,7 @@ function InstanceInfoSection({ instance }) {
         <div class="result-row"><span class="k">Slug</span><span class="v">${instance.slug}</span></div>
         <div class="result-row"><span class="k">Definition</span><span class="v">${instance.definition}</span></div>
         <div class="result-row"><span class="k">Version</span><span class="v">v${instance.definitionVersion}</span></div>
+        ${move ? html`<${DefinitionMoveRow} ...${move} />` : null}
         <div class="result-row">
           <span class="k">Current stage</span>
           <span class="v">${instance.stage.title} (gate: ${instance.stage.gate})</span>
@@ -1690,6 +1712,9 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
   // #224: the Definition's header logo — what the instance shows without one of its own — or `null`
   // when its reference documents carry none (or it can't be read), which offers no Logo setting.
   const [definitionLogo, setDefinitionLogo] = useState(null)
+  // #362: the move to a newer published version of the Definition, worked out from this folder (`{ view, plan }`), or `null`.
+  const [definitionMove, setDefinitionMove] = useState(null)
+  const [moveStatus, setMoveStatus] = useState('')
 
   async function load() {
     setState('loading')
@@ -1709,11 +1734,14 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
       const rec = parseInstanceYaml(text)
       setRecord(rec)
       setAssigneeDraft(rec.assignee ?? '')
+      let loaded = null
       try {
-        setStructure(await resolveDefinitionStructure(h, rec.definition, rec.definitionVersion ?? 1))
+        loaded = await resolveDefinitionStructure(h, rec.definition, rec.definitionVersion ?? 1)
       } catch {
-        setStructure(null)
+        loaded = null
       }
+      setStructure(loaded)
+      setDefinitionMove(loaded ? await localDefinitionMove(h, slug, rec, loaded).catch(() => null) : null)
       setDefinitionLogo(await resolveDefinitionLogo(h, rec.definition, rec.definitionVersion ?? 1).catch(() => null))
       setState('ready')
     } catch (err) {
@@ -1766,6 +1794,17 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
   }
 
   const instanceSettings = structure && record ? instanceSettingsWithValues(structure, record) : []
+
+  // #362: the move is the folder's own files, written by this browser; a reload then shows the Instance on its new version.
+  // It is worked out again from the folder as it is now, so a Module saved since Settings opened is not written over.
+  async function handleDefinitionMove(shown) {
+    const current = parseInstanceYaml(await readLocalTextFile(handle, `gantry-workspace/${slug}/instance.yaml`))
+    const fresh = await localDefinitionMove(handle, slug, current, structure)
+    if (!fresh || fresh.plan.to !== shown.to) throw new Error('This Instance changed since Settings opened. Nothing was changed: reload Settings to see the move on offer now.')
+    await moveLocalInstance(handle, slug, fresh.plan)
+    await load()
+    setMoveStatus(`Moved to v${fresh.plan.to}.`)
+  }
 
   // #224: the Local Workspace twin of PUT/DELETE /api/instance/logo — the image in the instance's
   // `assets/` folder and the `logo:` key naming it, written straight into the folder.
@@ -1840,6 +1879,7 @@ function LocalInstanceSettingsPage({ query, workspaceId, slug }) {
                 <div class="result-row"><span class="k">Slug</span><span class="v">${slug}</span></div>
                 <div class="result-row"><span class="k">Definition</span><span class="v">${record.definition}</span></div>
                 <div class="result-row"><span class="k">Version</span><span class="v">v${record.definitionVersion ?? 1}</span></div>
+                <${DefinitionMoveRow} move=${definitionMove?.view ?? null} where="in this workspace's folder" onMove=${handleDefinitionMove} status=${moveStatus} />
                 <div class="result-row"><span class="k">Current stage</span><span class="v">${record.stage}</span></div>
               </div>
             </section>
@@ -1899,6 +1939,27 @@ function RemoteInstanceSettingsPage({ query }) {
   useWriteAccessCheck(instance, workspaceId)
   const blocked = writeAccessBlocked(instance, workspaceId)
 
+  // #362: the move to a newer published version of the Instance's Definition, asked for once the Instance has loaded (and again after
+  // a move, which reloads it). `null` offers none.
+  const [definitionMove, setDefinitionMove] = useState(null)
+  const [moveStatus, setMoveStatus] = useState('')
+  useEffect(() => {
+    if (!instance) return
+    let cancelled = false
+    loadDefinitionMove(slug)
+      .then((move) => !cancelled && setDefinitionMove(move))
+      .catch(() => !cancelled && setDefinitionMove(null))
+    return () => {
+      cancelled = true
+    }
+  }, [instance])
+
+  async function handleDefinitionMove(move) {
+    await moveDefinitionVersion(slug, move.to)
+    setMoveStatus(`Moved to v${move.to}.`)
+    setInstance(await fetchInstanceDetail(slug))
+  }
+
   return html`
     <${SettingsHeader} title="Instance Settings" backHref=${backHrefFrom(query)} />
     <main class="settings-page">
@@ -1925,7 +1986,16 @@ function RemoteInstanceSettingsPage({ query }) {
                     : null}
                 />`
               : null}
-            <${InstanceInfoSection} instance=${instance} />
+            <${InstanceInfoSection}
+              instance=${instance}
+              move=${{
+                move: definitionMove,
+                disabled: blocked,
+                where: instance.workspaceBacked ? "one commit on the current Stage's branch" : 'one save',
+                onMove: handleDefinitionMove,
+                status: moveStatus,
+              }}
+            />
             <${WorkItemLinkSection} instance=${instance} />
             <${InstanceArchiveSection} slug=${slug} archived=${instance.archived} />
           `

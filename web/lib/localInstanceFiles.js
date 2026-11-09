@@ -148,7 +148,8 @@ export function withStoredInstanceLogo(record, path) {
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
 
-function normalizeHeadingText(text) {
+// Exported for web/lib/definitionVersionMove.js (#362), which finds a Field's section the way this parser does.
+export function normalizeHeadingText(text) {
   return text
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/__(.+?)__/g, '$1')

@@ -31,10 +31,15 @@ migrated.
 
 ### Moving an Instance from v3 (#359)
 
-Delete the `## References` section from the Instance's `modules/team-and-estimates.md`, then set
-`definitionVersion: 4` in its `instance.yaml`. Gantry does not do this for you, as with v3. Anything
-in that list that the documents should still name belongs in Sources: upload it as a Source document
-and cite it where the content draws on it.
+Open the Instance's **Settings** and choose **Move to v4…** under its Version (#362). The dialog lists
+what the move removes, References if the Instance has any, and on confirm Gantry takes the
+`## References` section out of `modules/team-and-estimates.md`, sets `definitionVersion: 4` and records
+the move in the current Stage's decisions log, as one change. An Instance on v1 or v2 is offered v4
+the same way. Anything in that list that the documents should still name belongs in Sources: upload
+it as a Source document and cite it where the content draws on it.
+
+For reference, the move by hand: delete the `## References` section from the Instance's
+`modules/team-and-estimates.md`, then set `definitionVersion: 4` in its `instance.yaml`.
 
 If you set the version and leave the section in the file, v4 reads it the way Gantry reads any `##`
 section of a Module file that the Definition has no Field for: as an added section. It stays in the
