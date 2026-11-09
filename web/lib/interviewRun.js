@@ -174,6 +174,43 @@ export function resumableRun({ stages, currentStageId, logs = {}, openPullReques
 }
 
 /**
+ * Whether the run is done on this Stage (#355): its target Stage is saved, so the Interview page offers the next steps (Open in the editor,
+ * Re-open <Stage>) in place of the run's controls (Pause, Finish with your recommendations, the chat box). The one rule the page follows, in
+ * the order the page knows things:
+ *
+ *   1. A Save made on this page says, from `saveOutcome`'s `finished`: the Stage saved is the run's target. A run of one Stage (its start is
+ *      its target) is done after its one Save; a Stage saved before the target is paused (Resume the run), not done. On Azure DevOps or GitHub
+ *      the run is done at the target whatever its approval is doing (asked for, queued behind an earlier Stage, refused): the card's own
+ *      actions stay, and the session has nothing more to draft. Anything else on the way (a Save going, a Pause, a Save that failed, moving
+ *      on, drafting ahead) is not a done run.
+ *   2. `reopened`: the architect chose Re-open <Stage> since, so the Stage is open for another session until a Save finishes the run again.
+ *   3. The run this tab holds, when it is on this Stage (back on the page in the same tab): `done` there, else not. A run carrying on into
+ *      the Stage is starting it, whatever an earlier run's log says.
+ *   4. Otherwise only a page at its kickoff (a reload, or another browser) on a Local or Server-hosted workspace reads the decisions log: the
+ *      newest status line says `done`. A remote workspace's Provider, not the log, says where approval stands, and its cards say so.
+ *
+ * Bring up to date, review comments and a revision are not runs; the page asks this only of an interview.
+ *
+ * @param {object} input
+ * @param {string} input.stageId  the Stage the page is on
+ * @param {{phase: string, finished?: boolean}|null} [input.saving]  this page's last Save, if any
+ * @param {{phase: string, at?: string, carryOn?: string|null}|null} [input.run]  the run held in this tab (`interviewRuns`)
+ * @param {boolean} [input.reopened]  Re-open <Stage> was chosen on this page since the run was done
+ * @param {boolean} [input.started]  a session is going on this Stage (it is past its kickoff)
+ * @param {boolean} [input.remote]  an Azure DevOps or GitHub workspace
+ * @param {object|null} [input.log]  the Stage's committed decisions log
+ * @returns {boolean}
+ */
+export function runIsDone({ stageId, saving = null, run = null, reopened = false, started = false, remote = false, log = null }) {
+  if (saving) return saving.phase === 'saved' && saving.finished === true
+  if (reopened) return false
+  if (run?.carryOn === stageId) return false
+  if (run?.at === stageId) return run.phase === 'done'
+  if (started || remote) return false
+  return latestStatus(log)?.state === 'done'
+}
+
+/**
  * The Stage a run began on, from the `stages` map the run's last Save wrote into its status block (#293): the earliest of the Stages it
  * names. `fallback` when the log names none. A run resumed in another browser takes its start from here, so its session total (#294)
  * still adds up the Stages it already went through.
