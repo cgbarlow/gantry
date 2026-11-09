@@ -17,6 +17,74 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.16.4 — 2026-11-09
+
+Design v4 drops the References section, which only repeated what the Sources appendix already lists, and new design
+Instances start on it. An Instance's Settings now move it to a newer Definition version in one step, and the Sources
+appendix says when a cited document has been replaced by a newer one.
+
+### Changed
+
+- **Design v4 has no References section** (#359).
+  - **What changes.** The SOAP, Full SOAP, SAD and SSAD no longer print References, because it listed the same
+    documents as the Sources appendix at the end of each document. The Full SOAP's Gate no longer asks for it. The
+    Sources appendix, the other Fields, the Stages and Gates, the Word reference documents and the logo are v3's.
+    Detailed Design still shows Teams required and Estimates.
+  - **New design Instances start on v4.** v4 is the latest published version, so it is what a new design Instance is
+    created on.
+  - **Your v1, v2 and v3 Instances render as before**, References included. Those versions are unchanged and nothing
+    is migrated: an Instance keeps its version until you move it.
+  - **Moving an Instance to v4.** Use **Move to v4…** in the Instance's Settings (below). Anything in References that
+    the documents should still name belongs in Sources: upload it as a Source document and cite it where the content
+    draws on it. If you move by hand and leave the References section in `team-and-estimates.md`, Gantry keeps it as
+    an added section that no document prints and no Gate asks for.
+  - **The bundled examples are on v4.** `kiwi-cover-mutual` and `gantry` have their References lists removed and pass
+    the same Gates they passed on v3.
+- **An Instance's Settings offer Move to v<N>…** (#362).
+  - **What changes.** When the Instance's Definition has a newer published version, Settings show *v<N> is available*
+    under the Version, with a **Move to v<N>…** button. Only the latest published version is offered, so a design v2
+    Instance is offered v4. An Instance already on the latest version shows nothing extra.
+  - **What the dialog shows.** Before anything changes, it lists the Fields the move **removes** that this Instance has
+    content in (for design v3 to v4, References), the Fields that are **new or now required** by a Gate the Instance
+    still has to pass (nothing is added for these; they are listed so you know what the next Gate will want), and the
+    Fields whose **type changed**, whose content Gantry leaves as it is. Below the list is the new version's own
+    CHANGELOG section. A Field in the same Module under the same title counts as the same Field, so a design v2
+    Instance keeps its Glossary and Open questions and sees Key decisions listed as new.
+  - **What the move does.** On confirm, Gantry takes the removed Fields' sections out of the Module files, sets
+    `definitionVersion` in `instance.yaml`, and records the move in the current Stage's decisions log, for example
+    *Moved from v3 to v4. Removed: References (…)*. It is one change: one commit on the Stage's branch on Azure DevOps,
+    GitHub or GitLab, one save on a server workspace (on the server's disk or in a Blob container), and the folder's
+    own files on a Local workspace. If any part fails, nothing is changed and the dialog says why.
+  - **It waits for approval.** On a Provider workspace, while the current Stage is awaiting approval the button is
+    greyed out with a sentence saying why: the move would change content its Pull Request asks the Owner to approve.
+  - **It replaces the manual steps.** Moving no longer means editing the Module files and `instance.yaml` yourself.
+    design v4's CHANGELOG keeps the manual steps for reference.
+- **The Sources appendix marks a document that a newer one replaces** (#360).
+  - **What changes.** A cited document that has been replaced reads *<title> (replaced by <newer title>)*, for example
+    *Gantry_Two_pager (replaced by Gantry - Two pager)*, in Word and in the exported .md, on every workspace. When the
+    newer copy has the same title, as a page added by **Fetch again** does, the mark reads *(replaced by a newer copy)*
+    and the date column tells the two rows apart. A removed document that has also been replaced shows *(replaced by
+    …)* in place of *(removed)*. In a chain, each row names the document that directly replaces it, as the Source
+    documents panel does.
+  - **Both rows while both are cited.** Fields written before the newer copy arrived still cite the old one, so both
+    are listed. Once **Bring up to date** has moved every citation to the new copy, the old one is no longer cited and
+    drops off the list by itself.
+  - **It relies on This replaces… or Fetch again.** Gantry only knows a document replaces another when it was uploaded
+    with **This replaces…** chosen, or added by **Fetch again**. A newer version uploaded as an ordinary upload is just
+    another document, with no mark on the old one.
+  - **Unchanged.** Footnotes and in-text citations.
+
+### Notes
+
+- A Local workspace render now sends the server one more item for each cited document that has been replaced: the
+  newer document's title. Nothing else of the newer document is sent, not its id, filename or link.
+- On a design v3 Instance, **Populate example text** leaves References empty, because the example it fills from is now
+  on v4. v3's Full SOAP Gate still asks for References, so write it yourself.
+- The decisions log line for a move does not name who made it. Moving is in the browser only; the MCP server has no
+  tool for it.
+- On a Provider workspace, a move that fails after the Stage's branch was opened leaves that branch in place, with the
+  same content as before.
+
 ## 0.16.3 — 2026-11-09
 
 Key decisions are read the way the AI actually writes them, so the interview stops looping on a warning nobody can
