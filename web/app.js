@@ -76,7 +76,7 @@ import {
 } from './lib/localWorkspace.js'
 import { wrap } from './lib/editorWrap.js'
 import { SourceDocumentsPanel } from './lib/sourceDocumentsPanel.js'
-import { citedCommits, citedSourceIds } from './lib/sourceCitations.js'
+import { citedCommits, citedSourceIds, sourceEntriesForRender } from './lib/sourceCitations.js'
 import { repositoryReaderFor } from './lib/sourceRepositoryClient.js'
 import { InterviewPage, clearInterviewSessions, startRoundAfresh, unsavedDraftModules } from './lib/interviewView.js'
 import { createLocalSourceStore } from './lib/localSourceDocuments.js'
@@ -386,13 +386,11 @@ async function buildLocalComputePayload(instance) {
     moduleFiles[moduleId] = await readLocalTextFile(handle, `gantry-workspace/${slug}/modules/${entry.name}`)
   }
   const payload = { definitionId: instance.definition, definitionVersion: instance.localDefinitionVersion, instanceYaml, moduleFiles }
-  // #281: a render prints the title of each Source document the content cites, and the Sources appendix lists them. Only the manifest entries of the ones cited go (their title, filename and dates, #318 a fetched one's origin, #319 a code repository's pointer), and only when something cites one: a Source document and its text never leave the folder.
-  const citedSources = citedSourceIds(Object.values(moduleFiles).join('\n'))
-  if (citedSources.length) {
+  // #281: a render prints the title of each Source document the content cites, and the Sources appendix lists them. Only the manifest entries of the ones cited go (their title, filename and dates, #318 a fetched one's origin, #319 a code repository's pointer), and only when something cites one: a Source document and its text never leave the folder. #360: a cited one a newer document replaces also carries that document's title, for the Sources appendix's "(replaced by …)", and nothing else of it.
+  const moduleText = Object.values(moduleFiles).join('\n')
+  if (citedSourceIds(moduleText).length) {
     const { entries: sourceEntries } = await createLocalSourceStore(handle, slug).list()
-    payload.sources = sourceEntries
-      .filter((e) => citedSources.includes(e.id))
-      .map(({ id, filename, title, uploadedAt, removedAt, origin, repository }) => ({ id, filename, title, uploadedAt, removedAt, origin, repository }))
+    payload.sources = sourceEntriesForRender(moduleText, sourceEntries)
   }
   // #224: the instance's own Logo, which the render puts in its documents' page header, rides along
   // as an asset at the path its instance.yaml names (`assets/instance-logo.png`).
