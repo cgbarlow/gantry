@@ -335,8 +335,8 @@ test('an over-budget instance still passes its gate and renders exactly what the
 
 // Spec #192's regression guard: design v2 declares no budgets, so an instance on it reads exactly as
 // before — no size, no targets — and a copy of v2 that does declare one renders the same document from
-// the same content. The bundled example is on v3, which declares budgets (#203), so the copy is pinned
-// back to v2 here.
+// the same content. The bundled example is on v4 (#359), which keeps v3's budgets (#203), so the copy is
+// pinned back to v2 here.
 test('design v2 renders the same SOAP for the example instance with or without a budget on one of its fields', () =>
   withLibrary(async ({ instancesDir }) => {
     const definitionsDir = mkdtempSync(join(tmpdir(), 'gantry-202-design-'))
@@ -351,7 +351,7 @@ test('design v2 renders the same SOAP for the example instance with or without a
 
       cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'kiwi-cover-mutual'), { recursive: true })
       const instanceYaml = join(instancesDir, 'kiwi-cover-mutual', 'instance.yaml')
-      writeFileSync(instanceYaml, readFileSync(instanceYaml, 'utf8').replace(/^definitionVersion: 3$/m, 'definitionVersion: 2'))
+      writeFileSync(instanceYaml, readFileSync(instanceYaml, 'utf8').replace(/^definitionVersion: 4$/m, 'definitionVersion: 2'))
       const withBudget = renderArtefact('kiwi-cover-mutual', 'soap', { dryRun: true, instancesDir, definitionsDir })
       const withoutBudget = renderArtefact('kiwi-cover-mutual', 'soap', { dryRun: true, instancesDir, definitionsDir: 'definitions' })
       assert.equal(withBudget.markdown, withoutBudget.markdown)

@@ -29,10 +29,3 @@ owner: p.natarajan
 | Reporting, security and C&A | S | Extends existing extracts; standard C&A path |
 
 Three increments over about nine months, sized on the KCM Delivery Office T-shirt scale.
-
-## References
-
-- Claims Service Review 2025, KCM Claims Operations
-- BIBIT gateway contract and integration guide v4.2
-- ArchiMate 3.2 Specification, The Open Group
-- KCM Delivery Office T-shirt sizing guide v3

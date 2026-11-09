@@ -7,6 +7,7 @@ import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { bodyTables, docxPart, expectedTableOfContents, footnoteMarks, footnotes, headerRowFormat, headingBookmarks, headingNumbers, rowsCantSplit, tableOfContents, wordStyles } from './helpers/wordDocx.js'
 import { renderArtefact } from '../lib/render.js'
+import { designV3Examples } from './helpers/designExamples.js'
 
 // #197 (spec #192) — the browser half of design v3's Word styles. The default Render converts in the
 // browser with pandoc-wasm (Pandoc 3.10), not the server's native Pandoc that tests/designV3.test.js
@@ -15,7 +16,8 @@ import { renderArtefact } from '../lib/render.js'
 // the one table style, its header row repeating and its rows kept together. #206: and its table of
 // contents filled in, as tests/tableOfContentsPrefill.test.js checks for the native render.
 
-const EXAMPLE = 'workspaces/examples/kiwi-cover-mutual'
+// #359: the bundled example is on design v4, so these v3 renders read it as it was on v3.
+const EXAMPLE = join(designV3Examples(), 'kiwi-cover-mutual')
 
 // One browser render serves every test in this file.
 let sadInBrowser

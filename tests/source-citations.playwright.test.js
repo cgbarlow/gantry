@@ -291,7 +291,14 @@ test('local workspace: a citation opens the document from the folder, Use as ima
       assert.equal(await readLocal(page, `gantry-workspace/${slug}/sources/Whiteboard sketch.png`, 'bytes'), null)
       assert.deepEqual(await readLocal(page, `gantry-workspace/${slug}/assets/Whiteboard-sketch.png`, 'bytes'), Array.from(pngImage()))
 
-      // A render request carries the title, filename and dates of the one document the content cites, and nothing of it or of any other.
+      // #360: a newer copy of the notes, uploaded with "This replaces…". The content still cites the old one.
+      const newerMarker = 'UNIQUE-NEWER-DOCUMENT-MARKER-4417'
+      await panel.locator('[data-testid="source-replaces"]').selectOption({ label: 'This replaces… Notes' })
+      await input.setInputFiles({ name: 'Notes v2.txt', mimeType: 'text/plain', buffer: Buffer.from(`${newerMarker}\n`) })
+      await panel.locator('tr[data-source-id="notes-v2"]').waitFor()
+
+      // A render request carries the title, filename and dates of the one document the content cites, and nothing of it or of any other;
+      // #360: of the newer copy that replaces it, only its title.
       const apiRequests = []
       page.on('request', (req) => {
         if (new URL(req.url()).pathname.startsWith('/api/local/')) apiRequests.push({ url: req.url(), body: req.postData() ?? '' })
@@ -312,7 +319,9 @@ test('local workspace: a citation opens the document from the folder, Use as ima
         assert.deepEqual(body.sources?.map((s) => s.id), ['notes'], 'only the cited document\'s entry')
         assert.equal(body.sources[0].title, 'Notes')
         assert.equal(body.sources[0].filename, 'Notes.txt')
-        for (const needle of [marker, 'Unrelated', 'Whiteboard', 'sources/', 'manifest.yaml', 'uploadedBy']) {
+        assert.equal(body.sources[0].replacedBy, 'Notes v2')
+        assert.deepEqual(Object.keys(body.sources[0]).sort(), ['filename', 'id', 'replacedBy', 'title', 'uploadedAt'], 'nothing else of the newer copy: not its id, filename or link')
+        for (const needle of [marker, newerMarker, 'Notes v2.txt', 'notes-v2', 'Unrelated', 'Whiteboard', 'sources/', 'manifest.yaml', 'uploadedBy']) {
           assert.ok(!call.body.includes(needle), `${call.url} must not carry "${needle}"`)
         }
       }

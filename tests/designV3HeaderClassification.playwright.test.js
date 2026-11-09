@@ -8,6 +8,7 @@ import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { bodyParagraphs, docxPart } from './helpers/wordDocx.js'
 import { classificationField, coverClassificationStyle, headerVisibleText, sectionHeaders } from './helpers/wordHeaders.js'
+import { designV3Examples } from './helpers/designExamples.js'
 
 // #207 — the browser half of design v3's header classification. The default Render converts in the
 // browser with pandoc-wasm (Pandoc 3.10), not the native Pandoc tests/designV3HeaderClassification.test.js
@@ -60,7 +61,8 @@ async function renderInBrowser(prepare, artefactTitle) {
 
 test('the browser\'s pandoc-wasm render of the v3 SAD has the classification field in every page type\'s header, and the cover\'s classification for it to read (#207)', async () => {
   const docx = await renderInBrowser((instancesDir) => {
-    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    // #359: the bundled example is on design v4, so this v3 render reads it as it was on v3.
+    cpSync(join(designV3Examples(), 'kiwi-cover-mutual'), join(instancesDir, 'examples'), { recursive: true })
     rmSync(join(instancesDir, 'examples', 'out'), { recursive: true, force: true })
     // The SAD renders at Detailed Design, which the bundled example has passed; open it there.
     const instanceYaml = join(instancesDir, 'examples', 'instance.yaml')

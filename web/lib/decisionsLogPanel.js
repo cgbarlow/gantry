@@ -108,6 +108,9 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
       return describePrComment(entry)
     case 'returned-to-draft':
       return entry.note ?? `${entry.module ?? 'A Module'} returned to draft`
+    case 'definition-move':
+      // #362: written whole when the move was made, so it reads the same wherever the log is shown.
+      return entry.note ?? `Moved from v${entry.from} to v${entry.to}`
     case 'artefact':
       return `Aimed for the ${entry.title ?? entry.artefact} Artefact`
     case 'restart':
@@ -119,7 +122,7 @@ export function describeEntry(entry, { fieldTitle = (key) => key } = {}) {
   }
 }
 
-const KIND_LABELS = { term: 'Term', answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'hand-edit': 'Hand edit', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model', 'source-update': 'Brought up to date', 'returned-to-draft': 'Returned to draft', 'review-answered': 'Review comment answered', 'pr-comment-answered': 'PR comment answered' }
+const KIND_LABELS = { term: 'Term', answer: 'Answer', fact: 'Architect', 'saved-content': 'Saved content', 'hand-edit': 'Hand edit', 'open-question': 'Open question', artefact: 'Artefact', restart: 'Restart', 'model-change': 'Model', 'source-update': 'Brought up to date', 'returned-to-draft': 'Returned to draft', 'review-answered': 'Review comment answered', 'pr-comment-answered': 'PR comment answered', 'definition-move': 'Definition version' }
 
 function EntryRow({ entry, fieldTitle, state }) {
   return html`<li class=${'dl-entry' + (entry.kind === 'open-question' && state !== 'old' ? ' open' : '') + (state === 'old' ? ' old' : '')} data-testid="decisions-entry" data-entry-id=${entry.id} data-kind=${entry.kind} data-state=${state ?? 'current'}>

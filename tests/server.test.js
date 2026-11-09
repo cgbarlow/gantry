@@ -27,9 +27,9 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
       {
         id: 'soap',
         title: 'Solution on a Page',
-        // design v3 `soap.requires` (the fixture is pinned to v3, #193): v2's Fields, in the Full
-        // SOAP's order since #232. Since #220 the Classification the cover prints is an Instance
-        // setting, not a required Field.
+        // design v4 `soap.requires` (the fixture is pinned to v4, #359): v2's Fields, in the Full
+        // SOAP's order since #232, without References since #359. Since #220 the Classification the
+        // cover prints is an Instance setting, not a required Field.
         requires: [
           'background.problem',
           'background.affected-domains',
@@ -40,7 +40,6 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
           'solution-definition.feature-breakdown',
           'team-and-estimates.teams-required',
           'team-and-estimates.estimates',
-          'team-and-estimates.references?',
         ],
       },
       {
@@ -68,7 +67,6 @@ test('GET /api/instance reports the examples fixture, fully populated', async ()
           'soap-full-details.sequencing',
           'open-questions.questions',
           'soap-full-details.caveats',
-          'team-and-estimates.references',
         ],
       },
     ])
@@ -110,7 +108,7 @@ test('GET /api/instance?stage=<id> browses a different stage\'s modules without 
     const body = await res.json()
     assert.deepEqual(body.stage, { id: 'hld-define', title: 'High-level Design', gate: 'hld-arb-approved', number: 2 })
     assert.equal(body.currentStageId, 'shape')
-    // design v2 `hld.requires`, carried into v3 — field-level end to end (WI #318), fixture pinned to v3 (#193),
+    // design v2 `hld.requires`, carried into v3 and v4 — field-level end to end (WI #318), fixture pinned to v4 (#359; v3 from #193),
     // trimmed to one entry per TAC reference section (WI #362, docs/adr/0032). This list is what
     // the editor filters visible fields by (`artefactFieldIds`, web/lib/artefactSelection.js), so
     // it is also the exact field set the HLD stage screen shows.

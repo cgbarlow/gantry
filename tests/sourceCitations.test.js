@@ -12,6 +12,7 @@ import {
   sourceAppendixProblem,
   sourceCitationFor,
   sourceCitationsForWord,
+  sourceEntriesForRender,
 } from '../web/lib/sourceCitations.js'
 import { ASSET_IMAGE_EXTENSIONS, assetFilenameForSource, canUseSourceAsImage } from '../web/lib/sourceDocuments.js'
 import { renderArtefact } from '../lib/render.js'
@@ -845,5 +846,143 @@ describe('a code repository in the render (#319)', () => {
     for (const text of [result.markdown, result.docxMarkdown]) assert.equal(appendixOf(text), APPENDIX)
     // An entry with neither a filename nor a pointer is still refused.
     await assert.rejects(runLocalWorkspaceCompute('compile', request([{ id: 'billing-api', title: 'Billing API' }]), { definitionsDir: 'definitions' }), /must carry a filename/)
+  })
+})
+
+// --- #360: a document a newer one replaces -------------------------------------------------------------------------
+// An architect uploads an updated two pager with **This replaces…**. Fields written before still cite the old copy, so both
+// stay in the Sources appendix while they are cited, and the old one says which document replaces it: the newest replacement,
+// by the rule the Source documents panel uses (web/lib/sourceDocuments.js's replacedByMap). Through the real render on a
+// server workspace and through a Local Workspace's compute request, which carries the replacement's title and nothing more.
+
+describe('a document a newer one replaces (#360)', () => {
+  const OLD_PAGER = { id: 'gantry-two-pager', title: 'Gantry_Two_pager', filename: 'Gantry_Two_pager.docx', uploadedBy: 'a.architect', uploadedAt: '2026-10-01T00:00:00.000Z', size: 100 }
+  const NEW_PAGER = { id: 'gantry-two-pager-2', title: 'Gantry - Two pager', filename: 'Gantry - Two pager.docx', uploadedBy: 'a.architect', uploadedAt: '2026-11-02T00:00:00.000Z', size: 120, replaces: 'gantry-two-pager' }
+  const rowsOf = (appendix) => appendix.split('\n').filter((line) => line.startsWith('| ') && !line.startsWith('| Document') && !line.startsWith('| ---')).map((line) => line.split(' | ')[0].slice(2))
+
+  test('a cited document a newer one replaces reads "(replaced by <newer title>)", and the newer one, cited too, is its own row', () => {
+    const appendix = buildSourceAppendix('[old](source:gantry-two-pager) and [new](source:gantry-two-pager-2)', [OLD_PAGER, NEW_PAGER])
+    assert.deepEqual(rowsOf(appendix), ['Gantry_Two_pager (replaced by Gantry - Two pager)', 'Gantry - Two pager'])
+    assert.match(appendix, /\| Gantry_Two_pager \(replaced by Gantry - Two pager\) \| Gantry_Two_pager\.docx \| 1 Oct 2026 \|/, 'the filename and date are the old copy\'s')
+  })
+
+  test('with only the old one cited there is one row, marked; with only the new one cited the old one is not listed', () => {
+    assert.deepEqual(rowsOf(buildSourceAppendix('[old](source:gantry-two-pager)', [OLD_PAGER, NEW_PAGER])), ['Gantry_Two_pager (replaced by Gantry - Two pager)'])
+    assert.deepEqual(rowsOf(buildSourceAppendix('[new](source:gantry-two-pager-2)', [OLD_PAGER, NEW_PAGER])), ['Gantry - Two pager'])
+  })
+
+  test('in a chain each row names its direct replacement, and of two replacements the newest is named', () => {
+    const third = { id: 'two-pager-3', title: 'Two pager v3', filename: 'v3.docx', uploadedAt: '2026-11-05T00:00:00.000Z', replaces: 'gantry-two-pager-2' }
+    const chain = [OLD_PAGER, NEW_PAGER, third]
+    assert.deepEqual(rowsOf(buildSourceAppendix('[old](source:gantry-two-pager) [new](source:gantry-two-pager-2)', chain)), ['Gantry_Two_pager (replaced by Gantry - Two pager)', 'Gantry - Two pager (replaced by Two pager v3)'])
+    const later = { id: 'two-pager-redo', title: 'Two pager, redone', filename: 'redo.docx', uploadedAt: '2026-11-08T00:00:00.000Z', replaces: 'gantry-two-pager' }
+    assert.deepEqual(rowsOf(buildSourceAppendix('[old](source:gantry-two-pager)', [OLD_PAGER, later, NEW_PAGER])), ['Gantry_Two_pager (replaced by Two pager, redone)'])
+  })
+
+  test('a removed document that is also replaced reads "(replaced by …)" and not "(removed)"; one with no replacement still reads "(removed)"', () => {
+    const removed = { ...OLD_PAGER, removedAt: '2026-11-03T00:00:00.000Z' }
+    assert.deepEqual(rowsOf(buildSourceAppendix('[old](source:gantry-two-pager)', [removed, NEW_PAGER])), ['Gantry_Two_pager (replaced by Gantry - Two pager)'])
+    assert.deepEqual(rowsOf(buildSourceAppendix('[old](source:gantry-two-pager)', [removed])), ['Gantry_Two_pager (removed)'])
+  })
+
+  test('a page fetched again, whose newer copy keeps its title, reads "(replaced by a newer copy)" rather than naming itself', () => {
+    // **Fetch again** adds the new copy under the old one's title (web/lib/sourceDocuments.js's fetchAgain), so naming the
+    // replacement would read "Vendor API guide (replaced by Vendor API guide)" and not say which row is the newer.
+    const fetched = { id: 'vendor-api-guide', title: 'Vendor API guide', filename: 'vendor-api-guide.html', uploadedAt: '2026-10-01T00:00:00.000Z', origin: { address: 'https://example.com/api', fetchedAt: '2026-10-01T00:00:00.000Z' } }
+    const again = { ...fetched, id: 'vendor-api-guide-2', filename: 'vendor-api-guide-2.html', uploadedAt: '2026-11-02T00:00:00.000Z', origin: { address: 'https://example.com/api', fetchedAt: '2026-11-02T00:00:00.000Z' }, replaces: 'vendor-api-guide' }
+    const appendix = buildSourceAppendix('[old](source:vendor-api-guide) [new](source:vendor-api-guide-2)', [fetched, again])
+    assert.deepEqual(rowsOf(appendix), ['Vendor API guide (replaced by a newer copy)', 'Vendor API guide'])
+    assert.match(appendix, /\| Vendor API guide \(replaced by a newer copy\) \| https:\/\/example\.com\/api \| retrieved 1 Oct 2026 \|/)
+    // The same holds for an upload with **This replaces…** given the same title, and for titles that differ only in spacing.
+    assert.deepEqual(rowsOf(buildSourceAppendix('[old](source:gantry-two-pager)', [OLD_PAGER, { ...NEW_PAGER, title: ' Gantry_Two_pager ' }])), ['Gantry_Two_pager (replaced by a newer copy)'])
+    // A Local Workspace render, which knows the replacement only by its title, reads the same.
+    const sent = sourceEntriesForRender('[old](source:vendor-api-guide)', [fetched, again])
+    assert.equal(sent[0].replacedBy, 'Vendor API guide')
+    const scratch = [...sent.map(({ replacedBy, ...e }) => e), { id: 'vendor-api-guide.replaced-by', filename: 'x', title: sent[0].replacedBy, replaces: 'vendor-api-guide' }]
+    assert.deepEqual(rowsOf(buildSourceAppendix('[old](source:vendor-api-guide)', scratch)), ['Vendor API guide (replaced by a newer copy)'])
+  })
+
+  test('a replacement\'s title holding a pipe cannot break the table', () => {
+    const appendix = buildSourceAppendix('[old](source:gantry-two-pager)', [OLD_PAGER, { ...NEW_PAGER, title: 'Two | pager' }])
+    assert.match(appendix, /\| Gantry_Two_pager \(replaced by Two \\\| pager\) \| Gantry_Two_pager\.docx \|/)
+  })
+
+  test('what a Local Workspace render sends: the cited entries only, each with what a render prints, and a replaced one with its replacement\'s title and nothing else of it', () => {
+    const notCited = { id: 'never-cited', title: 'Never cited', filename: 'other.pdf', uploadedAt: '2026-01-01T00:00:00.000Z', size: 10, text: 'sources/.text/other.pdf.txt', replaces: 'gantry-two-pager-2' }
+    const entries = [{ ...OLD_PAGER, text: 'sources/.text/old.txt', textChangedAt: '2026-10-02T00:00:00.000Z' }, { ...NEW_PAGER, removedAt: '2026-11-04T00:00:00.000Z', removedBy: 'a.architect' }, notCited]
+    assert.deepEqual(sourceEntriesForRender('[old](source:gantry-two-pager)', entries), [
+      { id: 'gantry-two-pager', filename: 'Gantry_Two_pager.docx', title: 'Gantry_Two_pager', uploadedAt: '2026-10-01T00:00:00.000Z', replacedBy: 'Gantry - Two pager' },
+    ])
+    // The newer one, cited too, goes as itself; it says nothing of what it replaces, only of what replaces it.
+    assert.deepEqual(sourceEntriesForRender('[new](source:gantry-two-pager-2)', entries), [
+      { id: 'gantry-two-pager-2', filename: 'Gantry - Two pager.docx', title: 'Gantry - Two pager', uploadedAt: '2026-11-02T00:00:00.000Z', removedAt: '2026-11-04T00:00:00.000Z', replacedBy: 'Never cited' },
+    ])
+    assert.deepEqual(sourceEntriesForRender('nothing cited', entries), [])
+  })
+
+  test('the render marks it, in the exported .md and in the Word text, the same on a server workspace and a Local Workspace', async () => {
+    const manifest = [...MANIFEST, OLD_PAGER, NEW_PAGER]
+    const citing = `${CITED} The plan is in the [two pager](source:gantry-two-pager), now the [new two pager](source:gantry-two-pager-2).`
+    const APPENDIX = [
+      '# Sources',
+      '',
+      '| Document | File | Added |',
+      '| --- | --- | --- |',
+      '| Client brief | Client brief v3.docx | 4 Mar 2026 |',
+      '| Old notes (removed) | notes.txt | 15 Jan 2026 |',
+      '| Gantry_Two_pager (replaced by Gantry - Two pager) | Gantry_Two_pager.docx | 1 Oct 2026 |',
+      '| Gantry - Two pager | Gantry - Two pager.docx | 2 Nov 2026 |',
+    ].join('\n')
+    const appendixOf = (text) => text.slice(text.lastIndexOf('# Sources')).trim()
+    await withCitingExample({ appendix: true, manifest, citing }, ({ instancesDir, definitionsDir }) => {
+      for (const options of [{ wordTags: false }, {}]) {
+        const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir, dryRun: true, ...options })
+        for (const text of [result.markdown, result.docxMarkdown]) assert.equal(appendixOf(text), APPENDIX)
+        // The footnotes are the citations' own words, as before.
+        assert.match(result.docxMarkdown, /in the\^\[two pager\], now the\^\[new two pager\]\./)
+      }
+    })
+
+    const instanceYaml = readFileSync(join(EXAMPLE, 'instance.yaml'), 'utf8').replace(/^definitionVersion: \d+$/m, 'definitionVersion: 3')
+    const moduleFiles = {}
+    for (const file of readdirSync(join(EXAMPLE, 'modules'))) {
+      const text = readFileSync(join(EXAMPLE, 'modules', file), 'utf8')
+      moduleFiles[file.replace(/\.md$/, '')] = file === 'background.md' ? text.replace(/\n## Affected domains/, `\n${citing}\n\n## Affected domains`) : text
+    }
+    const assets = readdirSync(join(EXAMPLE, 'assets')).map((file) => ({ id: file, base64: readFileSync(join(EXAMPLE, 'assets', file)).toString('base64') }))
+    const request = (sources) => ({ definitionId: 'design', definitionVersion: 3, instanceYaml, moduleFiles, assets, artefact: 'soap', sources })
+    // What web/app.js's buildLocalComputePayload sends.
+    const sources = sourceEntriesForRender(Object.values(moduleFiles).join('\n'), manifest)
+    const result = await runLocalWorkspaceCompute('compile', request(sources), { definitionsDir: 'definitions' })
+    for (const text of [result.markdown, result.docxMarkdown]) assert.equal(appendixOf(text), APPENDIX)
+    assert.match(result.docxMarkdown, /in the\^\[two pager\], now the\^\[new two pager\]\./)
+    // Only the old one cited: one row, still marked.
+    const onlyOld = sourceEntriesForRender('[two pager](source:gantry-two-pager)', manifest)
+    const files = Object.fromEntries(Object.entries(moduleFiles).map(([id, text]) => [id, id === 'background' ? text.replace(/, now the \[new two pager\]\(source:gantry-two-pager-2\)/, '') : text]))
+    const one = await runLocalWorkspaceCompute('compile', { ...request(onlyOld), moduleFiles: files }, { definitionsDir: 'definitions' })
+    assert.match(appendixOf(one.markdown), /\| Gantry_Two_pager \(replaced by Gantry - Two pager\) \| Gantry_Two_pager\.docx \| 1 Oct 2026 \|$/)
+    assert.doesNotMatch(appendixOf(one.markdown), /\| Gantry - Two pager \|/)
+    // A replacement's title must be words.
+    await assert.rejects(runLocalWorkspaceCompute('compile', request([{ ...sources[2], replacedBy: 7 }]), { definitionsDir: 'definitions' }), /replacedBy must be a string/)
+  })
+
+  test('the user guide\'s Sources appendix section describes the mark, and what a Local Workspace render sends of a replacement', () => {
+    const guide = readFileSync('docs/user-guide/index.md', 'utf8')
+    const start = guide.indexOf('#### The Sources appendix')
+    const section = guide.slice(start, guide.indexOf('\n#### ', start + 5))
+    assert.match(section, /"Gantry_Two_pager \(replaced by Gantry - Two pager\)"/)
+    assert.match(section, /Bring up to date/)
+    assert.match(section, /"\(replaced by …\)" in place of "\(removed\)"/)
+    assert.match(section, /\*\*Fetch again\*\*[^\n]*same title[^\n]*"\(replaced by a newer copy\)"/)
+    assert.match(section, /On a Local workspace, a render sends[^\n]*the newer one's title and nothing else of it/)
+  })
+
+  test('the real .docx ends with the marked row', async () => {
+    const citing = `${CITED} The plan is in the [two pager](source:gantry-two-pager).`
+    await withCitingExample({ appendix: true, manifest: [...MANIFEST, OLD_PAGER, NEW_PAGER], citing }, async ({ instancesDir, definitionsDir }) => {
+      const result = renderArtefact(SLUG, 'soap', { instancesDir, definitionsDir })
+      const { text } = await wordParts(result.docxPath)
+      assert.match(text, /Gantry_Two_pager \(replaced by Gantry - Two pager\)\s*Gantry_Two_pager\.docx\s*1 Oct 2026/)
+    })
   })
 })

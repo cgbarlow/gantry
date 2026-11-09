@@ -11,10 +11,13 @@
 //
 // An Artefact whose Definition sets `source-appendix: true` ends with a Sources list of the documents it cites: each with its title, original filename and upload date (or, #318, for a page fetched from a web address, its address and "retrieved <date>"). A removed document is still listed, marked removed. With the key off (its default) there is no list.
 //
+// #360: a cited document a newer one replaces (**This replaces…**, **Fetch again**) is marked "(replaced by <newer title>)", the newer title being its newest replacement's by the rule the Source documents panel uses (web/lib/sourceDocuments.js's replacedByMap). It reads "(replaced by a newer copy)" when the two share a title, as a page fetched again does. Once nothing cites it, it drops off the list like any other.
+//
 // #319: a repository's row gives its title, its web address, its branch and the commits the Artefact cites it at.
 //
 // Pure (no DOM, no Node built-ins), so the server's compile step (lib/render.js), the Definition checks (lib/definition.js, web/lib/localStatus.js) and the browser (web/app.js) share one copy of the syntax, as web/lib/diagramCaptions.js does.
 
+import { replacedByMap } from './sourceDocuments.js'
 import { isRepositorySource, normalizeSourceRepository, parseSourceAddress, repositoryCitationQuery, repositoryWebAddress, shortCommit } from './sourceRepository.js'
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/
@@ -464,27 +467,56 @@ const cell = (text) => String(text ?? '').replace(/\r?\n/g, ' ').replace(/\\/g, 
 export const SOURCE_APPENDIX_HEADING = 'Sources'
 
 /**
- * The Sources list an Artefact ends with: a heading and a table of the documents `markdown` cites, in the order they are first cited, each with its title, original filename and upload date. #318: a document fetched from a web address (it has an `origin`) shows the address and "retrieved <date>" in place of the filename and upload date. A removed document is listed too, marked "(removed)". A cited id the manifest does not list is left out (there is nothing to say about it), and `''` is returned when nothing is left, so an Artefact that cites nothing ends exactly as it did.
+ * The Sources list an Artefact ends with: a heading and a table of the documents `markdown` cites, in the order they are first cited, each with its title, original filename and upload date. #318: a document fetched from a web address (it has an `origin`) shows the address and "retrieved <date>" in place of the filename and upload date. A removed document is listed too, marked "(removed)". #360: one a newer document replaces is marked "(replaced by <newer title>)" instead, naming its newest replacement (replacedByMap), which is its direct one in a chain, or "(replaced by a newer copy)" when that has the same title, as a page fetched again does; a removed one that is also replaced reads only that. A cited id the manifest does not list is left out (there is nothing to say about it), and `''` is returned when nothing is left, so an Artefact that cites nothing ends exactly as it did.
  *
  * @param {string} markdown  the compiled text of the Artefact
- * @param {{ id: string, title?: string, filename?: string, uploadedAt?: string, removedAt?: string, origin?: { address: string, fetchedAt: string } }[]} entries  the Instance's manifest
+ * @param {{ id: string, title?: string, filename?: string, uploadedAt?: string, removedAt?: string, replaces?: string, origin?: { address: string, fetchedAt: string } }[]} entries  the Instance's manifest
  */
 export function buildSourceAppendix(markdown, entries) {
   const byId = new Map((entries ?? []).map((e) => [e.id, e]))
+  const replaced = replacedByMap(entries)
   const rows = citedSourceIds(markdown)
     .map((id) => byId.get(id))
     .filter(Boolean)
     .map((e) => {
-      const title = `${cell(e.title || e.id)}${e.removedAt ? ' (removed)' : ''}`
+      const newer = replaced.get(e.id)
+      const title = cell(e.title || e.id)
+      // #360: **Fetch again** keeps the old copy's title on the new one, so a mark naming it would name the row itself; it
+      // says "a newer copy" instead, and the date column tells the two apart.
+      const newerTitle = newer ? cell(newer.title || newer.id) : ''
+      const mark = newer ? ` (replaced by ${newerTitle === title ? 'a newer copy' : newerTitle})` : e.removedAt ? ' (removed)' : ''
+      const row = `${title}${mark}`
       if (isRepositorySource(e)) {
         // #319: a code repository: its address, its branch and the commits this Artefact cites it at.
         const repository = normalizeSourceRepository(e.repository)
         const commits = citedCommits(markdown, e.id).map(shortCommit)
-        return `| ${title} | ${cell(repositoryWebAddress(repository))} | branch ${cell(repository.branch)}${commits.length ? `, commit${commits.length === 1 ? '' : 's'} ${cell(commits.join(', '))}` : ''} |`
+        return `| ${row} | ${cell(repositoryWebAddress(repository))} | branch ${cell(repository.branch)}${commits.length ? `, commit${commits.length === 1 ? '' : 's'} ${cell(commits.join(', '))}` : ''} |`
       }
-      if (typeof e.origin?.address === 'string' && e.origin.address) return `| ${title} | ${cell(e.origin.address)} | retrieved ${appendixDate(e.origin.fetchedAt)} |`
-      return `| ${title} | ${cell(e.filename)} | ${appendixDate(e.uploadedAt)} |`
+      if (typeof e.origin?.address === 'string' && e.origin.address) return `| ${row} | ${cell(e.origin.address)} | retrieved ${appendixDate(e.origin.fetchedAt)} |`
+      return `| ${row} | ${cell(e.filename)} | ${appendixDate(e.uploadedAt)} |`
     })
   if (!rows.length) return ''
   return `# ${SOURCE_APPENDIX_HEADING}\n\n| Document | File | Added |\n| --- | --- | --- |\n${rows.join('\n')}\n`
+}
+
+/**
+ * #360: what a Local Workspace render sends the Gantry server about Source documents, which never sees the folder: the manifest
+ * entries of the documents `markdown` cites and only what a render prints of each (#281 its title, filename and dates, #318 a
+ * fetched one's origin, #319 a code repository's pointer). A cited document a newer one replaces also carries that document's
+ * title, as `replacedBy`, so the Sources appendix can mark it, and nothing else of the newer document goes unless it is cited
+ * too. The newer document is the newest replacement, by the rule buildSourceAppendix reads (replacedByMap). `[]` when nothing
+ * is cited: then nothing goes at all.
+ */
+export function sourceEntriesForRender(markdown, entries) {
+  const cited = new Set(citedSourceIds(markdown))
+  const replaced = replacedByMap(entries)
+  return (entries ?? [])
+    .filter((e) => cited.has(e?.id))
+    .map(({ id, filename, title, uploadedAt, removedAt, origin, repository }) => {
+      const newer = replaced.get(id)
+      const out = { id, filename, title, uploadedAt, removedAt, origin, repository }
+      if (newer) out.replacedBy = newer.title || newer.id
+      for (const key of Object.keys(out)) if (out[key] === undefined) delete out[key]
+      return out
+    })
 }

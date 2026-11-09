@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process'
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { loadDefinition } from '../../lib/definition.js'
+import { loadDefinitionForInstance, readInstance } from '../../lib/instance.js'
 import { buildFieldIndex, placeReview, readReviewedCopy } from '../../web/lib/reviewedCopy.js'
 import { reviewManifestEntry } from '../../web/lib/reviewManifest.js'
 import { unzip, zip } from '../../tests/helpers/reviewedCopyFixture.js'
@@ -105,7 +105,7 @@ export async function buildReviewedCopy({ instanceDir, slug, root = process.cwd(
     const bytes = zip(parts, { compress: true })
 
     const read = await readReviewedCopy(bytes)
-    const definition = loadDefinition('design', { version: 3 })
+    const definition = loadDefinitionForInstance(readInstance(slug, { instancesDir: workspace })) // the version the example is pinned to (#359)
     const fieldIndex = buildFieldIndex([...definition.modules].flatMap(([moduleId, spec]) => spec.fields.map((f) => ({ moduleId, moduleTitle: spec.title, fieldId: f.id, fieldTitle: f.title }))))
     const placed = placeReview(read, { fieldIndex })
     const fieldOf = new Map()

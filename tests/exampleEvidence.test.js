@@ -2,8 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { loadDefinition } from '../lib/definition.js'
-import { readModule } from '../lib/instance.js'
+import { loadDefinitionForInstance, readInstance, readModule } from '../lib/instance.js'
 import { renderArtefact } from '../lib/render.js'
 import { parseDecisionsLog, currentLogEntries } from '../web/lib/decisionsLog.js'
 import { findOutOfDateFields } from '../web/lib/outOfDate.js'
@@ -25,7 +24,10 @@ const WORKSPACE = 'workspaces/examples'
 const SLUG = 'kiwi-cover-mutual'
 const INSTANCE = join(WORKSPACE, SLUG)
 
-const definition = loadDefinition('design', { version: 3 })
+// #359: the evidence is built, and checked, against the version the example is pinned to (design v4 since #359), so a
+// rebuild never describes the example on a version it does not run on.
+const instance = readInstance(SLUG, { instancesDir: WORKSPACE })
+const definition = loadDefinitionForInstance(instance)
 const sources = parseSourceManifest(readFileSync(join(INSTANCE, SOURCE_MANIFEST_PATH), 'utf8'))
 const logs = Object.fromEntries(definition.stages.map((stage) => [stage.id, parseDecisionsLog(readFileSync(join(INSTANCE, 'interview', `${stage.id}.yaml`), 'utf8'), stage.id)]))
 const saved = Object.fromEntries([...definition.modules.keys()].filter((id) => existsSync(join(INSTANCE, 'modules', `${id}.md`))).map((id) => [id, readModule(definition, SLUG, id, { instancesDir: WORKSPACE })]))
@@ -91,6 +93,13 @@ test('every Stage has a decisions log in the shape a Save writes, and none of th
   const kinds = new Set(Object.values(logs).flatMap((log) => log.entries.map((e) => e.kind)))
   for (const kind of ['artefact', 'answer', 'fact', 'term', 'open-question', 'saved-content', 'review-answered', 'returned-to-draft']) assert.ok(kinds.has(kind), `a ${kind} entry`)
   assert.deepEqual(findOutOfDateFields({ sources, logs, modules: saved }), [], 'a fingerprint has drifted: run scripts/example-evidence/build.mjs')
+})
+
+test('each log says its interview ran on the version the example is pinned to, as a Save on that Instance would record it', () => {
+  assert.equal(definition.version, instance.definitionVersion)
+  for (const stage of definition.stages) {
+    for (const status of logs[stage.id].status) assert.equal(status.instructions, `design@${instance.definitionVersion}`, stage.id)
+  }
 })
 
 test('the open questions in the logs are the ones the Open questions module lists', () => {

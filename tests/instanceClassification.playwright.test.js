@@ -7,6 +7,7 @@ import { parse as parseYAML } from 'yaml'
 import { launchBrowser, DEFAULT_TIMEOUT } from './helpers/launchBrowser.js'
 import { withRunningServer } from './helpers/lifecycle.js'
 import { createInstance } from '../lib/instance.js'
+import { designV3Examples } from './helpers/designExamples.js'
 
 // #220 (spec #223, ADR-0058): browser coverage for Classification as an Instance setting — chosen
 // in the "+ New Workspace" wizard under the "Instance settings" heading (blank, or the Definition's
@@ -219,7 +220,8 @@ test('design v3\'s stage editor shows no Document handling section at any gate',
   const root = mkdtempSync(join(tmpdir(), 'gantry-220-stages-'))
   try {
     const instancesDir = join(root, 'instances')
-    cpSync('workspaces/examples/kiwi-cover-mutual', join(instancesDir, 'examples'), { recursive: true })
+    // #359: the bundled example is on v4, so this reads it as it was on v3.
+    cpSync(join(designV3Examples(), 'kiwi-cover-mutual'), join(instancesDir, 'examples'), { recursive: true })
     await withRunningServer({ slug: 'examples', instancesDir }, async (base) => {
       await withPage(async (page, pageErrors) => {
         for (const stage of ['shape', 'hld-define', 'detailed-design', 'handover']) {

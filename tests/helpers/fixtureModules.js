@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadDefinition } from '../../lib/definition.js'
 import { withoutCitationsAtAll } from './uncite.js'
+import { withV3References } from './designExamples.js'
 
 const EXAMPLE_DIR = join('workspaces', 'examples', 'kiwi-cover-mutual')
 
@@ -14,11 +15,11 @@ const EXAMPLE_DIR = join('workspaces', 'examples', 'kiwi-cover-mutual')
 // and their citation lines removed — the prose, headings, tables and lists are untouched, so gate
 // checks and renders see the same content shape without a dangling asset lookup.
 //
-// The example is on design v3 (#193), but most of those instances are on v2, the latest published
-// version. An instance file finds each Field by its title, so a Field v3 retitled with its id kept
+// The example is on design v4 (#359; v3 from #193), but most of those instances are on v2, the
+// version they were written for. An instance file finds each Field by its title, so a Field v3 retitled with its id kept
 // (#233's "Operational accounts and licences") gets back the title of the `definitionVersion` seeded.
 export function exampleModuleText(moduleId, { definitionVersion = 2 } = {}) {
-  const text = withVersion2Sections(moduleId, definitionVersion, withoutCitationsAtAll(readFileSync(join(EXAMPLE_DIR, 'modules', `${moduleId}.md`), 'utf8')))
+  const text = withVersion3References(moduleId, definitionVersion, withVersion2Sections(moduleId, definitionVersion, withoutCitationsAtAll(readFileSync(join(EXAMPLE_DIR, 'modules', `${moduleId}.md`), 'utf8'))))
   const retitled = retitledHeadings(moduleId, definitionVersion)
   return text
     .split('\n')
@@ -64,4 +65,12 @@ function withVersion2Sections(moduleId, definitionVersion, text) {
   const section = VERSION_2_SECTIONS[moduleId]
   if (!section || definitionVersion >= 3 || text.includes(section.trim().split('\n')[0])) return text
   return `${text.trimEnd()}\n${section}`
+}
+
+// #359: design v4 dropped `team-and-estimates.references`, so the example (now on v4) no longer carries
+// it. v1 to v3 still have the Field, and their Full SOAP's Gate asks for it, so a fixture seeded for
+// one of them gets the example's References list back, as it was on v3.
+function withVersion3References(moduleId, definitionVersion, text) {
+  if (moduleId !== 'team-and-estimates' || definitionVersion >= 4) return text
+  return withV3References('kiwi-cover-mutual', text)
 }

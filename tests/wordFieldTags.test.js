@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { Eta } from 'eta'
 import { renderArtefact } from '../lib/render.js'
+import { designV3Examples } from './helpers/designExamples.js'
 import {
   applyFieldTags,
   collapseBlankLines,
@@ -135,10 +136,10 @@ test('document properties are a metadata block that leaves out anything without 
 
 const SP = new Set(['kiwi-cover-mutual:soap', 'kiwi-cover-mutual:hld', 'kiwi-cover-mutual:sad', 'kiwi-cover-mutual:ssad', 'kiwi-cover-mutual:as-built', 'gantry:soap', 'gantry:soap-full'])
 
-function withExample(example, fn) {
+function withExample(example, fn, { from = 'workspaces/examples' } = {}) {
   const instancesDir = mkdtempSync(join(tmpdir(), 'gantry-instances-'))
   try {
-    cpSync(`workspaces/examples/${example}`, join(instancesDir, 'e'), { recursive: true })
+    cpSync(join(from, example), join(instancesDir, 'e'), { recursive: true })
     const result = fn(instancesDir)
     if (result?.then) return result.finally(() => rmSync(instancesDir, { recursive: true, force: true }))
     rmSync(instancesDir, { recursive: true, force: true })
@@ -186,7 +187,8 @@ test('a Word render has a bookmark for every printed Field and nothing is lost f
       const tagged = renderArtefact('e', artefactId, { dryRun: true, instancesDir })
       const untagged = renderArtefact('e', artefactId, { dryRun: true, instancesDir, wordTags: false })
       const names = [...tagged.docxMarkdown.matchAll(/gf_[0-9a-f]{8}(?:_\d+)?/g)].map((m) => m[0])
-      assert.ok(names.length >= 10, `${artefactId} has ${names.length} Field bookmarks`)
+      // The example is on design v4 (#359), whose SOAP prints nine Fields now that References is gone.
+      assert.ok(names.length >= 9, `${artefactId} has ${names.length} Field bookmarks`)
 
       const taggedPath = join(instancesDir, `${artefactId}-tagged.docx`)
       const untaggedPath = join(instancesDir, `${artefactId}-untagged.docx`)
@@ -203,6 +205,24 @@ test('a Word render has a bookmark for every printed Field and nothing is lost f
       assert.equal(withoutBookmarks(taggedXml), withoutBookmarks(untaggedXml), `${artefactId}: the visible document is unchanged`)
     }
   })
+})
+
+// #359: v4's SOAP has nine Field bookmarks, one fewer than v3's, because References is gone. A v3 Instance still prints References,
+// so its SOAP keeps all ten, and the References bookmark is the one v4 lost.
+test('a v3 SOAP keeps its References bookmark, so it has one Field bookmark more than the same example on v4', () => {
+  const bookmarks = (from) =>
+    withExample('kiwi-cover-mutual', (instancesDir) => {
+      const tagged = renderArtefact('e', 'soap', { dryRun: true, instancesDir })
+      return new Set([...tagged.docxMarkdown.matchAll(/gf_[0-9a-f]{8}(?:_\d+)?/g)].map((m) => m[0]))
+    }, { from })
+  const v3 = bookmarks(designV3Examples())
+  const v4 = bookmarks('workspaces/examples')
+  const references = fieldBookmarkName('team-and-estimates', 'references')
+  assert.ok(v3.size >= 10, `the v3 SOAP has ${v3.size} Field bookmarks`)
+  assert.ok(v3.has(references), 'the v3 SOAP bookmarks References')
+  assert.ok(!v4.has(references), 'the v4 SOAP has no References to bookmark')
+  assert.deepEqual([...v3].filter((name) => !v4.has(name)), [references], 'References is the only Field v3 bookmarks and v4 does not')
+  assert.equal(v3.size, v4.size + 1)
 })
 
 test('a native Word render writes the gantry-* properties, and every render has a new render id', () => {
@@ -223,7 +243,7 @@ test('a native Word render writes the gantry-* properties, and every render has 
     assert.equal(property('instance'), 'e')
     assert.equal(property('artefact'), 'soap')
     assert.equal(property('stage'), 'shape')
-    assert.equal(property('definition'), 'design@3')
+    assert.equal(property('definition'), 'design@4') // the version the example is pinned to (#359)
     assert.equal(property('commit'), 'abc1234def5678abc1234def5678abc1234def5')
     assert.equal(property('render-id'), idOf(first.docxMarkdown))
     assert.notEqual(property('render-id'), property('instance'))
@@ -269,7 +289,7 @@ test('a template the tagging can not compile still renders, with the properties 
   withExample('gantry', (instancesDir) => {
     // `<%~ x; y %>` is a fine statement for the plain engine but not a value for the tagged one.
     cpSync('definitions', join(instancesDir, 'definitions'), { recursive: true })
-    const templatePath = join(instancesDir, 'definitions', 'design', '3', 'templates', 'soap.md.tmpl')
+    const templatePath = join(instancesDir, 'definitions', 'design', '4', 'templates', 'soap.md.tmpl') // the example's version (#359)
     writeFileSync(templatePath, readFileSync(templatePath, 'utf8') + '\n<% const q = 1 %><%~ q; q %>\n')
     const result = renderArtefact('e', 'soap', { dryRun: true, instancesDir, definitionsDir: join(instancesDir, 'definitions') })
     assert.doesNotMatch(result.docxMarkdown, /gf_[0-9a-f]{8}/)

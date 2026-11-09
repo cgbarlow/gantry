@@ -1579,6 +1579,14 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .result-row:last-child { border-bottom: none; }
 .result-row .k { color: var(--text-muted); }
 .result-row .v { font-family: var(--font-mono); }
+/* #362: "v<N> is available" and Move to v<N>… under an Instance's Version row, and the dialog listing what the move changes. */
+.definition-move-row .v { display: flex; align-items: center; gap: 8px; font-family: inherit; }
+.definition-move-blocked { margin: 6px 0 0; }
+.definition-move-dialog { width: 620px; }
+.definition-move-dialog h4 { font-size: 13px; font-weight: 600; margin: 14px 0 4px; }
+.definition-move-dialog ul { margin: 4px 0 0; padding-left: 20px; font-size: 13px; }
+.definition-move-dialog .definition-move-module { color: var(--text-muted); }
+.definition-move-changelog { margin-top: 14px; font-size: 13px; }
 
 .dismiss-banner {
   display: flex;
