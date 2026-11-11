@@ -51,8 +51,9 @@ in plain prose, and is the only answer they have.
    "set NODE_USE_SYSTEM_CA in the install script" is the commit message.
    Reference the work item — it's where the full reasoning lives for anyone who
    *can* reach it.
-3. **PR to `main`** as normal, work item linked.
-4. **Tag the merge commit on `main`** and push it:
+3. **Update `README.md` in the same PR** if the release changes anything README describes: a CLI command or option, a Provider, a bundled Definition or version, the bundled examples, a setting or environment variable, an Instance or Settings screen, or what someone needs installed. README is the first thing an evaluator or an operator reads, and nothing else catches it drifting.
+4. **PR to `main`** as normal, work item linked.
+5. **Tag the merge commit on `main`** and push it:
 
    ```bash
    git tag -a v0.3.0-beta <merge-commit> -m "v0.3.0-beta — <summary>"
