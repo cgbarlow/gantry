@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke-width="2.5">
+  <!--
+    #364: the gantry mark from the app header (GantryBrandIcon in web/app.js and web/pages/user-guide.js),
+    on the header's own path and grid; tests/favicon.test.js fails if the three drift apart.
+
+    Two things differ from the header, both because a tab is not a page. The stroke colour is named
+    outright, since a tab has no text around the icon for the header's inherited colour to come
+    from: the light theme's ink, turned to the dark theme's paper when the browser is dark (each
+    theme's text colour in web/style.css). And the stroke is 2.5 rather than 2, so at 16 by 16 each
+    line still fills a whole pixel rather than smearing grey across two.
+
+    web/favicon.ico is drawn from this file: re-run scripts/render-favicon-ico.mjs after changing it.
+  -->
+  <style>
+    path { stroke: #1B1E22; }
+    @media (prefers-color-scheme: dark) { path { stroke: #EDEBE6; } }
+  </style>
+  <path d="M3 20h18M6 20V8l6-4 6 4v12M6 8h12" />
+</svg>

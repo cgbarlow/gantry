@@ -5883,6 +5883,7 @@ function InstanceSwitcher({ slug, instance, open, onOpenChange }) {
 // the Workspaces landing header, the setup wizard header, and Settings'
 // header (#113) — now lives solely in Settings (web/pages/settings.js's
 // SettingsHeader).
+// #364: web/favicon.svg draws this same path as the tab icon; tests/favicon.test.js fails if they drift.
 function GantryBrandIcon() {
   return html`
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
