@@ -34,6 +34,9 @@ COPY definitions/       definitions/
 COPY workspaces/        workspaces/
 COPY docs/user-guide/   docs/user-guide/
 COPY tests/             tests/
+# #364: some tests import from scripts/ (the favicon renderer, the live source-document check), so
+# they need it here to load at all. It stays out of the runtime image: nothing there runs it.
+COPY scripts/           scripts/
 
 # TODO: Stage – lint
 # When linters are introduced, add a stage here that:
