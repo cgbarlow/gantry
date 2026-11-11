@@ -15,6 +15,7 @@ const GUIDE_SECTIONS = [
   { id: 'definition-reference-guide', label: 'Definition Reference Guide' },
 ]
 
+// #364: web/favicon.svg draws this same path as the tab icon; tests/favicon.test.js fails if they drift.
 function GantryBrandIcon() {
   return html`
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
