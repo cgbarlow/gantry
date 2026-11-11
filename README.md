@@ -1,14 +1,18 @@
 # Introduction
 
-**Gantry is a repo-driven pipeline for staged, gated processes. Capture the data once; render whatever document the gate asks for.**
+**Gantry turns the evidence you gather into the documents a gated process asks for. You bring good inputs; the AI interview drafts from them, asks you about the gaps and contradictions, and holds the work to the process's standards; you decide what is saved.**
 
-Gantry separates the *content* of a process from the *documents* that process produces. You describe a process as a **definition** — its stages, its gates, its module specs — and Gantry runs it. People (or agents) fill in modules as flat files in a Git repo. Artefacts — a Solution on a Page, a business case, a handover pack — are rendered from that data on demand.
+Most people use Gantry through its web UI and its **AI interview**. Your job is to gather high-quality inputs (a client brief, requirements, meeting notes, an earlier design, a web page, the code itself) and give them to Gantry as **Source documents**. The AI interview reads them, drafts each Stage's Fields, cites the document every fact came from, and asks you about whatever is missing or doesn't agree. It holds the draft to the process's quality bar: what each Gate requires, how much to write in each Field, a source for every figure, and a Key decision only where there is a real trade-off.
 
-There is one set of data, not five documents that drift apart.
+You stay in the driver's seat. You answer the questions, edit the drafts and save. Nothing the AI writes is saved until you confirm it, AI-written content stays `draft` until a person agrees it, and the AI never passes a Gate that needs a person's approval. The AI does the transcribing; you do the judging.
 
-Gantry itself knows nothing about design, procurement or anything else. Every use case is a definition, and definitions are configuration.
+Underneath is one idea: Gantry separates the *content* of a process from the *documents* it produces. A process is described once as a **Definition** (its stages, its gates, its modules), each initiative's content is captured once as **Modules**, and every document a gate asks for (a Solution on a Page, a business case, a handover pack) is rendered from that data on demand. There is one set of data, not five documents that drift apart.
 
-Jump to [Executive Summary](docs/exec-summary.md)
+Gantry itself knows nothing about design, recruitment or anything else. Every use case is a Definition, and Definitions are configuration. Gantry ships with two, `design` and `recruitment-onboarding`.
+
+The web UI and the AI are not the only way in. Modules are plain Markdown files you can edit by hand, the `gantry` CLI checks and renders them, and an outside agent such as Claude Code can do what the web UI does through the Gantry MCP server (see [Working with agents](#working-with-agents)).
+
+Jump to [Try it](#try-it), the [User Guide](docs/user-guide/index.md) or the [Executive Summary](docs/exec-summary.md).
 
 <img width="1438" height="882" alt="image" src="https://github.com/user-attachments/assets/5a5d7010-30ba-47bf-987c-acc902bbd766" />
 
@@ -20,44 +24,67 @@ The usual response is to rationalise the document set. That works for about a ye
 
 Gantry attacks the coupling instead. The document is a *view*. The data is the thing. If a gate needs a two-page summary and the delivery team needs a detailed spec, those are two renderings of the same underlying modules — not two documents to keep in sync.
 
+The other cost is the writing itself. Someone reads the brief, the minutes and the last design and transcribes them into each template, and the gaps and contradictions between those inputs surface late, in review. The AI interview does the transcribing from the evidence you give it, and puts the gaps and contradictions to you as questions while the stage is still being written, each with the document it rests on.
+
 Because the shape of that problem is not unique to any one process, the engine is deliberately empty. Anything with stages, gates and repeated content is a candidate.
 
 ## How it works
 
 ```
-  definition (the process)            instance (one run of it)
-  ├── stages                          ├── module files (markdown + frontmatter)
-  ├── gates              ────────►    ├── validated against the definition
-  ├── module specs                    └── rendered to artefacts on demand
-  └── artefact templates
+  inputs                  AI interview              you                    documents
+  Source documents ──►    drafts each Field,  ──►   answer, edit,   ──►    rendered at each
+  (files, web pages,      asks about gaps and       save; a person         Gate from the
+   code repositories)     contradictions, holds     agrees and passes      saved Modules
+          ▲               the Definition's bar      the Gate
+          │                                            │
+          └──── an input changes: its Fields are flagged Out of date ──► Bring up to date
 ```
 
-1. **Write a definition.** It describes a process: its stages, the gate at the end of each stage, the modules that make up its content, and the artefacts that can be rendered from those modules.
-2. **Create an instance.** One initiative, one project, one procurement — whatever the process runs on. An instance is a folder of files.
-3. **Fill in modules.** By hand in your editor, by agent, or through the bundled web form.
-4. **Render at the gate.** `gantry render soap` produces the document. The document is disposable; the modules are not.
+1. **Gather the inputs.** Add Source documents to an Instance: upload files (Word, PowerPoint, spreadsheets, PDFs, Markdown, text and images), add a web page by its address (the server keeps a snapshot), or point at a code repository on GitHub, Azure DevOps, GitLab or Bitbucket, which the AI reads live.
+2. **Run the AI interview.** Connect an AI Provider (its key stays in your browser) and open **✦ AI interview** on a Stage. The AI drafts every Field the inputs support into a live preview, asks question cards in rounds, settles preferred terms, offers Key decisions and records open questions. It works to the Definition's own Interview instructions and to Gantry's rules, which no Definition can override.
+3. **Decide and save.** Choose answers, edit drafts by hand, keep what is already saved or take the AI's version. Saving writes the Stage's Modules and its decisions log together. A Stage moves on once its Gate passes; on a Provider workspace, only once its Pull Request is approved.
+4. **Keep it current.** When a Source document is replaced, removed or read again with different text, or a file the AI drew on in a code repository changes, the Fields that drew on it are flagged **Out of date**. **Bring up to date** works through exactly those Fields with you, a card each.
+5. **Render at the gate.** Render the documents the Gate asks for, to Word and Markdown, whenever you need them. They are derived from the Modules, so you change the Modules and render again rather than edit the document. When a reviewer sends a Word document back with comments, bring it in as a **Reviewed copy** and work through the comments with the AI.
 
-Git is the audit trail. Who changed what, when, and why is a `git log`, not a version-history table nobody maintains.
+On a Provider workspace, Git is the audit trail: each Stage's work is committed to its own branch and approved through a Pull Request, so who changed what, when, and why is a `git log`, not a version-history table nobody maintains.
+
+The [User Guide](docs/user-guide/index.md) walks through all of this, starting with [The AI interview](docs/user-guide/index.md#the-ai-interview) and [Source documents](docs/user-guide/index.md#source-documents).
+
+## Try it
+
+1. **Install and start Gantry** (see [Installation](#installation)): clone the repository, `npm install` and `npm link`, then `gantry serve`, and open the address it prints.
+2. **Look at a finished example.** The Workspaces page shows the bundled **Examples** workspace. Open `gantry`, Gantry's own hosting proposal written as a Full Solution on a Page on `design` version 4, or `kiwi-cover-mutual`, a fictitious insurer's design that also shows the interview's evidence: four Source documents, citations, a decisions log on every Stage and a Reviewed copy. A third, `platform-engineer`, is a hire on `recruitment-onboarding`. See [Example instances](docs/user-guide/index.md#example-instances) in the User Guide.
+3. **Connect an AI Provider.** Under **Global Settings → AI Providers**, add Anthropic, OpenAI, OpenRouter, Ollama, LM Studio or any OpenAI-compatible service, and press **Test connection**. The key stays in your browser. See [AI Providers](docs/user-guide/index.md#ai-providers) in the User Guide and, for whoever runs the server, [AI Providers and the AI relay](#ai-providers-and-the-ai-relay).
+4. **Start your own.** **+ New Workspace** creates an Instance (by default in a folder on your own machine, which needs Chrome or Edge; turn on **Advanced mode** in Global Settings for a workspace on the server or on a Provider). Add your Source documents, then open **✦ AI interview**.
 
 ## Concepts
 
+The terms below are the ones the app uses. [`CONTEXT.md`](CONTEXT.md) has the full glossary.
+
 | Term | What it is |
 |---|---|
-| **Definition** | A reusable, versioned process description. Design is one definition. Business case, procurement, incident review and operational handover are others. A Gantry repo can hold as many as you need, each definition carrying numbered versions (`definitions/<id>/<n>/`) with `version:` and `status:` (`draft` \| `published`). |
-| **Stage** | A phase of the process. Stages are ordered, and each has an exit gate. |
-| **Gate** | The decision point a stage feeds. Gates declare which artefacts and which modules must be complete to pass. |
-| **Module** | The atomic unit of content — a single, self-contained piece of the process (context, options, non-functional requirements, security posture). Modules are the source of truth. |
-| **Instance** | One run of a definition against one initiative — a folder of module files, local or living inside a workspace. Its own stored `assignee` (a single named person, editable from its Instance Settings screen or `gantry new --assignee`) is a distinct instance-level field, stable across stage transitions — separate from each module's own frontmatter `owner`, which is still just the first non-empty value found among its current stage's modules (see "Instance module files" below), unrelated and unchanged. |
-| **Provider** | The external suite a Server-hosted workspace's repo and work items both come from — **Azure DevOps** (Repos + Boards) and **GitHub** (repos + Issues) today, plus **GitLab** (Projects + Issues, `gitlab.com` or self-hosted CE/EE) built at the same full parity (`docs/adr/0041-gitlab-as-third-provider.md`); **Atlassian** (Bitbucket + Jira) is modelled but not built. A workspace names exactly one Provider, chosen when it is registered (`docs/adr/0037-provider-as-a-suite-one-per-workspace.md`). |
-| **Workspace** | Where an instance's data lives — **Server-hosted** or **Local**, chosen as the "+ New Workspace" wizard's own "Workspace location" step (`CONTEXT.md`'s "Workspace location" glossary entry, `docs/adr/0029-local-workspaces-client-filesystem.md`). A **Server-hosted workspace** is either a remote repository on a Provider (see "Backing an instance with a remote workspace" below) or a directory on the gantry server itself: registered through the wizard the first time you create an instance against it and reused by every later instance created against the same one, with its own free-text owner label, both editable from an instance's own Workspace Settings screen. A **Local workspace** is a folder on your own machine instead (see "Backing an instance with a local folder" below) — the gantry server keeps no record that it exists. |
-| **Stage advancement** | How an instance moves from one stage to the next — which depends entirely on whether it's local or Workspace-backed (see "Stage advancement and approval" below). A **local** instance — including one whose data lives in a Local workspace, not just the legacy local-instance mode — advances self-serve via "Advance to next stage", blocked until its current gate has passed. A **Workspace-backed** instance (Server-hosted only; a Local workspace never qualifies) never advances self-serve: its stage's work lives on its own **stage branch** (`gantry-workspace/<slug>/<stageId>`, stacked on the prior stage's branch while that one's still open — so `main` only ever reflects fully-approved, merged stages), and it advances only when that stage's Pull Request is approved on its Provider (Azure DevOps or GitHub) and gantry merges it. There is no third mode and no per-instance opt-out. |
-| **Artefact** | A rendered output. A document, a page, a summary. Generated, never hand-edited. Every artefact, `.md` and `.docx`, ends with a footer naming a short commit hash and date it was rendered from — the current local `HEAD` for a local instance, or (for a Workspace-backed one) the commit its content was pushed as on its Provider, one commit behind the file's own latest history entry, since a commit can't name its own hash — so a document can always be traced back to close to the exact version that produced it. |
+| **Definition** | A reusable, versioned description of a process: its Stages, Gates, Modules and the documents it renders. Each version is a numbered folder (`definitions/<id>/<n>/`), and a published version never changes. |
+| **Stage** | A phase of the process. Stages are ordered, and each ends at a Gate. |
+| **Gate** | The decision point at the end of a Stage. It passes when one of the Artefacts that count toward it has every Field it requires filled in. |
+| **Module** | A self-contained piece of the process's content, such as Background or Non-functional requirements, made up of Fields. Modules are the source of truth. |
+| **Instance** | One run of a Definition for one initiative, such as one project or one hire. It has its own Modules, current Stage, Source documents and settings. |
+| **Workspace** | Where Instances' data lives: a repository on a Provider, a folder on the Gantry server (or in an Azure Blob container), or a folder on your own machine (a Local workspace). |
+| **Provider** | The suite a remote workspace's repository and work items both come from: Azure DevOps, GitHub, GitLab or Atlassian (Bitbucket and Jira). Each Stage on a Provider workspace is approved through a Pull Request (a Merge Request on GitLab). |
+| **AI Provider** | The AI service the interview uses: Anthropic, OpenAI, OpenRouter, Ollama, LM Studio or any OpenAI-compatible service. It is set up in your own browser and has nothing to do with a Provider. |
+| **Source document** | Evidence an Instance's content is drawn from: an uploaded file, a snapshot of a web page fetched from its address, or a pointer to a code repository the AI reads live. Content cites it, and each document lists what it cites in a Sources appendix. |
+| **AI interview** | Drafting a Stage with an AI from its Source documents. The AI asks question cards about gaps and contradictions and works to the Definition's rules; nothing is saved until you confirm the Stage. |
+| **Key decisions** | A Module Gantry provides for the decisions that matter: hard to reverse, surprising without their context, and a real trade-off. Each keeps the number it was given (`AD01`, `AD02`, …). |
+| **Decisions log** | Each Stage's record of what was decided in the interview, with your answers in your own words. It is saved with the Stage's content, as `interview/<stage>.yaml`, and never printed in a document. |
+| **Out of date** / **Bring up to date** | A Field is Out of date when something it drew on has changed: a Source document replaced, removed or read again, or a file it used in a code repository. Bring up to date works through those Fields with you, one card each. |
+| **Artefact** | A document rendered from the Modules for a Gate, such as a Solution on a Page, as Word (`.docx`) and Markdown. It is generated, never hand-edited. |
+| **Reviewed copy** | A Word document Gantry rendered that came back with comments and tracked changes. Brought into the Instance, its comments are worked through with the AI, and a Review response list goes back to the reviewers. |
+| **Stage advancement** | On a Local or server workspace, a Stage moves on self-serve once its Gate passes. On a Provider workspace it moves on only when its Pull Request is approved on the Provider (see [Stage advancement and approval](#stage-advancement-and-approval)). |
 
 The key rule: **artefacts are derived, modules are authored.** If you find yourself editing a rendered artefact, something is wrong with the module spec.
 
 ### The Definitions page
 
-Definitions are versioned (numbered `definitions/<id>/<n>/` dirs — see "Definition schema" below). The **Definitions** page at `/definitions` — linked from the Workspaces page header as "Definitions" — is a first-class editor: an Outline/Map view switch over one focus pane (stage/artefact/module, with compact one-at-a-time field rows) and a docked, read-only Library panel. A published version is read-only, with a **View template source** button per artefact; a *draft* version is directly editable — every element can be reordered or moved between a stage, an artefact and a module by drag or an equivalent button, template editing opens as its own focus-pane view, and the toolbar shows a live problems count sharing the server's own validation rules (`findDefinitionProblemsInStructure`, WI #381). Also: creating a new draft version, a new definition (Blank or Clone), archiving/restoring, and publishing a draft. Save follows the stage Save convention: one Save for everything changed, with a Save/Discard/Cancel prompt on leaving with unsaved changes.
+Definitions are versioned (numbered `definitions/<id>/<n>/` dirs — see "Definition schema" below). The **Definitions** page at `/definitions` — linked from the Workspaces page header as "Definitions" — is a first-class editor: an Outline/Map view switch over one focus pane (stage/artefact/module, with compact one-at-a-time field rows) and a docked, read-only Library panel. A published version is read-only, with a **View template source** button per artefact; a *draft* version is directly editable — every element can be reordered or moved between a stage, an artefact and a module by drag or an equivalent button, template editing opens as its own focus-pane view, and the toolbar shows a live problems count sharing the server's own validation rules. Also: creating a new draft version, a new definition (Blank or Clone), archiving/restoring, and publishing a draft. Save follows the stage Save convention: one Save for everything changed, with a Save/Discard/Cancel prompt on leaving with unsaved changes.
 
 <img width="1613" height="844" alt="image" src="https://github.com/user-attachments/assets/67141d7a-c613-4ae6-9ff8-1d6b7dd44eba" />
 
@@ -65,13 +92,15 @@ Definitions are versioned (numbered `definitions/<id>/<n>/` dirs — see "Defini
 
 **Data over documents.** If content lives in two places, one of them is a rendering.
 
+**The AI drafts; people decide.** The AI interview works from the evidence you give it and marks every fact with where it came from. It changes saved content only through a question you answer, and nothing it writes can pass a Gate that needs approval.
+
 **Flat files, no database.** Git gives history, review, branching, access control and offline work for free. A database would give you a migration problem and a backup schedule.
 
 **Proportionate by design.** The definition declares what each gate genuinely requires. Completeness is checked against that, not against the full module set.
 
 **Process-agnostic engine.** Nothing in Gantry knows what a SOAP is. Design is a definition, and definitions are configuration.
 
-**Two front ends, one store.** The form writes the files a human would have written. There is no synchronisation step, because there is nothing to synchronise.
+**Several front ends, one store.** The web UI, a text editor, the CLI and an outside agent over MCP all read and write the same Module files. There is no synchronisation step, because there is nothing to synchronise.
 
 ---
 
@@ -101,7 +130,7 @@ Rendering from the web UI (`gantry serve`, both local-folder and Azure-DevOps-ba
   Or grab the latest `.deb` from the [Pandoc releases page](https://github.com/jgm/pandoc/releases/latest) if your distro's version lags.
 - **Windows**: download `pandoc-<version>-windows-x86_64.msi` from https://github.com/jgm/pandoc/releases/latest and run it.
 
-**3. Install Git** (needed to clone the source below, and if you'll back any instance with a remote workspace — Azure DevOps or GitHub — not needed for local-folder-only instances, see "Backing an instance with a local folder" below)
+**3. Install Git** (needed to clone the source below. Gantry also runs `git` to read the checkout's current commit when it renders an Instance kept on the server's own disk, so the document can name it. Workspaces on a Provider don't need it: Gantry reaches Azure DevOps, GitHub, GitLab and Atlassian over their web APIs.)
 
 - **Linux (Debian/Ubuntu)**:
   ```bash
@@ -149,12 +178,12 @@ Step 4's `npm install` already installed Playwright, the package that runs it. I
 | Node.js | 24+ | Engine runtime and CLI (`package.json` `engines.node` is `>=24`) |
 | `pandoc` | 3.x confirmed (3.1.3) | **Required for the `gantry render` CLI command** (shells out to it unconditionally). Optional for the web UI — `gantry serve` renders via an in-browser WASM Pandoc by default; native Pandoc is only needed there if you use Settings' native-engine toggle, or as the automatic fallback if WASM fails to load |
 | Playwright's headless Chromium | the `playwright` version in `package.json` (`optionalDependencies`) | **Optional, `gantry render` only.** Draws Mermaid diagrams into the CLI's `.docx` with the browser export's own code, so both match (docs/adr/0055). Install with `npx playwright install chromium`. Without it, `gantry render` leaves diagrams as source text and warns. Never needed by `gantry serve`; the container images leave it out (`npm ci --omit=dev --omit=optional`) |
-| Git | 2.x+ | Needed to clone the source below and for any Workspace-backed instance (Azure DevOps or GitHub). Not needed for local-folder-only instances |
+| Git | 2.x+ | Needed to clone the source, and read by renders of Instances on the server's own disk to name the commit they came from. Not needed for Provider-backed workspaces, which Gantry reaches over each Provider's web API |
 | A text editor | any | Modules are markdown; no tooling required to author them |
 
 The web form (`web/`) is a static page with no build step — but it is **not** dependency-free: `gantry serve` generates a browser import map that serves Preact, `preact-iso`, `@preact/signals`, `htm`, CodeMirror 6, `markdown-it`, `DOMPurify`, pandoc-wasm and Mermaid straight out of `node_modules/` (see `docs/adr/0006-preact-frontend-framework.md`). That directory must exist wherever `gantry serve` runs — don't `npm prune --production` or ship without it.
 
-Backing an instance with a remote Provider (Azure DevOps or GitHub) needs nothing installed locally — no Azure CLI, no `az` login, no `gh`. It needs that workspace's own **Personal Access Token** — Azure DevOps needs Code + Work Items (+ Identity Read), GitHub needs a fine-grained token with Contents + Issues + Pull requests + Metadata — entered once through the browser when prompted (see "Backing an instance with a remote workspace" below).
+Backing an instance with a remote Provider needs nothing installed locally — no Azure CLI, no `az` login, no `gh`, no local Git. It needs that workspace's own **Personal Access Token** (two for Atlassian, one for Bitbucket and one for Jira), entered once through the browser when prompted; the scopes each Provider needs are listed under "Backing an instance with a remote workspace" below.
 
 Backing an instance with a local folder needs nothing installed either — just a Chromium browser (Chrome or Edge; see "Backing an instance with a local folder" below).
 
@@ -166,116 +195,63 @@ Release notes live in **[CHANGELOG.md](CHANGELOG.md)** — one section per tagge
 
 Releases are tagged `v<version>` on their merge commit on `main`. Every version bump adds a changelog section in the same commit — `tests/changelog.test.js` fails the build otherwise. Full process: [`docs/agents/release-process.md`](docs/agents/release-process.md).
 
-Early. The engine, definition schema and design definition are under active development. Treat the definition schema as unstable until v0.1.
+Gantry is under active development, and releases come often; read [CHANGELOG.md](CHANGELOG.md) before you upgrade, especially its **For operators** notes. Your content is protected from that churn by Definition versioning: a published Definition version never changes, so an Instance keeps rendering the same until you move it, and **Move to v<N>…** in its Instance Settings moves it to the latest published version in one step, showing first what the move removes (see [Definition versions](docs/user-guide/index.md#definition-versions-and-the-definitions-page) in the User Guide).
 
 ## Repository layout
 
+A map of where things are, not a file inventory:
+
 ```
 gantry/
-├── gantry.yaml                   # engine configuration
-├── definitions/
-│   └── design/                   # the only definition that exists today
-│       └── 1/                    # numbered version dirs — one per definition version
-│           ├── definition.yaml   # stages, gates, artefacts (with version: and status:)
-│           ├── CHANGELOG.md      # per-version changelog
-│           ├── modules/          # module specs for this version
-│           │   ├── context.yaml
-│           │   ├── solution-definition.yaml
-│           │   └── ...
-│           └── templates/        # artefact templates for this version
-│               ├── soap.md.tmpl  # one .md.tmpl per artefact (soap, soap-full, hld, sad, ssad, as-built)
-│               ├── ...
-│               └── reference-*.docx  # pandoc --reference-doc, one per artefact, derived from the real templates
-├── workspaces/                   # the workspaces root (WI #355/#358) — every server workspace lives here
-│   ├── instance-registry.json    # slug -> workspace/location map, gitignored
-│   ├── workspace-registry.json   # provider + location entities (Azure DevOps org/project/repo, or
-│   │                             # GitHub owner/repo), gitignored (docs/adr/0037)
-│   ├── number-registry.json      # scoped numeric refs (ADR-0024): workspace/instance/stage ordinals, gitignored
-│   └── <workspace-slug>/         # a server workspace directory — a folder with workspace.json,
-│       ├── workspace.json        # same format a local (browser) workspace uses (ADR-0029/ADR-0031)
-│       └── <initiative-slug>/    # a remote-workspace instance lives at gantry-workspace/<slug>/ in its
-│           ├── instance.yaml     # own repo on its Provider instead (see below), never here
-│           ├── modules/
-│           │   ├── context.md
-│           │   └── solution-definition.md
-│           ├── assets/           # (WI260) local asset store — for a Workspace-backed instance the same dir lives as gantry-workspace/<slug>/assets/ in the repo on its Provider, sibling of modules/ and out/
-│           ├── reviews/          # (#302) Reviewed copies — Word documents that came back with comments, one <id>.docx each,
-│           │                     # listed in reviews/manifest.yaml; never cited, never edited by Gantry (docs/adr/0066)
-│           └── out/              # rendered artefacts (gitignored by default)
-├── lib/                          # the engine: definition/instance loading, render, status, the web server
-│   ├── server.js                 # HTTP routes, incl. the work-item, workspace, stage-advancement/approval,
-│   │                             # stage-review and synced-fields (Work item details card) endpoints
-│   ├── instanceRegistry.js       # slug -> workspace/location lookup/registration (the registry above)
-│   ├── workspaceRegistry.js      # provider + location entities instances reference (docs/adr/0037)
-│   ├── provider.js / providerRegistry.js / providerErrors.js  # the four capability interfaces
-│   │                             # (content store, pull requests, work items, identity) and
-│   │                             # provider-neutral errors every provider implements (docs/adr/0039)
-│   ├── numberRegistry.js         # scoped numeric workspace/instance/stage references layered over slugs
-│   │                             # (docs/adr/0024-scoped-numeric-references-layered-over-slugs.md)
-│   ├── azureDevOpsClient.js / azureDevOpsWorkItemsClient.js / azureDevOpsPullRequestsClient.js / azureDevOpsIdentityClient.js
-│   │                              # PAT-authenticated Azure DevOps REST clients (Git, Work Items, Pull
-│   │                              # Requests, Identity) — create a PR, read reviewer votes, complete/merge it
-│   ├── githubClient.js / githubWorkItemsClient.js / githubPullRequestsClient.js / githubIdentityClient.js
-│   │                              # the GitHub twins of the above (repo contents/branches/commits,
-│   │                              # Issues, Pull Requests + reviews, collaborators/org members)
-│   ├── stageBranch.js             # per-stage branch names/lifecycle for Workspace-backed instances
-│   │                              # (gantry-workspace/<slug>/<stageId>, stacked on an open prior stage's branch)
-│   ├── stageAdvancement.js        # local instances' gate-gated self-serve "Advance to next stage"
-│   ├── stageApproval.js           # Workspace-backed "Request Sign-off": open the stage's gate-pass-gated PR
-│   ├── stageStatus.js             # "Check status": read the PR's reviewer votes; on approval, merge,
-│   │                              # advance the stage and push the linked work item
-│   ├── stageReview.js             # Workspace-backed "Request Review": informal, non-gating reviewer feedback
-│   ├── reviewStatus.js            # custom review/sign-off status field on the Work item details card
-│   ├── syncedFields.js            # the instance screen's Work item details card (type/title/status/PR state/assignee)
-│   ├── workItemLink.js           # link an instance to a work item; confirmed gate-pass state sync
-│   ├── repoCheck.js              # "does this repo (Azure DevOps or GitHub) already hold instance
-│   │                             # data", incl. the legacy-root-to-gantry-workspace/<slug>/ migration
-│   ├── mermaidChromium.js        # `gantry render`: draws Mermaid with web/lib/mermaid.js in optional headless Chromium (docs/adr/0055)
-│   └── credential.js             # extracts a forwarded PAT from a request
-├── bin/gantry.js                 # CLI entrypoint
-└── web/
-    ├── index.html                # app shell
-    ├── app.js                     # dashboard + module editor (incl. stage advancement/approval panels,
-    │                              # the Work item details card and the workspace-scoped instance switcher)
-    ├── pages/new-workspace-wizard.js # "+ New Workspace" — pick/register a workspace, then instance fields
-    ├── pages/settings.js         # /settings, /settings/workspace, /settings/instance — tab-free
-    ├── pages/user-guide.js       # /user-guide — the in-product, end-user-facing User Guide (separate surface from this README)
-    ├── pages/definition-viewer.js # /definitions — the Definitions page
-    ├── lib/credential.js         # client-side PAT storage/prompt, one slot per workspace, no global default (docs/adr/0038)
-    ├── lib/provider.js           # client-side Provider metadata (labels, which location fields each needs)
-    ├── lib/ticketingSystem.js    # client-side default-ticketing-system setting (Azure DevOps workspaces only)
-    ├── lib/apiFetch.js           # fetch wrapper: attaches the right PAT, retries once on 401
-    ├── lib/validateRepo.js       # parses/checks the legacy Azure DevOps repo-URL adopt flow
-    ├── lib/markdown.js           # markdown-it + DOMPurify rendering
-    ├── lib/mermaid.js            # ```mermaid fences → SVG in the preview, PNG in docx exports: WASM in the browser, and the CLI via lib/mermaidChromium.js (docs/adr/0030, 0055)
-    ├── lib/diagramCaptions.js    # Diagram captions: the fence/alt-text syntax and "Diagram N." numbering, shared with lib/render.js (docs/adr/0053)
-    ├── lib/dropdown.js           # reusable dropdown (trigger + menu)
-    ├── lib/reorder.js            # pure array reorder helper
-    ├── user-guide-images/        # User Guide screenshots, served statically
-    └── style.css
+├── bin/gantry.js            # the CLI entrypoint (see "CLI" below)
+├── lib/                     # the engine and the web server: definitions, instances, gates, render,
+│                            # the Provider clients (Azure DevOps, GitHub, GitLab, Bitbucket, Jira),
+│                            # stage branches and sign-off, Source documents, decisions logs, Blob storage
+├── web/                     # the web UI, served as-is by `gantry serve` (no build step)
+│   ├── pages/               # the dashboard, New Workspace wizard, Settings, Definitions page, User Guide
+│   ├── lib/                 # the editor, the AI interview, AI Providers, Source documents, Out of date
+│   └── interview-skills/    # the interviewing skills the AI follows, bundled at a pinned release
+├── definitions/             # the bundled Definitions, one numbered folder per version
+│   ├── design/1 … 4/        # definition.yaml, modules/, templates/, CHANGELOG.md in each
+│   └── recruitment-onboarding/1 … 4/
+├── workspaces/              # the workspaces root `gantry serve` and the CLI read by default
+│   └── examples/            # the bundled Examples workspace: kiwi-cover-mutual, gantry, platform-engineer
+├── mcp-server/              # the Gantry MCP server, a separate package and service (see its README)
+├── docs/
+│   ├── user-guide/          # the User Guide, also served in the app at /user-guide
+│   ├── adr/                 # architecture decision records
+│   └── agents/              # how this repo is worked on: issue tracker, release process
+├── scripts/                 # maintenance scripts: the example's evidence, User Guide screenshots, live checks
+├── tests/                   # unit, integration and Playwright browser tests
+├── ContainerFile            # the container image, with its test and render stages
+└── CHANGELOG.md             # release notes for people running Gantry
 ```
 
-Definitions sit side by side — adding a second one requires no change to the engine — but `design` is the only one built out so far. `procurement` and `incident-review` are illustrative names from this README's own example, not real definitions in this repo.
+Inside the workspaces root, the registries (`instance-registry.json`, `workspace-registry.json`, `number-registry.json`) are application state and gitignored. A server workspace is a folder with a `workspace.json` and one folder per Instance: `instance.yaml`, `modules/`, and, when used, `assets/`, `sources/`, `interview/`, `reviews/` and `out/` (rendered documents, gitignored by default). An Instance on a Provider keeps the same layout at `gantry-workspace/<slug>/` in its own repository instead.
 
-## Two ways to work
+Definitions sit side by side, and adding one requires no change to the engine. `design` and `recruitment-onboarding` are the two bundled today.
 
-**Clone and write.** The repo is flat files. Clone it, read the definition, fill in the module files in your editor. Every module carries its own spec and guidance, so you're not guessing at what "Context" is supposed to contain. This is the path for architects who'd rather write markdown than fight a form, and for agents driving the process programmatically.
+## Ways to work
 
-**Use the form.** `gantry serve` opens a dashboard of every registered instance — local, remote-workspace-backed (Azure DevOps or GitHub), or living in a Local workspace on your own machine (see below). Opening one walks you through the process stage by stage, with the spec and guidance inline. A stage switcher lets you jump to any gate's screen, not just whichever stage the instance is currently at. Fill it in, hit render, get your document. Under the hood it writes the same files to the same repo (or the same Provider repo) — there is no second store, and no import/export step.
+**The web UI and the AI interview (the main path).** `gantry serve` opens a dashboard of every Instance this server knows about — on a Provider, on the server, or in a Local workspace on your own machine (see below). Opening one walks you through the process Stage by Stage, with each Field's guidance inline; a Stage switcher jumps to any Gate's screen, not just the current one. Add Source documents, run the AI interview, edit and save, then render. Under the hood it writes the same files to the same place (or the same Provider repository) a person editing by hand would — there is no second store, and no import/export step. To see what a finished Instance looks like, `gantry serve` and open `kiwi-cover-mutual` or `gantry` in the **Examples** workspace.
 
-Each gate screen also has a "Clear all fields" button, blanking every field shown for that stage without touching the saved files until you hit each module's own Save button. To see what a filled-in gate screen looks like, `gantry serve` and open `examples` from the dashboard — a fixture instance with real content for every stage.
+Each Stage screen also has a "Clear all fields" button, blanking every field shown for that Stage without touching the saved files until you save.
 
-Neither path is the "real" one. They're two front ends onto the same data.
+**Clone and write.** The Modules are flat Markdown files. Clone the repository holding them, read the Definition, and fill in the module files in your editor. Every module carries its own spec and guidance, so you're not guessing at what "Background" is supposed to contain. This is the path for architects who'd rather write Markdown than use a form; the CLI (below) checks and renders what you wrote.
+
+**An outside agent over MCP.** An agent such as Claude Code can do what the web UI does, including running a whole AI interview session, through the Gantry MCP server (see "Working with agents" below).
+
+None of these is the "real" one. They're front ends onto the same data.
 
 ## Backing an instance with a remote workspace
 
-An instance's data doesn't have to live on the machine running `gantry serve` — it can live in a repo on a **Provider** instead, with gantry acting as a form over it. This is useful when the people filling in modules aren't the people running the server. Gantry supports two Providers you can register a brand-new workspace against through this wizard today, at full parity: **Azure DevOps** (Repos + Boards) and **GitHub** (repos + Issues) — see `CONTEXT.md`'s **Provider** entry and `docs/adr/0037-provider-as-a-suite-one-per-workspace.md`. **GitLab** (Projects + Issues, `gitlab.com` or self-hosted CE/EE) is built at that same full parity at the capability layer — content store, stage branches, Merge-Request-gated sign-off, work items, identity, Library repos — per `docs/adr/0041-gitlab-as-third-provider.md`, but this wizard's own Register-a-new-workspace step doesn't offer it as a Provider choice yet, so it shows up as a known-but-disabled option in the picker for now; a GitLab-backed workspace is reachable today by adopting a Project that already holds instance data. A fourth, **Atlassian** (Bitbucket + Jira), is modelled in the schema but not implemented at all.
+An instance's data doesn't have to live on the machine running `gantry serve` — it can live in a repo on a **Provider** instead, with gantry acting as a form over it. This is useful when the people filling in modules aren't the people running the server. The "+ New Workspace" wizard offers four Providers when you register a new workspace: **Azure DevOps** (Repos + Boards), **GitHub** (repos + Issues), **GitLab** (Projects + Issues, `gitlab.com` or self-hosted CE/EE, `docs/adr/0041-gitlab-as-third-provider.md`) and **Atlassian** (Bitbucket Cloud for the repo, Jira Cloud for work items, `docs/adr/0042-atlassian-as-fourth-provider.md`) — see `CONTEXT.md`'s **Provider** entry and `docs/adr/0037-provider-as-a-suite-one-per-workspace.md`. **Azure DevOps and GitHub are complete.** GitLab and Atlassian are still being finished: their workspaces can be registered, and their stage branches, Pull/Merge Request sign-off, work items, reviewers and library repos are built, but saving Modules from the editor isn't supported on them yet, so neither has Source documents, the AI interview or decisions logs so far.
 
 A repo backing instance data this way is a **workspace**: `instance.yaml` and `modules/` live at `gantry-workspace/<slug>/` inside it, not at repo root — so one workspace (one repo) can hold more than one instance, each in its own slug-named subdirectory, rather than being permanently tied to exactly one.
 
 The landing page's sole creation entry point is **"+ New Workspace"** (`/new-workspace`) — a single wizard that covers both registering a brand-new workspace and adding another instance to one that already exists (there is no separate "+ New instance" action, and no paste-a-URL-first flow any more):
 
-1. **Pick an existing workspace** from those this server already knows, or **register a new one**. Registering starts with a **Provider** choice, which drives everything after it: Azure DevOps collects `https://dev.azure.com/{organization}/{project}/_git/{repository}`-shaped fields (Organization/Project/Repository; an on-premises Azure DevOps Server base URL isn't supported here yet), while GitHub collects Owner/Repository (with an optional GitHub Enterprise Server base URL, gated behind an explicit server-side allow flag, the same SSRF protection an on-premises Azure DevOps Server base URL already has). Registering also sets that workspace's **Owner** in the same step — nothing else asks for it ahead of an instance existing in it. The PAT you're prompted for here proves real access to that exact repo before anything is recorded, and becomes that workspace's own PAT once registration succeeds (see the credentials paragraph below) — a failed registration discards it rather than storing it anywhere.
+1. **Pick an existing workspace** from those this server already knows, or **register a new one**. Registering starts with a **Provider** choice, which drives everything after it: Azure DevOps collects `https://dev.azure.com/{organization}/{project}/_git/{repository}`-shaped fields (Organization/Project/Repository; an on-premises Azure DevOps Server base URL isn't supported here yet), GitHub collects Owner/Repository (with an optional GitHub Enterprise Server base URL, gated behind an explicit server-side allow flag, the same SSRF protection an on-premises Azure DevOps Server base URL already has), GitLab collects Namespace/Project (with an optional self-hosted base URL, gated the same way), and Atlassian collects a Bitbucket Account and Repository plus a Jira Site, Jira Project and Jira issue type, with one token for each product. Registering also sets that workspace's **Owner** in the same step — nothing else asks for it ahead of an instance existing in it. The PAT you're prompted for here proves real access to that exact repo before anything is recorded, and becomes that workspace's own PAT once registration succeeds (see the credentials paragraph below) — a failed registration discards it rather than storing it anywhere.
 2. **Instance fields** — Name, Directory (defaulting to the slugified Name, overridable), and an initial Assignee.
 3. **Work-item link** — every remote workspace tracks work items on its own Provider (a suite always supplies both halves — ADR-0037), so this step always runs for a Server-hosted workspace and never for a Local one: an Azure DevOps parent-work-item link with Organization *and* Project auto-filled read-only, Parent work item id / Work item type as real PAT-backed lookups; a GitHub parent-issue link the same way but with no Work item type field at all, since GitHub issues are untyped (`docs/adr/0040-github-work-item-and-review-model.md`).
 
@@ -284,6 +260,7 @@ The landing page's sole creation entry point is **"+ New Workspace"** (`/new-wor
 - **Azure DevOps**: **Code (Read & write)**, **Work Items (Read & write)**, and **Identity (Read)**.
 - **GitHub**: a fine-grained token with **Contents**, **Issues** and **Pull requests** set to Read & write, and **Metadata** set to Read-only. A token missing one of these reports the repository itself as **not found** (GitHub's own documented behaviour — a permissions problem and a missing repository are indistinguishable from the HTTP response alone), so a bare "repository not found" is worth re-checking the token's permissions for before assuming the owner/repository name is wrong.
 - **GitLab**: a Personal, Project or Group Access Token with the **api** scope (or, narrower, **read_repository** and **write_repository** together with API access to Issues and Merge Requests). GitLab, like GitHub, reports a Project as **not found** for a token missing a required scope, the same response a genuinely missing namespace/project produces.
+- **Atlassian**: two tokens, both kept in the workspace's one slot. The Bitbucket token needs **Repositories** and **Pull requests** (Read & Write); the Jira token needs Read & write access to Jira issues. Each is sent only to its own product.
 
 If you upgrade from a version that stored a single global PAT, it's copied automatically into every workspace registered at the time, once, on first load — nothing needs re-entering, and the old global entry is then removed.
 
@@ -294,11 +271,11 @@ Settings is three separate, tab-free screens, reached differently depending on w
 
 Each screen's own back control returns to wherever it was actually opened from (Home, or that same instance screen) — not browser history — falling back to Home for a direct/bookmarked Settings URL.
 
-- **Global Settings** (`/settings`) — the **Advanced mode** toggle, off by default (see "Backing an instance with a local folder" below), and a **default ticketing system** selector that only ever affects a *new* Azure DevOps workspace's own ticketing-system override (Jira is listed but disabled). There is no global PAT control here any more, for any Provider — see the credentials paragraph above.
-- **Workspace Settings** (`/settings/workspace`, from an instance's own Settings dropdown) — the workspace *behind that one instance* (never a picker across every registered workspace): its Provider and repo location, a free-text **owner** label, and that workspace's own **PAT** — set, replace or clear it, with no effect on any other workspace. For an Azure DevOps workspace only, a **ticketing-system** override is also shown (Jira is listed but disabled — a GitHub or GitLab workspace has no such choice, since its tracker is fixed by its Provider, GitHub Issues or GitLab Issues respectively). It also offers **Archive** — a reversible "set aside" that drops the workspace out of the default dashboard and API listings without deleting anything on disk or on the Provider (blocked while it still has an active instance; `?archived=1` reveals archived rows for a per-row Restore). A local instance has no workspace, so this screen reports that instead.
-- **Instance Settings** (`/settings/instance`, from an instance's own Settings dropdown) — that instance's own stored **Assignee** (editable), its **Size** (editable, shown only when its definition sets `target-words`), read-only instance info (slug, definition, current stage), and a read-only view of its linked work item (organization/project or owner/repository, parent work item/issue, type where the Provider has one, and each stage's own child work item id). Re-linking isn't supported here or anywhere else after creation — linking happens only at instance creation (see "Linking an instance to a tracked work item" below). This screen also offers **Archive** for the instance itself — the same reversible set-aside as for a workspace; an archived instance still resolves read-only at its direct URL.
+- **Global Settings** (`/settings`) — the **Advanced mode** toggle, off by default (see "Backing an instance with a local folder" below); the **Render engine** (the in-browser WASM Pandoc, or the server's native one); your **AI Providers** (see "AI Providers and the AI relay" below); the **Blob containers** the operator declared, read-only (see "Blob containers" below); and, with Advanced mode on, the server's **Library repos**. There is no global PAT control here any more, for any Provider — see the credentials paragraph above.
+- **Workspace Settings** (`/settings/workspace`, from an instance's own Settings dropdown) — the workspace *behind that one instance* (never a picker across every registered workspace): its Provider and repo location, a free-text **owner** label, and that workspace's own **PAT** — set, replace or clear it, with no effect on any other workspace. There is no separate ticketing-system choice: a workspace's tracker is fixed by its Provider. It also offers **Archive** — a reversible "set aside" that drops the workspace out of the default dashboard and API listings without deleting anything on disk or on the Provider (blocked while it still has an active instance; `?archived=1` reveals archived rows for a per-row Restore). A local instance has no workspace, so this screen reports that instead.
+- **Instance Settings** (`/settings/instance`, from an instance's own Settings dropdown) — that instance's own stored **Assignee** and **Required reviewer** (editable); its **Instance settings**, as its Definition declares them: **Size** (shown only when the Definition sets `target-words`), **Classification** (shown only when the Definition declares markings) and its own **Logo** (replace, download, or go back to the Definition's); read-only instance info (slug, definition, version, current stage), with **Move to v<N>…** under the version when a newer published version of the Definition exists; and a read-only view of its linked work item (organization/project or owner/repository, parent work item/issue, type where the Provider has one, and each stage's own child work item id). Re-linking isn't supported here or anywhere else after creation — linking happens only at instance creation (see "Linking an instance to a tracked work item" below). This screen also offers **Archive** for the instance itself — the same reversible set-aside as for a workspace; an archived instance still resolves read-only at its direct URL.
 
-Once registered, a server-workspace-backed and a remote-workspace-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command, regardless of which Provider a remote workspace uses. Where each one's data actually lives is tracked server-side across three registry files at the workspaces root (`workspaces/instance-registry.json`: slug -> workspace; `workspaces/workspace-registry.json`: workspace -> provider/location/owner/ticketing-system/`archived`, for a remote workspace, or -> its own `workspace.json`, for a server workspace directory; `workspaces/number-registry.json`: the scoped numeric ordinals of ADR-0024 — all gitignored, application state, not source), not in any client-visible config. A flat, pre-Provider record is read forward into the nested `{provider, location}` shape automatically the first time it's touched, and rewritten in that shape on next write — there is no separate migration step to run.
+Once registered, a server-workspace-backed and a remote-workspace-backed instance are indistinguishable from the dashboard's point of view — same listing, same module editor, same render command, regardless of which Provider a remote workspace uses. Where each one's data actually lives is tracked server-side across three registry files at the workspaces root (`workspaces/instance-registry.json`: slug -> workspace; `workspaces/workspace-registry.json`: workspace -> provider/location/owner/`archived`, for a remote workspace, or -> its own `workspace.json`, for a server workspace directory; `workspaces/number-registry.json`: the scoped numeric ordinals of ADR-0024 — all gitignored, application state, not source), not in any client-visible config. A flat, pre-Provider record is read forward into the nested `{provider, location}` shape automatically the first time it's touched, and rewritten in that shape on next write — there is no separate migration step to run.
 
 ## Backing an instance with a local folder
 
@@ -351,7 +328,7 @@ Nothing moves an instance from one stage to the next by itself — advancement i
 
 **Local instances** advance self-serve: an "Advance to next stage" panel runs the gate check, asks for confirmation, and moves the instance's stage pointer directly — nothing is pushed anywhere else. The panel isn't rendered for a Workspace-backed instance at all, which has no self-serve path out of a stage. A Local-workspace instance (see "Backing an instance with a local folder" above) follows this exact same rule — the gate check runs through `/api/local/check` instead of `/api/instance/check`, but the panel, the confirmation, and the direct stage-pointer move are otherwise identical.
 
-**Workspace-backed instances** are gated by a real Pull Request the Owner reviews *on the workspace's own Provider* — Azure DevOps or GitHub — there is no separate approve button inside gantry:
+**Workspace-backed instances** are gated by a real Pull Request the Owner reviews *on the workspace's own Provider* (a Merge Request on GitLab) — there is no separate approve button inside gantry:
 
 1. The moment the first save of a stage lands, that stage gets its own branch — `gantry-workspace/<slug>/<stageId>` — and every subsequent read/write targets it. If the previous stage's branch is still open (its PR unmerged), the new branch stacks on top of it rather than forking fresh from `main`, so work continues in sequence through approval latency; `main` itself only ever reflects fully-approved, merged stages.
 2. Every module save re-renders whichever of the stage's artefacts have enough data and commits them to the same branch, so the eventual Pull Request's diff always carries the generated documents alongside the module files.
@@ -381,12 +358,13 @@ Instances live inside a **workspace** under the workspaces root, so a listing na
 |---|---|---|
 | `gantry definitions [--json]` | List definitions available in this repo, with their stages and versions | Implemented |
 | `gantry instances [--json]` | List instances available in this repo, with the workspace each lives in, its definition and current stage | Implemented |
-| `gantry new <definition> <slug> [--owner <name>] [--assignee <name>]` | Create an instance, in the reserved `default` workspace — `--owner` seeds each first-stage module file's own frontmatter `owner`; `--assignee` sets the instance record's own stored assignee | Implemented |
+| `gantry new <definition> <slug> [--owner <name>] [--assignee <name>] [--size <size>] [--classification <marking>] [--definition-version <n>]` | Create an instance, in the reserved `default` workspace — `--owner` seeds each first-stage module file's own frontmatter `owner`; `--assignee` sets the instance record's own stored assignee; `--size` (`small`, `medium` or `large`) and `--classification` set its Instance settings where the definition declares them; `--definition-version` (alias `--version`) pins a version, default the latest published | Implemented |
 | `gantry status <slug> [--json]` | Current stage, module completeness, what's outstanding | Implemented |
 | `gantry check <slug> [--gate <id>] [--json]` | Validate an instance against a gate's requirements — any gate, not just the instance's current stage | Implemented |
 | `gantry render <slug> <artefact> [--dry-run]` | Render an artefact to `out/`. Draws Mermaid diagrams when the optional headless Chromium is installed (see below) | Implemented |
-| `gantry serve [slug] [--port <port>]` | Serve the web app (default port 3000): a dashboard of every registered instance at `/`, local or remote-workspace-backed (Azure DevOps or GitHub), and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/new-workspace` is the "+ New Workspace" wizard, `/settings` the Settings screens, `/user-guide` the in-product User Guide, `/definitions` the Definitions page (see "Backing an instance with a remote workspace" above) | Implemented |
-| `gantry validate <definition> [--json]` | Report every structural problem with a definition in one pass | Implemented |
+| `gantry serve [slug] [--port <port>]` | Serve the web app (default port 3000): a dashboard of every registered instance at `/`, on a Provider, on the server or in a Local workspace, and the stage-by-stage form at `/instance/<slug>`. `[slug]` only sets a fallback default for API requests made with no `?slug=<slug>` of their own — it doesn't change what the dashboard shows or require picking one instance up front. `/new-workspace` is the "+ New Workspace" wizard, `/settings` the Settings screens, `/user-guide` the in-product User Guide, `/definitions` the Definitions page (see "Backing an instance with a remote workspace" above) | Implemented |
+| `gantry validate <definition> [--version <n>] [--json]` | Report every structural problem with a definition in one pass — the latest published version unless `--version` (alias `--definition-version`) names another | Implemented |
+| `gantry workspace-id [--provider <id>] [<location options>] [--json]` | Print the workspace id derived from a Provider and location, with no server or registry — the key `GANTRY_SHARED_WORKSPACE_PATS` and `GANTRY_MCP_WORKSPACE_PATS` entries use. With no location it reads `GANTRY_BOOTSTRAP_WORKSPACES`; `--json` prints a ready-to-fill PAT map (see "Persistence" below) | Implemented |
 | `gantry backfill-numeric-refs` | One-time (idempotent) backfill of scoped numeric workspace/instance references (ADR-0024) for workspaces/instances that predate the feature | Implemented |
 
 `definitions`, `instances`, `status`, `check` and `validate` all emit structured output with `--json` for scripting and agent use.
@@ -406,59 +384,80 @@ Every command that reads instance data takes `--workspaces-dir <path>` (or `GANT
 
 ## Definition schema
 
-**`definitions/design/1/definition.yaml`** — `definitions/<id>/<n>/definition.yaml`
+**`definitions/design/4/definition.yaml`**, abridged — the current `design` version (`definitions/<id>/<n>/definition.yaml` in general). Comments, Interview instructions, guidance and most `requires` entries are left out; read the file for the whole thing.
 
 ```yaml
 id: design
-version: 1
+version: 4
 status: published
 title: Solution Design
 description: >
   Design content for an initiative, from shaping through HLD approval,
   build-ready detailed design, and operational handover.
+interview: >
+  These documents are read by architects, delivery teams and the governance board ...
+
+instance-settings:
+  classification:
+    choices: [UNCLASSIFIED, IN-CONFIDENCE, SENSITIVE, RESTRICTED]
+
+standard-modules:            # Gantry's own Glossary, Open questions and Key decisions
+  - id: glossary
+    version: 1
+  - id: open-questions
+    version: 1
+  - id: key-decisions
+    version: 1
+    prefix: AD
+    style: why
 
 stages:
   - id: shape
     title: SOAP
     gate: business-case
-    modules: [context, solution-definition, team-and-estimates, dependencies, soap-full-details]
+    modules: [background, introduction, design-basis, solution-definition, team-and-estimates, dependencies, soap-full-details, open-questions]
 
   - id: hld-define
     title: High-level Design
     gate: hld-arb-approved
-    modules: [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
+    modules: [hld-submission, background, introduction, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
 
   - id: detailed-design
     title: Detailed Design
     gate: build-ready-checklist
-    modules: [architecture, integration, data, nfrs, security, risks, dependencies, support-and-operations]
+    modules: [introduction, design-basis, architecture, key-decisions, integration, data, nfrs, security, ...]
 
   - id: handover
     title: Operational Handover
     gate: operational-handover
-    modules: [as-built-notes]
+    modules: [glossary, introduction, design-basis, key-decisions, as-built-notes, recovery-plan, data-security-controls, nfrs]
 
 artefacts:
   - id: soap
     title: Solution on a Page
     template: templates/soap.md.tmpl
     gate: business-case
-    requires: [context, solution-definition, team-and-estimates]
+    cover-page: true
+    table-of-contents: true
+    source-appendix: true          # end the document with the Source documents it cites
+    requires:
+      [
+        background.problem,
+        background.affected-domains,
+        design-basis.assumptions?,   # in scope, but blocks the gate only if required on its own
+        solution-definition.high-level-requirements,
+        ...
+        team-and-estimates.estimates,
+      ]
 
-  - id: soap-full            # heavier variant sharing the business-case gate; field-level requires
+  - id: soap-full            # heavier variant sharing the business-case gate
     title: Full Solution on a Page
     template: templates/soap-full.md.tmpl
     gate: business-case
-    requires: [context.driver, context.opportunity, solution-definition.high-level-requirements, ...]
+    requires: [...]
 
-  - id: hld
-    title: High Level Design
-    template: templates/hld.md.tmpl
-    gate: hld-arb-approved
-    requires: [hld-submission, problem-statement, proposed-solution, alternatives-considered, open-questions, nfrs, risks, security, dependencies]
-
-  # sad and ssad also render at build-ready-checklist, each with its own field-level requires list;
-  # as-built renders at operational-handover. See definitions/design/1/definition.yaml for the full file.
+  # hld renders at hld-arb-approved, sad and ssad at build-ready-checklist,
+  # as-built at operational-handover, each with its own field-level requires list.
 ```
 
 Every `definition.yaml` starts with `version:` (integer) and `status:` (`draft` | `published`). Definitions carry numbered versions (`definitions/<id>/<n>/`), each with its own `definition.yaml`, `modules/`, `templates/` and `CHANGELOG.md`. The latest `published` version is the default for new instances; `draft` versions are opt-in via the New Workspace wizard's version picker.
@@ -469,33 +468,32 @@ A gate passes when *at least one* of its gate-matching artefacts has its own `re
 
 ## Module specs
 
-**`definitions/design/1/modules/context.yaml`**
+**`definitions/design/4/modules/background.yaml`**, abridged (one Field's guidance and two Fields left out):
 
 ```yaml
-id: context
-title: Context
+id: background
+title: Background and context
 purpose: >
-  Why this initiative exists and what it is responding to. Enough for a reader
-  with no prior knowledge to understand the situation in under two minutes.
+  Describe why this initiative exists and what it is responding to. Give a reader with
+  no prior knowledge enough context to understand the situation quickly, stated clearly
+  enough that a reviewer can judge the fit of the solution without inferring it.
 
 fields:
-  - id: driver
-    title: Business driver
+  - id: problem
+    title: Problem statement
     type: markdown
-    required: true
+    target-words: { small: 50, medium: 130, large: 260 }
+    required-at: [business-case, hld-arb-approved]
     guidance: >
-      The change in the world that makes this necessary — legislative,
-      operational, commercial, or a constraint that has become binding.
+      The current state — what is wrong, missing, or binding right now: the
+      legislative, operational, commercial, or technical constraint that makes
+      this necessary. Open with a one-line summary before the fuller narrative.
 
   - id: affected-domains
     title: Affected domains
     type: list
+    target-words: { small: 15, medium: 30, large: 50 }
     required: true
-
-  - id: out-of-scope
-    title: Explicitly out of scope
-    type: markdown
-    required: false
 ```
 
 Modules can be shared between definitions where the content genuinely is the same thing — and should not be where it merely looks similar.
@@ -544,32 +542,30 @@ Each instance's marking is stored as `classification:` in its `instance.yaml` �
 
 ## Instance module files
 
-**`workspaces/<workspace>/my-initiative/modules/context.md`** — what someone actually writes:
+**`workspaces/<workspace>/my-initiative/modules/background.md`** — what someone (or the AI interview) actually writes, abridged from the bundled `kiwi-cover-mutual` example:
 
 ```markdown
 ---
-module: context
-status: draft
-owner: c.barlow
+module: background
+status: agreed
+owner: p.natarajan
 ---
 
-# Context
+# Background and context
 
-## Business driver
+## Problem statement
 
-...
+Kiwi Cover Mutual (KCM) cannot settle a straightforward home or motor claim in under twelve working days ...
+Median time to payment is 12.4 working days against a member expectation of five [Client brief, p. 1](source:client-brief).
 
 ## Affected domains
 
-- Payments
-- Client Record
-
-## Explicitly out of scope
-
-...
+- Claims handling (register, accept, valuate, pay)
+- Policy administration
+- Customer contact and CRM
 ```
 
-Module files are markdown so they're readable, diffable and editable anywhere. Frontmatter carries the machine-legible state.
+Module files are markdown so they're readable, diffable and editable anywhere. Frontmatter carries the machine-legible state. A citation such as `[Client brief, p. 1](source:client-brief)` names a Source document by its id; in Word it prints as a footnote, and a document whose Artefact sets `source-appendix: true` ends with a Sources appendix listing what it cites.
 
 Headings follow one document scale (ADR-0016): the module's title sits at `#`, each field heading at `##`, and author content starts at `###` — so an author's own sub-heading can never collide with a field boundary. Files written before this scale existed are migrated in place on first read; no manual step is needed.
 
@@ -583,11 +579,30 @@ In Gantry these become artefact declarations over one module set. The SOAP rende
 
 The level of content remains proportionate to the increment: a small, familiar change completes fewer modules, and the definition marks which modules are mandatory per gate rather than requiring the full set every time.
 
+`design` has four published versions. **Version 4 is the default** for a new Instance; each earlier one stays published and unchanged, so an Instance on it keeps rendering exactly as it did:
+
+- **[v1](definitions/design/1/CHANGELOG.md)** — the first version: four Stages (SOAP, High-level Design, Detailed Design, Operational Handover) and six documents (SOAP, Full SOAP, HLD, SAD, SSAD, As-built) over one module set.
+- **[v2](definitions/design/2/CHANGELOG.md)** — a layout revision: each document's Fields in the reading order of its reference template, duplicate Fields merged, the HLD trimmed to its template's sections, and the HLD gate renamed from TAC to ARB (`hld-arb-approved`).
+- **[v3](definitions/design/3/CHANGELOG.md)** — built for the AI interview and for production Word output: Interview instructions, Gantry's Glossary, Open questions and Key decisions standard modules, a Sources appendix on every document, a Classification marking, and a cover page and table of contents.
+- **[v4](definitions/design/4/CHANGELOG.md)** — v3 without the References section, which only repeated what the Sources appendix lists.
+
+To move an Instance to the latest version, use **Move to v<N>…** in its Instance Settings: it lists the Fields the move removes, and the ones new or now required, before it changes anything.
+
+Gantry ships a second definition, **`recruitment-onboarding`** (versions 1 to 4, v4 the default): turning a vacancy into a starter who can work on day one, from requisition through selection, approval, and offer, contract and payroll to provisioning. Its bundled `platform-engineer` example is a worked hire. See each version's `CHANGELOG.md` under `definitions/recruitment-onboarding/`.
+
 Read the design definition before writing your own — not because your process resembles design, but because it is a worked example of how to decompose a document set into modules without smuggling the old templates back in.
 
 ## Working with agents
 
-The definition is the contract. Because every module carries a machine-readable purpose, field list and guidance, an agent can be pointed at an instance and told to complete a module without further prompting — the spec *is* the prompt.
+**The Gantry MCP server is the main way for an outside agent to work with Gantry.** An agent such as Claude Code can do over MCP what a person does in the web UI, and while it runs an interview it is held to the same rules as Gantry's own AI:
+
+- **Read the evidence and add to it.** List and read Source documents (a page at a time, or a picture as a picture), each Stage's decisions log and each Reviewed copy's comments by Field; upload a Source document, add one from a web address, point at a code repository and search it; bring in a Reviewed copy.
+- **Run an AI interview session.** Get the same interview brief the in-app AI gets, then start, pause and resume a "run until Stage X" session. It asks its questions in its own chat and saves once, as one commit, passing the Stage version it read so it never overwrites a colleague's changes unseen. It never passes a Gate: on a Provider workspace it requests approval and waits for the Owner, in Stage order. Every entry it records in the decisions log is stamped **recorded by an outside agent**.
+- **Everything else.** Create workspaces and Instances, check Gates, render documents, request reviews and approvals, see Out of date Fields, and author and publish Definitions.
+
+The MCP server is a separate package in [`mcp-server/`](mcp-server/README.md), deployed as its own service and talking to a running `gantry serve` with the same per-workspace tokens the browser uses (`docs/adr/0043-mcp-server-is-a-separate-render-hosted-http-client.md`). Its README covers setup, credentials and the tools; the User Guide's [Using an outside agent](docs/user-guide/index.md#using-an-outside-agent) covers what it is like to work with one. It can't reach a Local workspace.
+
+**Working on the files directly** is the second path. The definition is the contract: because every module carries a machine-readable purpose, field list and guidance, an agent can be pointed at an instance and told to complete a module without further prompting — the spec *is* the prompt.
 
 - `gantry status --json` and `gantry check --json` let an agent determine what's missing and act on it.
 - Modules are independent files. Parallel agents can work on separate modules without conflict.
@@ -626,7 +641,7 @@ npm test               # node --test with no filter — runs every *.test.js, Pl
 
 ## Continuous integration
 
-`azure-pipelines.yml` (repo root) has no CI or PR triggers of its own (`trigger: none`, `pr: none`) — it runs only when an Azure DevOps branch-protection build-validation policy invokes it. The pipeline does a single `docker build` of `ContainerFile`, whose stages run `npm run test:unit:ci`, `npm run test:e2e:ci`, and `npm run render:examples` (rendering the `examples` fixture for `soap`, `hld`, `sad`, `ssad` and `as-built`). Test results and coverage are embedded in the image and extracted afterwards; the pipeline's `PublishTestResults` (`failTaskOnFailedTests`) and the render stage's non-zero exit are the gates.
+`azure-pipelines.yml` (repo root) has no CI or PR triggers of its own (`trigger: none`, `pr: none`) — it runs only when an Azure DevOps branch-protection build-validation policy invokes it. The pipeline does a single `docker build` of `ContainerFile`, whose stages run `npm run test:unit:ci`, `npm run test:e2e:ci`, and `npm run render:examples` (rendering the bundled Examples workspace's `kiwi-cover-mutual` as `soap`, `hld`, `sad`, `ssad` and `as-built`, and its `gantry` as `soap` and `soap-full`). Test results and coverage are embedded in the image and extracted afterwards; the pipeline's `PublishTestResults` (`failTaskOnFailedTests`) and the render stage's non-zero exit are the gates.
 
 ---
 
@@ -674,7 +689,7 @@ podman build --file ContainerFile \
 docker run -p 3000:3000 gantry
 ```
 
-Open http://localhost:3000 in a browser. The dashboard shows one **Examples** workspace shipped with the repo, holding two instances: `kiwi-cover-mutual`, a fully worked design (Kiwi Cover Mutual's claims handling modernisation) with content and diagrams for every stage, and `gantry`, Gantry's own Azure Container Apps hosting proposal as a complete Full SOAP with Mermaid diagrams (WI #354; identifiers are angle-bracket placeholders, not real Contoso resources). Click either instance to view its stages, modules, and completeness. This one-liner uses the bundled `workspaces/` baked into the image — no volume mounts, no env vars.
+Open http://localhost:3000 in a browser. The dashboard shows one **Examples** workspace shipped with the repo, holding three instances: `kiwi-cover-mutual`, a fully worked design (Kiwi Cover Mutual's claims handling modernisation) with content and diagrams for every stage, `gantry`, Gantry's own Azure Container Apps hosting proposal as a complete Full SOAP with Mermaid diagrams (WI #354; identifiers are angle-bracket placeholders, not real Contoso resources), both on `design` version 4, and `platform-engineer`, a worked hire on `recruitment-onboarding`. Click any instance to view its stages, modules, and completeness. This one-liner uses the bundled `workspaces/` baked into the image — no volume mounts, no env vars.
 
 ## Corporate proxy / custom CA certificates
 
@@ -750,7 +765,7 @@ Pull whichever tag matches your promotion model. For a pinned UAT, use the versi
 
 ### Access control
 
-Gantry has no built-in authentication — this is intentional. Each user supplies their own Personal Access Token in the browser, one per remote workspace with no global fallback (`docs/adr/0038-per-workspace-pat-no-global-credential.md`): the web UI stores each token in `localStorage`, scoped to the workspace it was entered for, and forwards it as HTTP Basic on every API request that needs it (instance reads/writes, work-item linking) to whichever Provider — Azure DevOps or GitHub — that workspace uses. There is no server-side session or shared credential.
+Gantry has no built-in authentication — this is intentional. Each user supplies their own Personal Access Token in the browser, one per remote workspace with no global fallback (`docs/adr/0038-per-workspace-pat-no-global-credential.md`): the web UI stores each token in `localStorage`, scoped to the workspace it was entered for, and forwards it as HTTP Basic on every API request that needs it (instance reads/writes, work-item linking) to whichever Provider — Azure DevOps, GitHub, GitLab or Atlassian — that workspace uses. There is no server-side session or shared credential.
 
 Gate access at the network layer (VPN, private network, reverse proxy with SSO, firewall rules) rather than inside the app. Treat Gantry as an internal tool that assumes the network has already authenticated the caller.
 
@@ -954,7 +969,7 @@ docker run -p 4000:4000 gantry serve --port 4000
 
 ### Outbound network
 
-When instances are backed by a remote workspace, the server (and CLI) makes outbound HTTPS calls to that workspace's Provider — `https://dev.azure.com` (or your on-premises Azure DevOps Server if configured) for Azure DevOps, `https://api.github.com` (or your GitHub Enterprise Server host if configured) for GitHub, `https://gitlab.com` (or your self-hosted GitLab CE/EE host if configured) for GitLab. The host running the container must allow egress to whichever host(s) your workspaces actually use.
+When instances are backed by a remote workspace, the server (and CLI) makes outbound HTTPS calls to that workspace's Provider — `https://dev.azure.com` (or your on-premises Azure DevOps Server if configured) for Azure DevOps, `https://api.github.com` (or your GitHub Enterprise Server host if configured) for GitHub, `https://gitlab.com` (or your self-hosted GitLab CE/EE host if configured) for GitLab, and `https://api.bitbucket.org` plus each workspace's own Jira Cloud site (`<site>.atlassian.net`) for Atlassian. The host running the container must allow egress to whichever host(s) your workspaces actually use.
 
 A code repository added as a Source document (see **Code repositories as Source documents**) is read through the same Provider hosts, plus a few more. `raw.githubusercontent.com` serves a public GitHub repository's files read without a token. The server downloads a whole repository as one archive, and two Providers send that download from a host of its own: `codeload.github.com` for GitHub (on GitHub Enterprise Server, `codeload.<host>` or the server's own `/codeload/` path) and `bitbucket.org` for Bitbucket, whose API is at `api.bitbucket.org`. If those hosts aren't allowed, nothing breaks: the repository is read file by file, as described there.
 
