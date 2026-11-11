@@ -16,7 +16,7 @@ Next choose a Definition, such as `design`, then provide the Instance's name, di
 
 ### Choosing a Provider
 
-A **Provider** is the external suite a Server-hosted Workspace's repo and work items both come from. The wizard offers four: **Azure DevOps** (Repos + Boards), **GitHub** (repos + Issues), **GitLab** (Projects + Issues, `gitlab.com` or self-hosted CE/EE) and **Atlassian** (Bitbucket Cloud for the repo, Jira Cloud for work items). Azure DevOps and GitHub are complete. GitLab and Atlassian are still being finished: you can register a workspace on either, but saving Modules from the editor isn't supported there yet, so they don't have Source documents, the AI interview or decisions logs so far. A workspace picks exactly one Provider when it is registered, and everything about that workspace — its repository location, its Personal Access Token, its stage branches, its sign-off Pull/Merge Requests, its linked work items — runs through that one Provider from then on. There is no way to mix, for example, a GitHub repository with Azure DevOps work items.
+A **Provider** is the external suite a Server-hosted Workspace's repo and work items both come from. The wizard offers four: **Azure DevOps** (Repos + Boards), **GitHub** (repos + Issues), **GitLab** (Projects + Issues, `gitlab.com` or self-hosted CE/EE) and **Atlassian** (Bitbucket Cloud for the repo, Jira Cloud for work items). Azure DevOps and GitHub are complete. GitLab and Atlassian are not finished: you can register a workspace on either, but you can't yet create a new Instance in one (see below for what each can do so far). A workspace picks exactly one Provider when it is registered, and everything about that workspace — its repository location, its Personal Access Token, its stage branches, its sign-off Pull/Merge Requests, its linked work items — runs through that one Provider from then on. There is no way to mix, for example, a GitHub repository with Azure DevOps work items.
 
 Each Server-hosted Workspace holds its own **Workspace PAT** — there is no global or default token any more. The first request against a workspace with no PAT stored prompts for one, naming that workspace and its Provider so you always know which token to paste; the PAT you submit is stored only for that workspace, in this browser, and is never sent to any other workspace or Provider. Rotating or clearing a token in **Workspace Settings** (see **Settings** below) never affects any other workspace.
 
@@ -33,7 +33,10 @@ GitLab's own repo-equivalent is called a **Project**, held under a **Namespace**
 
 GitLab's Merge Requests read a little differently from GitHub's Pull Requests when it comes to sign-off — see **Sign-off** under **Approval workflow** below for exactly how Gantry maps GitLab's approval toggle and discussion threads onto Gantry's own review states.
 
-GitLab's and Atlassian's stage branches, sign-off, work items, reviewers and Library repos (see **Settings** below) are built, and the "+ New Workspace" wizard registers a new workspace on either: Namespace and Project for GitLab; Bitbucket Account, Repository, Jira Site, Jira Project and a Jira issue type for Atlassian. What isn't there yet is saving Modules from the editor, which Source documents, the AI interview and decisions logs depend on.
+The "+ New Workspace" wizard registers a new workspace on GitLab (Namespace and Project) or Atlassian (Bitbucket Account, Repository, Jira Site, Jira Project and a Jira issue type), but it can't yet create a new Instance in either. What works after that differs:
+
+- **GitLab.** A GitLab workspace's Instances come from a Project that already holds Instance data: Gantry finds them once the workspace is registered. Their stage branches, Merge Request sign-off, work items and reviewers work, and a GitLab Library repo can be added from **Settings** below. Saving Modules from the editor isn't supported yet, so GitLab has no Source documents, AI interview or decisions log so far.
+- **Atlassian.** Only registering a workspace and adding an Atlassian Library repo from **Settings** work so far. An Atlassian workspace can't hold an Instance yet, so nothing that happens inside an Instance (stage branches, sign-off, work items, saving Modules) is available on it.
 
 ### Choosing a definition version
 
@@ -460,7 +463,7 @@ The **Save** button saves every module on the stage that has changed, in one go;
 
 If you have unsaved changes and switch stage, switch instance, follow a link in the header or press the browser's Back button, Gantry asks whether to **Save**, **Discard** or **Cancel**. **Render**, **Advance to next stage** and **Request Sign-off** ask the same question first, so they always work from your latest content. Closing or refreshing the tab shows the browser's own warning. Changing the view mode or the Artefact selector doesn't count as leaving.
 
-On a Workspace-backed instance, on Azure DevOps, GitHub or GitLab alike, one Save is one commit on the stage's branch containing only the modules you changed. Saving doesn't re-render documents: they are rendered and committed only when you click **Render**, so render before requesting sign-off if the Pull Request should include up-to-date documents.
+On a Workspace-backed instance, on Azure DevOps or GitHub alike (GitLab can't save Modules yet), one Save is one commit on the stage's branch containing only the modules you changed. Saving doesn't re-render documents: they are rendered and committed only when you click **Render**, so render before requesting sign-off if the Pull Request should include up-to-date documents.
 
 #### When someone else has saved the stage meanwhile
 
