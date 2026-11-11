@@ -17,6 +17,16 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.16.5 — 2026-11-11
+
+Gantry has a favicon.
+
+### Added
+
+- **The gantry mark in your browser tab** (#364). Gantry's tabs, bookmarks and history entries now show the gantry arch
+  from the app header. It is dark in a light browser and light in a dark one. Browsers and bookmark tools that ask for
+  `/favicon.ico` get a small icon of the same mark too, instead of nothing.
+
 ## 0.16.4 — 2026-11-09
 
 Design v4 drops the References section, which only repeated what the Sources appendix already lists, and new design
