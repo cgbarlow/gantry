@@ -17,6 +17,57 @@ build if the version in `package.json` has no entry. See
 Versions are the `package.json` version; each is tagged `v<version>` on its merge
 commit on `main`.
 
+## 0.16.6 — 2026-11-12
+
+The New Workspace wizard stops offering an Instance form it can't fulfil on a GitLab or Atlassian workspace, and the
+Definitions page fits a laptop screen, with the whole Map on show and its details a click away.
+
+### Fixed
+
+- **The New Workspace wizard no longer offers to create an Instance on GitLab or Atlassian** (#370).
+  - **What went wrong.** After you registered a GitLab or Atlassian workspace, or picked one that was already
+    registered, the wizard went on to its create-Instance form, which neither Provider can fulfil yet. Asked to create
+    one anyway, the server gave an Azure DevOps error, or quietly created the Instance in the server's default
+    workspace instead.
+  - **What it does now.** However you reach such a workspace (registering it, picking it from the list, a
+    `?workspace=` link, or coming back to a wizard step you left), the wizard says the workspace is registered and
+    explains, naming the Provider, what it can do so far. On GitLab, any Instances already in the Project appear on the
+    Workspaces page, and a new one can't be created there yet. On Atlassian, the workspace can't hold an Instance yet,
+    but its repository can still be a Library repo. The screen has **Back** and **Go to Workspaces**.
+  - **The server refuses it by name.** A request to create an Instance in a GitLab or Atlassian workspace, over the API
+    say, is refused with a message such as *A new Instance can't be created in a GitLab workspace yet.* It doesn't
+    mention Azure DevOps, and nothing is created anywhere.
+  - **The pick screen's hint is corrected.** The hint by the repo URL field now promises to detect and adopt existing
+    instance data only on GitHub and GitLab, and says Atlassian has none to adopt.
+  - **What stays the same.** Azure DevOps, GitHub, Local and server workspaces work exactly as before.
+
+### Changed
+
+- **The Definitions page fits a laptop screen** (#371).
+  - **What changes.** The page now uses up to 1,760 pixels of a wide screen, and the Map's columns share its width. At
+    1440×900, Solution Design v4's Map shows all seven of its columns side by side: its four Stages, **Not in any
+    stage**, **Instance settings** and **Interview**. A 1920 screen shows the whole Map with room to spare.
+  - **No scrolling inside the Map.** The Map is as tall as its longest column, up to the height of the window, so
+    scrolled to the Map you see a Stage as long as Detailed Design (16 Modules and its Gate's artefacts) whole. The
+    focus pane and the Library now sit below the Map, and you scroll the page to reach them.
+  - **Picking something takes you to its details.** When the details are out of sight, picking a Module, a Stage, an
+    artefact, one of the **+** buttons or a jump to a problem in the Map scrolls the page down to them. When they are
+    already on show, or the Map is expanded, the page stays where it is.
+  - **It says when columns run off a side.** A definition with more columns than fit fades at that edge, and a cue
+    above the columns, such as **2 more columns →**, scrolls to them. The cue stays at the top of the window while you
+    scroll down the Map and never covers a column's heading.
+  - **The Library's dropdowns show their full labels.** In Map view the Library is wider, and its definition and
+    version dropdowns sit one above the other at full width, so a name like *Recruitment and Onboarding
+    (recruitment-onboarding)* shows in full. In Outline view they stay side by side. In both views each dropdown shows
+    its full label as a tooltip.
+  - **The way back from an expanded Map is easy to see.** When the Map is expanded, **Show the detail and Library
+    panes** sits where the panes were.
+
+### Notes
+
+- Outline view is also wider on a big screen, because the page's new width applies to both views. Its layout is
+  otherwise unchanged.
+
 ## 0.16.5 — 2026-11-11
 
 Gantry has a favicon.
