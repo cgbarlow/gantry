@@ -1,5 +1,5 @@
 # Executive Summary
-Contoso's current solution design process is scattered across up to 5 different documents across the solution lifecycle from idea to handover. It contains a lot of duplicated information, a lot of margin for human error, and a lot of unnecessary overhead.
+Our current solution design process is scattered across up to 5 different documents across the solution lifecycle from idea to handover. It contains a lot of duplicated information, a lot of margin for human error, and a lot of unnecessary overhead.
 
 We are building a proof of concept for a new design documentation pipeline to fix that. It is a first step towards Architecture as Code.
 
