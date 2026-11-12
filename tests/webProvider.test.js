@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { PROVIDERS, DEFAULT_PROVIDER , workItemParentRef, describeWorkItemLink } from '../web/lib/provider.js'
+import { PROVIDERS, DEFAULT_PROVIDER , workItemParentRef, describeWorkItemLink, instanceCreationBlockedReason } from '../web/lib/provider.js'
 
 // The "+ New Workspace" wizard's own Provider picker (#8, docs/adr/0037; gitlab #25, ADR-0041;
 // atlassian #48, ADR-0042). Every provider ADR-0037's model names is now a real, selectable choice —
@@ -105,5 +105,25 @@ test('describeWorkItemLink: no Provider shape yields an undefined heading or par
     assert.equal(typeof described.parentLabel, 'string')
     assert.ok(described.parentLabel.length > 0)
     assert.ok(Array.isArray(described.rows))
+  }
+})
+
+// ---------------------------------------------------------------------------
+// #370: a GitLab or Atlassian workspace can be registered, but a new Instance can't be created in
+// one yet. The wizard used to offer the create form anyway and then fail with an Azure DevOps error,
+// and POST /api/instances had no way to say why. Both now read this one answer.
+// ---------------------------------------------------------------------------
+
+test('instanceCreationBlockedReason: GitLab and Atlassian say, naming the Provider, that a new Instance can\'t be created there yet', () => {
+  assert.equal(instanceCreationBlockedReason('gitlab'), "A new Instance can't be created in a GitLab workspace yet.")
+  assert.equal(instanceCreationBlockedReason('atlassian'), "A new Instance can't be created in an Atlassian workspace yet.")
+  for (const reason of [instanceCreationBlockedReason('gitlab'), instanceCreationBlockedReason('atlassian')]) {
+    assert.doesNotMatch(reason, /Azure DevOps|organization|project/i)
+  }
+})
+
+test('instanceCreationBlockedReason: Azure DevOps, GitHub and a providerless (server or Local) workspace are not blocked', () => {
+  for (const provider of ['azure-devops', 'github', undefined, null]) {
+    assert.equal(instanceCreationBlockedReason(provider), null, `${provider} should allow creating an Instance`)
   }
 })

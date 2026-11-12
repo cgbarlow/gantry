@@ -29,7 +29,7 @@ import { signal, effect } from '@preact/signals'
 import { apiFetch, apiFetchForInstance } from '../lib/apiFetch.js'
 import { basicAuthHeaderForValue, setPatForWorkspace } from '../lib/credential.js'
 import { renderMarkdown } from '../lib/markdown.js'
-import { PROVIDERS, DEFAULT_PROVIDER } from '../lib/provider.js'
+import { PROVIDERS, DEFAULT_PROVIDER, instanceCreationBlockedReason } from '../lib/provider.js'
 import { IdentityPicker } from '../lib/identityPicker.js'
 import { parseRepoUrl } from '../lib/validateRepo.js'
 import { advancedMode } from '../lib/advancedMode.js'
@@ -1521,6 +1521,14 @@ async function createInstanceAndMaybeLink() {
   const ws = selectedWorkspace.value
   const slug = directoryField.value.trim()
   const versionToSend = resolvedVersion()
+  // #370: the steps that call this are never shown for such a workspace (see NoNewInstanceStep); this
+  // keeps any other way in from sending its location below as an Azure DevOps one.
+  const blockedReason = instanceCreationBlockedReason(ws.provider)
+  if (blockedReason) {
+    createStatus.value = 'failed'
+    createError.value = blockedReason
+    return
+  }
 
   let actualSlug = slug
   if (ws.serverWorkspace) {
@@ -3180,6 +3188,40 @@ function InstanceStep() {
   `
 }
 
+// #370: what the Instance step shows instead of the create form for a workspace whose Provider can't
+// hold a new Instance yet (`instanceCreationBlockedReason`, web/lib/provider.js) — GitLab or Atlassian,
+// whether it was just registered, picked from the list or reached through `?workspace=`. The form used
+// to be offered anyway and its Create sent this workspace's location as Azure DevOps's, failing with a
+// "missing organization, project" error. The wording follows the user guide's own account of what each
+// of these workspaces can do so far.
+function NoNewInstanceStep() {
+  const ws = selectedWorkspace.value
+  const label = PROVIDERS.find((p) => p.id === ws.provider)?.label ?? ws.provider
+  return html`
+    <div class="result-card">
+      <h3><span class="stamp agreed">Workspace</span></h3>
+      <div class="result-row"><span class="k">${label}</span><span class="v">${workspaceLocationLabel(ws)}</span></div>
+    </div>
+
+    <section class="wizard-no-instance" aria-labelledby="no-instance-heading">
+      <h3 id="no-instance-heading">No new Instance here yet</h3>
+      ${ws.provider === 'atlassian'
+        ? html`<p>
+            The Atlassian workspace is registered. Atlassian workspaces can't hold an Instance yet. You can still use the
+            repository as a Library repo, from Settings.
+          </p>`
+        : html`<p>
+            The ${label} workspace is registered. Gantry lists any Instances already in this Project on the Workspaces
+            page. ${instanceCreationBlockedReason(ws.provider)}
+          </p>`}
+      <div class="wizard-field" style="display:flex;gap:8px">
+        <button type="button" class="btn ghost" onClick=${() => (step.value = 'workspace')}>← Back</button>
+        <a class="btn primary" href="/">Go to Workspaces</a>
+      </div>
+    </section>
+  `
+}
+
 function LinkStep() {
   const ws = selectedWorkspace.value
   const isGitHub = ws.provider === 'github'
@@ -3467,6 +3509,10 @@ export function NewWorkspaceWizardPage({ query }) {
   // including the from-scratch flow's own arrival at this same instance
   // step, keeps the genuine "New Workspace" heading throughout.
   const heading = step.value === 'instance' && instanceStepIsShortcut.value ? 'New Instance' : 'New Workspace'
+  // #370: a GitLab or Atlassian workspace never reaches the create form or the Link step after it,
+  // however the wizard arrived there (Register, Pick, `?workspace=`, or a step restored on revisit).
+  const instanceStepBlocked =
+    (step.value === 'instance' || step.value === 'link') && Boolean(instanceCreationBlockedReason(selectedWorkspace.value?.provider))
 
   return html`
     <${WizardHeader} />
@@ -3478,8 +3524,9 @@ export function NewWorkspaceWizardPage({ query }) {
       </p>
 
       ${step.value === 'workspace' ? html`<${WorkspaceStep} />` : null}
-      ${step.value === 'instance' ? html`<${InstanceStep} />` : null}
-      ${step.value === 'link' ? html`<${LinkStep} />` : null}
+      ${instanceStepBlocked ? html`<${NoNewInstanceStep} />` : null}
+      ${step.value === 'instance' && !instanceStepBlocked ? html`<${InstanceStep} />` : null}
+      ${step.value === 'link' && !instanceStepBlocked ? html`<${LinkStep} />` : null}
       ${step.value === 'done' ? html`<${DoneStep} />` : null}
     </main>
   `

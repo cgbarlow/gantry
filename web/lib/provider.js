@@ -26,6 +26,26 @@ export const PROVIDERS = [
 
 export const DEFAULT_PROVIDER = 'azure-devops'
 
+// ---------- Where a new Instance can be created (#370) ----------
+// A GitLab or Atlassian workspace can be registered, but a new Instance can't be created in either yet:
+// a GitLab workspace's Instances come from a Project that already holds them, and an Atlassian
+// workspace can't hold an Instance at all so far. Creating one on GitLab needs Module Save there first.
+// The wizard used to offer the create form for both anyway and then fail with an Azure DevOps error,
+// and POST /api/instances quietly created a server Instance for a location it didn't read. Both now
+// ask this one function, so the two can't disagree about which Providers are ready.
+const PROVIDERS_WITHOUT_INSTANCE_CREATION = ['gitlab', 'atlassian']
+
+/**
+ * Why a new Instance can't be created in a workspace on `providerId`, naming that Provider, or `null`
+ * when it can. A providerless workspace (a server or Local one, `providerId` unset) always can.
+ */
+export function instanceCreationBlockedReason(providerId) {
+  if (!PROVIDERS_WITHOUT_INSTANCE_CREATION.includes(providerId)) return null
+  const label = PROVIDERS.find((p) => p.id === providerId).label
+  const article = /^[AEIOU]/.test(label) ? 'an' : 'a'
+  return `A new Instance can't be created in ${article} ${label} workspace yet.`
+}
+
 // ---------- Work-item link shape (#136) ----------
 // `lib/workItemLink.js` records an instance's work-item link in the shape its own Provider uses:
 // Azure DevOps as `{ organization, project, workItemType, parentId, stages }`, GitHub (docs/adr/0040)
