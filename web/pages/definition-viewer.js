@@ -434,6 +434,12 @@ export function DefinitionViewerPage() {
   const [dragPayload, setDragPayload] = useState(null)
   const [dropTarget, setDropTarget] = useState(null)
 
+  // #371: how many Map columns lie wholly or partly off each side of the part of the Map on show, for the cues on its edges. A
+  // laptop screen fits design v4's seven columns, but a definition with more Stages (or a narrower window) still runs off the side,
+  // and a scrollbar alone is easy to miss (macOS hides it until you scroll).
+  const mapRef = useRef(null)
+  const [mapOffSide, setMapOffSide] = useState({ left: 0, right: 0 })
+
   // Docked Library panel (WI #381 built the browse-only shell; WI #382 wires up Copy). Sources are
   // "any server-library definition (published or draft)" (WI #382) — libSourceVersion defaults to
   // latest-published (else the max version) but can be pointed at a specific draft explicitly.
@@ -661,6 +667,28 @@ export function DefinitionViewerPage() {
       .then(setLibDetail)
       .catch((err) => setLibError(err.message))
   }, [libSourceId, libSourceVersion])
+
+  // #371: re-counted after every render (the Map's columns change as a draft is edited, and the Map comes and goes with the view
+  // switch), on every scroll of the Map, and when the window is resized. The state only changes when a count does.
+  function measureMapOffSide() {
+    const map = mapRef.current
+    let left = 0
+    let right = 0
+    if (map) {
+      const box = map.getBoundingClientRect()
+      for (const col of map.querySelectorAll('.defn-map-col')) {
+        const r = col.getBoundingClientRect()
+        if (r.left < box.left - 1) left++
+        else if (r.right > box.left + map.clientWidth + 1) right++
+      }
+    }
+    setMapOffSide((prev) => (prev.left === left && prev.right === right ? prev : { left, right }))
+  }
+  useEffect(measureMapOffSide)
+  useEffect(() => {
+    window.addEventListener('resize', measureMapOffSide)
+    return () => window.removeEventListener('resize', measureMapOffSide)
+  }, [])
 
   function guardedNav(action) {
     if (isDirty) {
@@ -2076,7 +2104,7 @@ export function DefinitionViewerPage() {
       `
     }
     return html`
-      <div class="defn-map">
+      <div class="defn-map" ref=${mapRef} onScroll=${measureMapOffSide}>
         ${d.stages.map((s, si) => html`
           <div key=${s.id} class=${'defn-map-col' + (selection.type === 'stage' && selection.id === s.id ? ' selected' : '') + (dropTarget === `stage-drop:${si}` ? ' defn-drop-target' : '')} ...${stageDropZone(si)}>
             <div class="defn-map-col-head" role="button" tabindex="0" onClick=${() => select('stage', s.id)}>
@@ -2847,6 +2875,13 @@ export function DefinitionViewerPage() {
     `
   }
 
+  // #371: a Library dropdown's label doubles as its tooltip, so a label too long for the panel can still be read in full.
+  const versionOptionLabel = (v) => `v${v.version} · ${v.status}`
+  const libVersionLabel = (def) => {
+    const v = def.versions.find((x) => x.version === libSourceVersion)
+    return v ? versionOptionLabel(v) : undefined
+  }
+
   function renderLibraryPanel() {
     const currentDef = definitions?.find((d) => d.id === selectedId) ?? null
     const otherDefs = definitions?.filter((d) => d.id !== selectedId && isEligibleCopySource(d, currentDef)) ?? []
@@ -2860,12 +2895,14 @@ export function DefinitionViewerPage() {
         ${otherDefs.length
           ? html`
               <div class="defn-library-source-row">
-                <select class="wizard-input defn-library-source" value=${libSourceId ?? ''} onChange=${(e) => setLibSourceId(e.currentTarget.value)}>
+                <select class="wizard-input defn-library-source" aria-label="Library source definition" title=${sourceDef ? `${sourceDef.title} (${sourceDef.id})` : undefined}
+                  value=${libSourceId ?? ''} onChange=${(e) => setLibSourceId(e.currentTarget.value)}>
                   ${otherDefs.map((d) => html`<option value=${d.id}>${d.title} (${d.id})</option>`)}
                 </select>
                 ${sourceDef ? html`
-                  <select class="wizard-input defn-library-version" aria-label="Library source version" value=${String(libSourceVersion ?? '')} onChange=${(e) => setLibSourceVersion(Number(e.currentTarget.value))}>
-                    ${sourceDef.versions.map((v) => html`<option value=${String(v.version)}>v${v.version} · ${v.status}</option>`)}
+                  <select class="wizard-input defn-library-version" aria-label="Library source version" title=${libVersionLabel(sourceDef)}
+                    value=${String(libSourceVersion ?? '')} onChange=${(e) => setLibSourceVersion(Number(e.currentTarget.value))}>
+                    ${sourceDef.versions.map((v) => html`<option value=${String(v.version)}>${versionOptionLabel(v)}</option>`)}
                   </select>
                 ` : null}
               </div>
@@ -2939,15 +2976,30 @@ export function DefinitionViewerPage() {
     `
   }
 
+  // #371: the cues on the Map's edges when columns run off a side. Each says how many, and scrolls the Map most of a screenful that way.
+  function renderMapMoreCues() {
+    const scroll = (dir) => mapRef.current?.scrollBy({ left: dir * Math.round(mapRef.current.clientWidth * 0.8) })
+    const columns = (n) => `${n} more column${n === 1 ? '' : 's'}`
+    return html`
+      ${mapOffSide.left ? html`<button class="btn small defn-map-more defn-map-more-left" title="Scroll the Map left" onClick=${() => scroll(-1)}>← ${columns(mapOffSide.left)}</button>` : null}
+      ${mapOffSide.right ? html`<button class="btn small defn-map-more defn-map-more-right" title="Scroll the Map right" onClick=${() => scroll(1)}>${columns(mapOffSide.right)} →</button>` : null}
+    `
+  }
+
   function renderWorkbench() {
     if (defnView.value === 'map') {
+      // #371: while the Map is expanded, a button stands where the panes were, so the way back to the Library is in plain sight rather
+      // than only in the pressed Expand map toggle up in the toolbar.
       return html`
         <div class=${'defn-workbench defn-workbench-map' + (defnMapExpanded.value ? ' expanded' : '')}>
-          <div class="defn-map-pane pane">${renderMap()}</div>
+          <div class=${'defn-map-pane pane' + (mapOffSide.left ? ' more-left' : '') + (mapOffSide.right ? ' more-right' : '')}>${renderMap()}${renderMapMoreCues()}</div>
           <div class="defn-bottom" hidden=${defnMapExpanded.value}>
             <div class="defn-focus-pane pane">${renderFocusPane()}</div>
             ${renderLibraryPanel()}
           </div>
+          ${defnMapExpanded.value
+            ? html`<button class="btn small ghost defn-map-restore" onClick=${() => setDefnMapExpanded(false)}>Show the detail and Library panes</button>`
+            : null}
         </div>
       `
     }
