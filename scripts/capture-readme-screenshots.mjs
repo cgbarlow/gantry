@@ -140,6 +140,10 @@ async function main() {
     await shot(page, 'readme-ai-interview.png')
 
     // 2) The Definitions page on design v4, published, in Map view, with the Library panel showing the other bundled definition.
+    // Some of this picture is cut off by the page itself, not by the clip, and a wider viewport does not help: the page stops at 1320 px wide,
+    // the Library column is a fixed 280 px (so its two dropdowns cut their text short), and the Map pane is 40% of the window high and scrolls
+    // both ways (design v4's seven columns are 1636 × 794 px against 1270 × 358 px on show). Expand map would show the Map's full height, but
+    // it hides the Library panel, which #368 asks this shot to show.
     await page.goto(`${base}/definitions`)
     await page.waitForSelector('.defn-viewer')
     await page.getByRole('button', { name: 'Map', exact: true }).click()
