@@ -1767,6 +1767,8 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-workbench-map.expanded { grid-template-rows: auto; align-content: start; }
 .defn-workbench-map.expanded .defn-map { max-height: none; }
 .defn-workbench-map .defn-bottom[hidden] { display: none; }
+/* #371 review: where a pick in the Map scrolls the page to (see select() in definition-viewer.js), just below the window's top. */
+.defn-workbench-map .defn-focus-pane { scroll-margin-top: 12px; }
 .defn-map-restore { justify-self: start; }
 .defn-outline, .defn-focus-pane, .defn-library, .defn-map-pane { border: var(--hairline) solid var(--line); border-radius: var(--radius); background: var(--bg-raised); }
 .defn-focus-pane { background: var(--bg); padding: 4px 4px 20px; }
@@ -1794,6 +1796,9 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
  * fit a 1440px screen; the Map is never taller than the window, so it can be seen whole; and where columns still run off a side,
  * a fade and a cue (.defn-map-more) on that edge say so. */
 .defn-map-pane { position: relative; }
+/* #371 review: the pane lets its cue bar (.defn-map-more-bar) stick to the window as the page scrolls; the Map scrolls inside itself,
+ * and min-width: 0 keeps the pane from growing to the width of every column now that overflow no longer does. */
+.defn-viewer .defn-map-pane { overflow: visible; min-width: 0; }
 .defn-map { display: flex; gap: 10px; align-items: flex-start; padding: 12px; overflow: auto; max-height: calc(100vh - 24px); }
 .defn-map-col { flex: 1 0 190px; max-width: 300px; border: var(--hairline) solid var(--line); background: var(--bg-raised); border-radius: var(--radius); padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 4px; }
 .defn-map-col-instance-settings, .defn-map-col-interview { flex-basis: 160px; }
@@ -1816,9 +1821,10 @@ input.text-field.has-error { border-color: var(--stamp-error-bg); }
 .defn-map-pane.more-left::before, .defn-map-pane.more-right::after { content: ''; position: absolute; top: 0; bottom: 0; width: 56px; pointer-events: none; z-index: 1; }
 .defn-map-pane.more-left::before { left: 0; background: linear-gradient(to right, var(--bg-raised), transparent); }
 .defn-map-pane.more-right::after { right: 0; background: linear-gradient(to left, var(--bg-raised), transparent); }
-.defn-map-more { position: absolute; top: 10px; z-index: 2; margin: 0; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); }
-.defn-map-more-left { left: 10px; }
-.defn-map-more-right { right: 10px; }
+.defn-map-more-bar { position: sticky; top: 0; z-index: 2; display: flex; padding: 8px 12px 0; background: var(--bg-raised); }
+.defn-map-more-bar + .defn-map { max-height: calc(100vh - 60px); }
+.defn-map-more { margin: 0; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); }
+.defn-map-more-right { margin-left: auto; }
 
 /* Focus pane */
 .defn-focus { padding: 14px 18px 30px; }
@@ -1902,10 +1908,14 @@ label.btn.disabled { opacity: 0.4; cursor: not-allowed; }
 /* Library panel (docked, read-only shell in WI #381; Copy wired up in WI #382) */
 .defn-library { padding: 8px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .defn-library-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.defn-library-source-row { display: flex; flex-direction: column; gap: 6px; }
-/* #371: the definition and version dropdowns sit one above the other at the panel's full width, in the body font, so a long label
- * such as "Recruitment and Onboarding (recruitment-onboarding)" fits in Map view's wider Library (each also has it as a tooltip). */
-.defn-library-source-row .wizard-input { font-family: var(--font-body, inherit); font-size: 12px; padding: 6px 8px; }
+.defn-library-source-row { display: flex; gap: 6px; }
+.defn-library-source { flex: 1; min-width: 0; }
+.defn-library-version { flex: 0 0 auto; max-width: 130px; }
+/* #371: in Map view the definition and version dropdowns sit one above the other at the wider Library's full width, in the body font,
+ * so a long label such as "Recruitment and Onboarding (recruitment-onboarding)" fits. Outline view keeps them side by side; there,
+ * as in Map view, each has its whole label as a tooltip. */
+.defn-workbench-map .defn-library-source-row { flex-direction: column; }
+.defn-workbench-map .defn-library-source-row .wizard-input { flex: none; max-width: none; font-family: var(--font-body, inherit); font-size: 12px; padding: 6px 8px; }
 .defn-library-tree { overflow: auto; }
 .defn-library-group { margin-bottom: 10px; }
 .defn-library-node { padding: 3px 6px; font-size: 12px; border-radius: var(--radius); display: flex; align-items: center; gap: 6px; }

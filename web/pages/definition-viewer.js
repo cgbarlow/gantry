@@ -439,6 +439,10 @@ export function DefinitionViewerPage() {
   // and a scrollbar alone is easy to miss (macOS hides it until you scroll).
   const mapRef = useRef(null)
   const [mapOffSide, setMapOffSide] = useState({ left: 0, right: 0 })
+  // #371: in Map view the Map is about a window tall, so the focus pane below it starts out of sight. select() raises this flag when
+  // something is picked there, and the effect below scrolls the page down to its details once they have rendered.
+  const mapFocusPaneRef = useRef(null)
+  const revealFocusRef = useRef(false)
 
   // Docked Library panel (WI #381 built the browse-only shell; WI #382 wires up Copy). Sources are
   // "any server-library definition (published or draft)" (WI #382) — libSourceVersion defaults to
@@ -689,6 +693,15 @@ export function DefinitionViewerPage() {
     window.addEventListener('resize', measureMapOffSide)
     return () => window.removeEventListener('resize', measureMapOffSide)
   }, [])
+
+  // #371: the page only moves when the details are out of sight (their top is in the bottom quarter of the window or below it), so a
+  // pick made with them already on show, such as a link inside the focus pane, leaves the page where it is.
+  useEffect(() => {
+    if (!revealFocusRef.current) return
+    revealFocusRef.current = false
+    const pane = mapFocusPaneRef.current
+    if (pane && pane.getBoundingClientRect().top > window.innerHeight * 0.75) pane.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
 
   function guardedNav(action) {
     if (isDirty) {
@@ -1501,6 +1514,7 @@ export function DefinitionViewerPage() {
   function select(type, id) {
     setSelection({ type, id })
     setTemplateView(null)
+    revealFocusRef.current = defnView.value === 'map' && !defnMapExpanded.value
   }
   function selectField(moduleId, fieldId) {
     setSelection({ type: 'module', id: moduleId })
@@ -2976,13 +2990,18 @@ export function DefinitionViewerPage() {
     `
   }
 
-  // #371: the cues on the Map's edges when columns run off a side. Each says how many, and scrolls the Map most of a screenful that way.
+  // #371: the cues for Map columns that run off a side. Each says how many, and scrolls the Map most of a screenful that way. They sit
+  // in a bar above the columns, at the side they point to, so they cover no column's header; the bar sticks to the top of the window
+  // while the page scrolls down through the Map.
   function renderMapMoreCues() {
+    if (!mapOffSide.left && !mapOffSide.right) return null
     const scroll = (dir) => mapRef.current?.scrollBy({ left: dir * Math.round(mapRef.current.clientWidth * 0.8) })
     const columns = (n) => `${n} more column${n === 1 ? '' : 's'}`
     return html`
-      ${mapOffSide.left ? html`<button class="btn small defn-map-more defn-map-more-left" title="Scroll the Map left" onClick=${() => scroll(-1)}>← ${columns(mapOffSide.left)}</button>` : null}
-      ${mapOffSide.right ? html`<button class="btn small defn-map-more defn-map-more-right" title="Scroll the Map right" onClick=${() => scroll(1)}>${columns(mapOffSide.right)} →</button>` : null}
+      <div class="defn-map-more-bar">
+        ${mapOffSide.left ? html`<button class="btn small defn-map-more defn-map-more-left" title="Scroll the Map left" onClick=${() => scroll(-1)}>← ${columns(mapOffSide.left)}</button>` : null}
+        ${mapOffSide.right ? html`<button class="btn small defn-map-more defn-map-more-right" title="Scroll the Map right" onClick=${() => scroll(1)}>${columns(mapOffSide.right)} →</button>` : null}
+      </div>
     `
   }
 
@@ -2992,9 +3011,9 @@ export function DefinitionViewerPage() {
       // than only in the pressed Expand map toggle up in the toolbar.
       return html`
         <div class=${'defn-workbench defn-workbench-map' + (defnMapExpanded.value ? ' expanded' : '')}>
-          <div class=${'defn-map-pane pane' + (mapOffSide.left ? ' more-left' : '') + (mapOffSide.right ? ' more-right' : '')}>${renderMap()}${renderMapMoreCues()}</div>
+          <div class=${'defn-map-pane pane' + (mapOffSide.left ? ' more-left' : '') + (mapOffSide.right ? ' more-right' : '')}>${renderMapMoreCues()}${renderMap()}</div>
           <div class="defn-bottom" hidden=${defnMapExpanded.value}>
-            <div class="defn-focus-pane pane">${renderFocusPane()}</div>
+            <div class="defn-focus-pane pane" ref=${mapFocusPaneRef}>${renderFocusPane()}</div>
             ${renderLibraryPanel()}
           </div>
           ${defnMapExpanded.value
