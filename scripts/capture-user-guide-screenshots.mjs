@@ -14,9 +14,10 @@ async function main() {
   let server
   let browser
   try {
-    // Seed temp instances dir with copies of the committed example fixtures.
-    // Mirrors how *.playwright.test.js tests boot a server + copy the fixture.
-    cpSync('instances/examples', join(tmpDir, 'examples'), { recursive: true })
+    // Seed temp instances dir with a copy of the bundled Kiwi Cover Mutual example, kept at the slug
+    // `examples` the captures below open. Mirrors tests/helpers/lifecycle.js's withRunningExamplesServer
+    // (#368: the bundled examples moved from instances/examples to workspaces/examples in WI #358).
+    cpSync('workspaces/examples/kiwi-cover-mutual', join(tmpDir, 'examples'), { recursive: true })
     // Remove rendered out/ so the run is deterministic.
     try { rmSync(join(tmpDir, 'examples', 'out'), { recursive: true, force: true }) } catch {}
 
@@ -37,7 +38,7 @@ async function main() {
 
     mkdirSync(IMAGES_DIR, { recursive: true })
 
-    server = createServer({ instancesDir: tmpDir })
+    server = createServer({ instancesDir: tmpDir, migrateWorkspacesOnStart: true })
     const base = await new Promise((resolve, reject) => {
       server.listen(0, () => {
         const { port } = server.address()
