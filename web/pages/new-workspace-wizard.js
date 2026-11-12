@@ -2523,9 +2523,10 @@ function WorkspaceStep() {
               </div>
               <p class="wizard-field-hint">
                 Point at an Azure DevOps repo that already holds a gantry workspace — gantry checks it
-                and adopts the existing instance data. On GitHub, GitLab or Atlassian instead, use
+                and adopts the existing instance data. On GitHub or GitLab instead, use
                 "New remote workspace" with that repo's own real details — gantry detects and adopts
-                existing instance data there too, no separate URL-paste step needed.
+                existing instance data there too, no separate URL-paste step needed. Atlassian
+                workspaces can't hold an Instance yet, so there is no instance data to adopt there.
               </p>
               <label for="adopt-repo-pat">Personal Access Token</label>
               <input

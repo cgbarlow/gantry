@@ -789,3 +789,58 @@ test('#48: the "+ New Workspace" wizard registers a brand new Atlassian workspac
     }
   })
 })
+
+// #370: the Atlassian twin of the GitLab pick test above. Picking an Atlassian workspace that is
+// already registered lands on the same explanation as registering one, and no path through the
+// wizard sends POST /api/instances for it. The pick screen's own hint (beside the Azure DevOps repo
+// URL field) also no longer promises that Gantry adopts existing instance data on Atlassian, which
+// would contradict the explanation this test then lands on.
+test('#370: picking an existing Atlassian workspace explains that it can\'t hold an Instance yet, instead of offering the create form', async () => {
+  await withAtlassianWizardTestServer(async ({ gantryBase }) => {
+    const registered = await fetch(`${gantryBase}/api/workspaces`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: basicAuthHeader(BITBUCKET_VALID_PAT),
+        'X-Gantry-Secondary-Authorization': basicAuthHeader(JIRA_VALID_PAT),
+      },
+      body: JSON.stringify({
+        provider: 'atlassian',
+        location: { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY },
+        owner: '',
+      }),
+    })
+    assert.equal(registered.status, 201, await registered.text())
+
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      const createRequests = []
+      page.on('request', (req) => {
+        if (req.method() === 'POST' && new URL(req.url()).pathname === '/api/instances') createRequests.push(req.url())
+      })
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+      await page.waitForSelector('#workspace-picker', { timeout: 10_000 })
+
+      const adoptHint = await page.locator('.wizard-field-hint', { hasText: 'Point at an Azure DevOps repo' }).innerText()
+      assert.match(adoptHint, /On GitHub or GitLab instead/)
+      assert.match(adoptHint, /Atlassian workspaces can't hold an Instance yet/)
+      assert.doesNotMatch(adoptHint, /GitHub, GitLab or Atlassian/)
+
+      await page.locator('#workspace-picker .definition-card', { hasText: `${BITBUCKET_OWNER}/${BITBUCKET_REPOSITORY}` }).click()
+      await page.getByRole('button', { name: 'Continue' }).click()
+
+      await assertNoInstanceCreateOffered(page, { provider: 'Atlassian', explanation: /Atlassian workspaces can't hold an Instance yet\./ })
+      // Back still returns to the workspace picker, so a different workspace can be chosen.
+      await page.getByRole('button', { name: '← Back' }).click()
+      await page.waitForSelector('#workspace-picker', { timeout: 10_000 })
+      assert.deepEqual(createRequests, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})
