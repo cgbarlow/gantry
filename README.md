@@ -12,9 +12,11 @@ Gantry itself knows nothing about design, recruitment or anything else. Every us
 
 The web UI and the AI are not the only way in. Modules are plain Markdown files you can edit by hand, the `gantry` CLI checks and renders them, and an outside agent such as Claude Code can do what the web UI does through the Gantry MCP server (see [Working with agents](#working-with-agents)).
 
+The thinking behind Gantry is set out in [*The Organisation as Code*](https://agentics.org.nz/blog/the-organisation-as-code/), an essay on running work the way good software is built. Gantry is one of its worked examples.
+
 Jump to [Try it](#try-it), the [User Guide](docs/user-guide/index.md) or the [Executive Summary](docs/exec-summary.md).
 
-<img width="1438" height="882" alt="image" src="https://github.com/user-attachments/assets/5a5d7010-30ba-47bf-987c-acc902bbd766" />
+![The AI interview on the SOAP Stage of the gantry example: four Source documents in the left rail, the AI's summary and a round of two question cards in the centre, each with a recommended answer and the reason for it, and the live draft of the Stage's Modules on the right](docs/images/readme-ai-interview.png)
 
 ## The problem this solves
 
@@ -86,7 +88,7 @@ The key rule: **artefacts are derived, modules are authored.** If you find yours
 
 Definitions are versioned (numbered `definitions/<id>/<n>/` dirs — see "Definition schema" below). The **Definitions** page at `/definitions` — linked from the Workspaces page header as "Definitions" — is a first-class editor: an Outline/Map view switch over one focus pane (stage/artefact/module, with compact one-at-a-time field rows) and a docked, read-only Library panel. A published version is read-only, with a **View template source** button per artefact; a *draft* version is directly editable — every element can be reordered or moved between a stage, an artefact and a module by drag or an equivalent button, template editing opens as its own focus-pane view, and the toolbar shows a live problems count sharing the server's own validation rules. Also: creating a new draft version, a new definition (Blank or Clone), archiving/restoring, and publishing a draft. Save follows the stage Save convention: one Save for everything changed, with a Save/Discard/Cancel prompt on leaving with unsaved changes.
 
-<img width="1613" height="844" alt="image" src="https://github.com/user-attachments/assets/67141d7a-c613-4ae6-9ff8-1d6b7dd44eba" />
+![The Definitions page on design version 4, published and read-only, in Map view: each Stage is a column of its Modules, and the Library panel below lists the recruitment-onboarding Definition's Stages](docs/images/readme-definitions-page.png)
 
 ## Principles
 
@@ -220,8 +222,9 @@ gantry/
 ├── docs/
 │   ├── user-guide/          # the User Guide, also served in the app at /user-guide
 │   ├── adr/                 # architecture decision records
-│   └── agents/              # how this repo is worked on: issue tracker, release process
-├── scripts/                 # maintenance scripts: the example's evidence, User Guide screenshots, live checks
+│   ├── agents/              # how this repo is worked on: issue tracker, release process
+│   └── images/              # this README's screenshots (scripts/capture-readme-screenshots.mjs)
+├── scripts/                 # maintenance scripts: the example's evidence, README and User Guide screenshots, live checks
 ├── tests/                   # unit, integration and Playwright browser tests
 ├── ContainerFile            # the container image, with its test and render stages
 └── CHANGELOG.md             # release notes for people running Gantry
