@@ -620,8 +620,17 @@ test('#25: the "+ New Workspace" wizard registers a brand new GitLab workspace e
 
       await page.getByRole('button', { name: 'Register workspace' }).click()
 
-      // ---------- Step 2: instance step reached — a real workspace was created, not just checked ----------
-      await page.waitForSelector('#instance-name', { timeout: 10_000 })
+      // ---------- Step 2: a real workspace was created, and the wizard says plainly what comes next ----------
+      // #370: a GitLab workspace can't hold a new Instance yet, so the wizard no longer offers the create
+      // form (which used to fail with an Azure DevOps error). It explains, naming GitLab, and offers the
+      // way back to the Workspaces page instead.
+      await assertNoInstanceCreateOffered(page, {
+        provider: 'GitLab',
+        explanation: /Gantry lists any Instances already in this Project on the Workspaces page\. A new Instance can't be created in a GitLab workspace yet\./,
+      })
+      const workspaces = await (await fetch(`${gantryBase}/api/workspaces`)).json()
+      assert.equal(workspaces.length, 1)
+      assert.equal(workspaces[0].provider, 'gitlab')
 
       assert.deepEqual(pageErrors, [])
     } finally {
@@ -629,6 +638,60 @@ test('#25: the "+ New Workspace" wizard registers a brand new GitLab workspace e
     }
   })
 })
+
+// #370: picking a GitLab workspace that is already registered lands on the same explanation as
+// registering one, and no path through the wizard sends POST /api/instances for it.
+test('#370: picking an existing GitLab workspace explains that a new Instance can\'t be created there, instead of offering the create form', async () => {
+  await withGitLabWizardTestServer(async ({ gantryBase, gitlabBaseUrl }) => {
+    const registered = await fetch(`${gantryBase}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: basicAuthHeader(GITLAB_VALID_PAT) },
+      body: JSON.stringify({ provider: 'gitlab', location: { namespace: GITLAB_NAMESPACE, repository: GITLAB_REPOSITORY, baseUrl: gitlabBaseUrl }, owner: '' }),
+    })
+    assert.equal(registered.status, 201, await registered.text())
+
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      const createRequests = []
+      page.on('request', (req) => {
+        if (req.method() === 'POST' && new URL(req.url()).pathname === '/api/instances') createRequests.push(req.url())
+      })
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+      await page.waitForSelector('#workspace-picker', { timeout: 10_000 })
+      await page.locator('#workspace-picker .definition-card', { hasText: `${GITLAB_NAMESPACE}/${GITLAB_REPOSITORY}` }).click()
+      await page.getByRole('button', { name: 'Continue' }).click()
+
+      await assertNoInstanceCreateOffered(page, { provider: 'GitLab', explanation: /A new Instance can't be created in a GitLab workspace yet\./ })
+      // Back still returns to the workspace picker, so a different workspace can be chosen.
+      await page.getByRole('button', { name: '← Back' }).click()
+      await page.waitForSelector('#workspace-picker', { timeout: 10_000 })
+      assert.deepEqual(createRequests, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+// #370: the Instance step for a workspace whose Provider can't hold a new Instance yet shows the
+// explanation, naming the Provider and the workspace, and a link back to the Workspaces page; no
+// create form (Definition picker, Name field, Create button) is on the page at all.
+async function assertNoInstanceCreateOffered(page, { provider, explanation }) {
+  const notice = page.locator('.wizard-no-instance')
+  await notice.waitFor({ timeout: 10_000 })
+  const text = await notice.innerText()
+  assert.match(text, new RegExp(`${provider} workspace is registered`))
+  assert.match(text, explanation)
+  assert.doesNotMatch(text, /Azure DevOps|organization/i)
+  assert.equal(await page.getByRole('link', { name: 'Go to Workspaces' }).getAttribute('href'), '/')
+  assert.equal(await page.locator('#instance-name').count(), 0)
+  assert.equal(await page.locator('#definition-picker').count(), 0)
+  assert.equal(await page.getByRole('button', { name: /Create instance|Next: link a work item/ }).count(), 0)
+}
 
 // ---- #48: registering a brand new Atlassian workspace through the wizard's Register step ----
 //
@@ -673,21 +736,6 @@ test('#48: the "+ New Workspace" wizard registers a brand new Atlassian workspac
       page.on('console', (msg) => {
         if (msg.type() === 'error') pageErrors.push(msg.text())
       })
-      // The Instance step's own best-effort `GET /api/workspaces/:id/definitions` fetch (WI #383,
-      // lib/server.js's own `rejectUnlessAzureDevOpsWorkspace`) is a known, already-declared 400 for
-      // any provider without its own workspace-definitions route wired in yet — Atlassian's isn't
-      // (per that function's own doc comment: "a fail-safe for any *future* provider ... without
-      // workspace-definitions support of its own"), out of #48's own scope (Register step + repoCheck
-      // + the POST /api/workspaces dispatch table, not this separate definitions-listing route). The
-      // wizard's own effect already handles it gracefully (falls back to `[]`, `catch(() => {})`) — the
-      // browser still logs its own generic, URL-less "Failed to load resource: ... 400" console message
-      // for it regardless, so this counts *expected* such 400s (via the real response, which does carry
-      // a URL) to tell them apart from a genuinely unexpected failure below.
-      let expectedBadRequestResponses = 0
-      page.on('response', (res) => {
-        if (res.status() === 400 && res.url().includes('/definitions')) expectedBadRequestResponses += 1
-      })
-
       await page.goto(`${gantryBase}/new-workspace`)
       await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
 
@@ -721,16 +769,76 @@ test('#48: the "+ New Workspace" wizard registers a brand new Atlassian workspac
       assert.equal(await registerButton.isDisabled(), false)
       await registerButton.click()
 
-      // ---------- Step 2: instance step reached — a real workspace was created, not just checked ----------
-      await page.waitForSelector('#instance-name', { timeout: 10_000 })
+      // ---------- Step 2: a real workspace was created, and the wizard says plainly what comes next ----------
+      // #370: an Atlassian workspace can't hold an Instance yet, so the wizard explains that, naming
+      // Atlassian, instead of offering a create form that failed with an Azure DevOps error.
+      await assertNoInstanceCreateOffered(page, {
+        provider: 'Atlassian',
+        explanation: /Atlassian workspaces can't hold an Instance yet\. You can still use the repository as a Library repo/,
+      })
+      const workspaces = await (await fetch(`${gantryBase}/api/workspaces`)).json()
+      assert.equal(workspaces.length, 1)
+      assert.equal(workspaces[0].provider, 'atlassian')
 
-      // Exactly the expected number of generic "Failed to load resource ... 400" console messages
-      // (the `/definitions` 400 tracked above, see this test's own `response` listener) — anything
-      // beyond that is a genuinely unexpected error and must still fail this test.
-      const genericBadRequestMessages = pageErrors.filter((msg) => /responded with a status of 400/.test(msg))
-      const unexpectedErrors = pageErrors.filter((msg) => !/responded with a status of 400/.test(msg))
-      assert.deepEqual(unexpectedErrors, [])
-      assert.equal(genericBadRequestMessages.length, expectedBadRequestResponses)
+      // #370: this used to allow for the Instance step's best-effort `GET /api/workspaces/:id/definitions`,
+      // a known 400 for an Atlassian workspace. That step's form, and so its fetch, is no longer shown
+      // here, so any console error at all is now unexpected.
+      assert.deepEqual(pageErrors, [])
+    } finally {
+      await browser.close()
+    }
+  })
+})
+
+// #370: the Atlassian twin of the GitLab pick test above. Picking an Atlassian workspace that is
+// already registered lands on the same explanation as registering one, and no path through the
+// wizard sends POST /api/instances for it. The pick screen's own hint (beside the Azure DevOps repo
+// URL field) also no longer promises that Gantry adopts existing instance data on Atlassian, which
+// would contradict the explanation this test then lands on.
+test('#370: picking an existing Atlassian workspace explains that it can\'t hold an Instance yet, instead of offering the create form', async () => {
+  await withAtlassianWizardTestServer(async ({ gantryBase }) => {
+    const registered = await fetch(`${gantryBase}/api/workspaces`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: basicAuthHeader(BITBUCKET_VALID_PAT),
+        'X-Gantry-Secondary-Authorization': basicAuthHeader(JIRA_VALID_PAT),
+      },
+      body: JSON.stringify({
+        provider: 'atlassian',
+        location: { owner: BITBUCKET_OWNER, repository: BITBUCKET_REPOSITORY, jiraSite: JIRA_SITE, jiraProjectKey: JIRA_PROJECT_KEY },
+        owner: '',
+      }),
+    })
+    assert.equal(registered.status, 201, await registered.text())
+
+    const browser = await launchBrowser()
+    try {
+      const page = await browser.newPage()
+      await page.addInitScript(ADVANCED_MODE_ON_INIT)
+      page.setDefaultTimeout(DEFAULT_TIMEOUT)
+      const createRequests = []
+      page.on('request', (req) => {
+        if (req.method() === 'POST' && new URL(req.url()).pathname === '/api/instances') createRequests.push(req.url())
+      })
+
+      await page.goto(`${gantryBase}/new-workspace`)
+      await page.waitForSelector('h2:has-text("New Workspace")', { timeout: 10_000 })
+      await page.waitForSelector('#workspace-picker', { timeout: 10_000 })
+
+      const adoptHint = await page.locator('.wizard-field-hint', { hasText: 'Point at an Azure DevOps repo' }).innerText()
+      assert.match(adoptHint, /On GitHub or GitLab instead/)
+      assert.match(adoptHint, /Atlassian workspaces can't hold an Instance yet/)
+      assert.doesNotMatch(adoptHint, /GitHub, GitLab or Atlassian/)
+
+      await page.locator('#workspace-picker .definition-card', { hasText: `${BITBUCKET_OWNER}/${BITBUCKET_REPOSITORY}` }).click()
+      await page.getByRole('button', { name: 'Continue' }).click()
+
+      await assertNoInstanceCreateOffered(page, { provider: 'Atlassian', explanation: /Atlassian workspaces can't hold an Instance yet\./ })
+      // Back still returns to the workspace picker, so a different workspace can be chosen.
+      await page.getByRole('button', { name: '← Back' }).click()
+      await page.waitForSelector('#workspace-picker', { timeout: 10_000 })
+      assert.deepEqual(createRequests, [])
     } finally {
       await browser.close()
     }
