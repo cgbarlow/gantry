@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gantry: write it once, and every sign-off gets its document</title>
+<meta name="description" content="Gantry turns the evidence you gather into the documents a gated process asks for. Free and open source.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231B1E22' stroke-width='2.5'%3E%3Cpath d='M3 20h18M6 20V8l6-4 6 4v12M6 8h12'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+/* Layout: an engineering drawing sheet. Huge condensed wordmark, then a working gantry: pick a process, pick a step, and a trolley runs along the beam to it. Posts are sign-offs, spans are steps. The title block carries licence and contact. Dark = cyanotype, light = ink on drafting paper. */
+:root {
+  --sheet: #F3F6FA; --ink: #12356B; --ink-soft: #4A6591; --rule: #A9BBD6; --grid: #DDE5F0; --tint: #E2EAF6; --mark: #C2410C; --mark-fg: #FFFFFF;
+  --font-display: 'Big Shoulders Display', 'Arial Narrow', 'Helvetica Neue', sans-serif;
+  --font-body: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --sheet: #0E2A57; --ink: #EAF1FB; --ink-soft: #A8BEDF; --rule: #4A6CA3; --grid: #16376D; --tint: #173F7E; --mark: #FFB454; --mark-fg: #0E2A57; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --sheet: #0E2A57; --ink: #EAF1FB; --ink-soft: #A8BEDF; --rule: #4A6CA3; --grid: #16376D; --tint: #173F7E; --mark: #FFB454; --mark-fg: #0E2A57; color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; color: var(--ink); font: 400 1.0625rem/1.6 var(--font-body); background-color: var(--sheet);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 2rem 2rem; }
+a { color: inherit; text-underline-offset: 0.2em; }
+button { font: inherit; color: inherit; }
+a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--mark); outline-offset: 3px; }
+.page { max-width: 76rem; margin: 0 auto; padding-block: 1.25rem; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.sheet { border: 2px solid var(--ink); background: var(--sheet); }
+.mono { font: 500 0.75rem/1.5 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-soft); }
+
+.strip { display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem; justify-content: space-between; padding: 0.6rem 1.25rem; border-bottom: 1px solid var(--rule); }
+.strip nav { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+.strip a { color: var(--ink); }
+
+.hero { padding: 2.5rem 1.25rem 0; }
+h1 { font: 900 clamp(4.5rem, 19vw, 15rem)/0.8 var(--font-display); letter-spacing: -0.01em; text-transform: uppercase; margin: 0; }
+.claim { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 2rem; align-items: end; margin-top: 1.75rem; }
+.claim p { margin: 0; font-size: clamp(1.125rem, 2vw, 1.375rem); line-height: 1.45; max-width: 38rem; }
+.claim p + p { margin-top: 0.75rem; color: var(--ink-soft); font-size: 1.0625rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: flex-end; }
+.btn { display: inline-block; padding: 0.75rem 1.2rem; border: 2px solid var(--ink); color: var(--ink); background: var(--sheet); font: 700 1.25rem/1 var(--font-display); letter-spacing: 0.04em; text-transform: uppercase; text-decoration: none; cursor: pointer; }
+.btn.primary { background: var(--mark); border-color: var(--mark); color: var(--mark-fg); }
+.btn:hover { box-shadow: 4px 4px 0 var(--ink); }
+
+/* The working gantry */
+.works { padding: 3rem 1.25rem 1.5rem; }
+.picker { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; margin-bottom: 1rem; }
+.tab { padding: 0.5rem 0.9rem; border: 1px solid var(--ink); background: var(--sheet); font: 700 1.125rem/1 var(--font-display); letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; }
+.tab[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+.own { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; margin-bottom: 1rem; }
+.own label { flex: 1 1 100%; }
+.own input { flex: 1 1 16rem; min-width: 0; padding: 0.6rem 0.75rem; border: 1px solid var(--ink); background: var(--sheet); color: var(--ink); font: 1rem var(--font-body); }
+
+.gantry { position: relative; margin-top: 2.25rem; }
+.beam { position: relative; height: 2.75rem; border-top: 3px solid var(--ink); border-bottom: 3px solid var(--ink); margin: 0 -0.6rem; }
+.beam svg { display: block; width: 100%; height: 100%; }
+.beam polyline { fill: none; stroke: var(--ink); stroke-width: 1.25; vector-effect: non-scaling-stroke; }
+.trolley { position: absolute; top: -1.15rem; left: 0; width: 3rem; height: 0.9rem; margin-left: -1.5rem; background: var(--mark); transition: left 0.55s cubic-bezier(0.4, 0, 0.2, 1); z-index: 2; }
+.trolley::after { content: ""; position: absolute; left: 50%; top: 100%; width: 2px; margin-left: -1px; height: 3.2rem; background: var(--mark); }
+.spans { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); border-right: 3px solid var(--ink); }
+.span { position: relative; display: grid; grid-template-rows: auto 1fr auto; gap: 0.9rem; justify-items: center; padding: 1rem 0.6rem 0.9rem; min-height: 15rem; border: 0; border-left: 3px solid var(--ink); background: transparent; text-align: center; cursor: pointer; min-width: 0; }
+.span:hover { background: var(--tint); }
+.span[aria-pressed="true"] { background: var(--tint); }
+.span .name { font: 700 clamp(1.05rem, 1.9vw, 1.5rem)/1.05 var(--font-display); letter-spacing: 0.03em; text-transform: uppercase; overflow-wrap: anywhere; }
+.span .docs { display: grid; gap: 0.35rem; align-content: start; width: 100%; max-width: 11rem; padding-top: 1.4rem; }
+.span .doc { border: 1px solid var(--ink); background: var(--sheet); padding: 0.4rem 0.4rem; font-size: 0.8125rem; line-height: 1.25; overflow-wrap: anywhere; }
+.span[aria-pressed="true"] .doc { border-color: var(--mark); box-shadow: 3px 3px 0 var(--mark); }
+.span .gate { font: 500 0.6875rem/1.35 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); padding-right: 0.5rem; justify-self: end; text-align: right; }
+.span::after { content: ""; position: absolute; right: -0.5rem; bottom: 1.1rem; width: 0.8rem; height: 0.8rem; background: var(--mark); transform: rotate(45deg); z-index: 1; }
+.ground { height: 0.7rem; margin: 0 -1.2rem; border-top: 2px solid var(--ink); background: repeating-linear-gradient(135deg, var(--ink) 0 1px, transparent 1px 9px); opacity: 0.8; }
+.caption { margin: 0.9rem 0 0; }
+
+.detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: 1.5rem; align-items: start; margin-top: 1.5rem; padding: 1.25rem; border: 1px solid var(--ink); background: var(--tint); }
+.detail h2 { font: 700 1.875rem/1 var(--font-display); letter-spacing: 0.02em; text-transform: uppercase; margin: 0.3rem 0 0; overflow-wrap: anywhere; }
+.detail .val { margin: 0.3rem 0 0; font-weight: 600; }
+.detail ul { margin: 0.3rem 0 0; padding: 0; list-style: none; font-weight: 600; }
+.detail .extra { grid-column: 1 / -1; margin: 0; color: var(--ink-soft); font-size: 0.9688rem; max-width: 46rem; }
+.steppers { display: flex; gap: 0.5rem; }
+.step { width: 2.75rem; height: 2.75rem; border: 1px solid var(--ink); background: var(--sheet); font: 700 1.25rem/1 var(--font-display); cursor: pointer; }
+.step:disabled { opacity: 0.35; cursor: default; }
+
+.notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--rule); }
+.notes div { padding: 1.5rem 1.25rem; border-right: 1px solid var(--rule); }
+.notes div:last-child { border-right: 0; }
+.notes h2 { font: 700 1.75rem/1 var(--font-display); letter-spacing: 0.02em; text-transform: uppercase; margin: 0.4rem 0 0.5rem; }
+.notes p { margin: 0; font-size: 0.9688rem; color: var(--ink-soft); }
+
+.titleblock { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr)); border-top: 2px solid var(--ink); }
+.titleblock > div { padding: 0.9rem 1.25rem; border-right: 1px solid var(--rule); min-width: 0; }
+.titleblock > div:last-child { border-right: 0; }
+.titleblock .val { font: 600 1rem/1.4 var(--font-body); color: var(--ink); margin-top: 0.2rem; overflow-wrap: anywhere; }
+.titleblock .help p { margin: 0.35rem 0 0.6rem; font-size: 0.9375rem; color: var(--ink-soft); }
+.mailrow { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+.mailrow a { font: 500 clamp(1.05rem, 2vw, 1.35rem) var(--font-mono); overflow-wrap: anywhere; }
+.copy { font: 500 0.75rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; background: none; border: 1px solid var(--ink); padding: 0.3rem 0.6rem; cursor: pointer; }
+
+@media (max-width: 54rem) {
+  .claim { grid-template-columns: minmax(0, 1fr); } .actions { justify-content: flex-start; }
+  .detail { grid-template-columns: minmax(0, 1fr) auto; } .detail > div:nth-child(2), .detail > div:nth-child(3) { grid-column: 1 / -1; } .detail .steppers { grid-row: 1; grid-column: 2; }
+  .notes { grid-template-columns: minmax(0, 1fr); } .notes div { border-right: 0; border-bottom: 1px solid var(--rule); } .notes div:last-child { border-bottom: 0; }
+  .titleblock { grid-template-columns: repeat(2, minmax(0, 1fr)); } .titleblock .help { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .titleblock > div:nth-child(3) { border-right: 0; } .titleblock > div:last-child { grid-column: 1 / -1; border-top: 1px solid var(--rule); }
+}
+/* Phone: the gantry stands on end. Steps stack down one post. */
+@media (max-width: 44rem) {
+  .beam, .trolley, .ground { display: none; }
+  .gantry { margin-top: 0.5rem; }
+  .spans { grid-auto-flow: row; border-right: 0; border-top: 3px solid var(--ink); }
+  .span { grid-template-rows: auto; grid-template-columns: minmax(0, 1fr); justify-items: start; text-align: left; min-height: 0; gap: 0.5rem; padding: 0.9rem 0.5rem 1.1rem 1rem; border-bottom: 1px solid var(--rule); }
+  .span .name { font-size: 1.375rem; }
+  .span .docs { padding-top: 0; max-width: none; grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); }
+  .span .gate { justify-self: start; text-align: left; }
+  .span::after { right: auto; left: -0.5rem; bottom: -0.45rem; }
+}
+@media (prefers-reduced-motion: reduce) { .trolley { transition: none; } }
+</style>
+</head>
+<body>
+<div class="page"><div class="sheet">
+  <header class="strip mono">
+    <span>Free and open source</span>
+    <nav aria-label="Links"><a href="https://gantry.chrisbarlow.nz">Live demo</a><a href="https://github.com/cgbarlow/gantry">GitHub</a><a href="https://github.com/cgbarlow/gantry/blob/main/docs/user-guide/index.md">User guide</a></nav>
+  </header>
+
+  <main>
+  <section class="hero">
+    <h1>Gantry</h1>
+    <div class="claim">
+      <div>
+        <p>Every organisation runs on documents. Most processes ask for the same information again at every sign-off, in a slightly different form.</p>
+        <p>With Gantry you write it once. At each sign-off it prepares the document that sign-off asks for, from the same information.</p>
+      </div>
+      <div class="actions">
+        <a class="btn primary" href="https://gantry.chrisbarlow.nz">Try it in your browser</a>
+        <a class="btn" href="https://github.com/cgbarlow/gantry">Get the code</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="works" aria-label="See how a process looks in Gantry">
+    <div class="picker">
+      <span class="mono">Pick a process</span>
+      <button class="tab" type="button" id="tab-hiring" data-p="hiring">Hiring someone</button>
+      <button class="tab" type="button" id="tab-design" data-p="design">Designing a solution</button>
+      <button class="tab" type="button" id="tab-own" data-p="own">Your own</button>
+    </div>
+    <div class="own" id="own-row" hidden>
+      <label class="mono" for="own-steps">Type the steps of a process you run, with commas between them</label>
+      <input id="own-steps" type="text" value="Application, Assessment, Decision, Payment" maxlength="160" autocomplete="off">
+    </div>
+
+    <div class="gantry">
+      <div class="beam"><svg id="truss" preserveAspectRatio="none" aria-hidden="true"><polyline id="zig" points=""></polyline></svg><div class="trolley" id="trolley"></div></div>
+      <div class="spans" id="spans"></div>
+      <div class="ground"></div>
+    </div>
+    <p class="mono caption">Each span is a step. Each post is a sign-off. Choose a step to see what Gantry prepares for it.</p>
+
+    <div class="detail" id="detail" aria-live="polite">
+      <div><span class="mono" id="d-count"></span><h2 id="d-name"></h2></div>
+      <div><span class="mono">The sign-off</span><p class="val" id="d-gate"></p></div>
+      <div><span class="mono">Gantry prepares</span><ul id="d-docs"></ul></div>
+      <div class="steppers"><button class="step" type="button" id="prev" aria-label="Previous step">←</button><button class="step" type="button" id="next" aria-label="Next step">→</button></div>
+      <p class="extra" id="d-extra"></p>
+    </div>
+  </section>
+
+  <section class="notes" aria-label="How it works">
+    <div><span class="mono">Note 1</span><h2>Start with what you have</h2><p>Give Gantry the documents you already have: the brief, the emails, the meeting notes, last time's version. An AI reads them, drafts each step, and shows which document every fact came from.</p></div>
+    <div><span class="mono">Note 2</span><h2>You stay in charge</h2><p>Where your documents leave a gap or disagree with each other, it asks you. Nothing is saved until you say so, and the sign-off stays with a person.</p></div>
+    <div><span class="mono">Note 3</span><h2>Word comes out</h2><p>Each sign-off gets its document as a Word file. Reviewers comment in Word the way they always have, and Gantry works through their comments with you.</p></div>
+  </section>
+  </main>
+
+  <footer class="titleblock">
+    <div class="help"><span class="mono">Service, implementation or development</span>
+      <p>Gantry is free. If you'd like a hand setting it up, running it or building on it, email me.</p>
+      <div class="mailrow"><a href="mailto:me@chrisbarlow.nz" id="addr">me@chrisbarlow.nz</a><button class="copy" id="copy" type="button">Copy</button></div></div>
+    <div><span class="mono">Licence</span><div class="val">MIT, free to use</div></div>
+    <div><span class="mono">Drawn by</span><div class="val">Chris Barlow, 2026</div></div>
+    <div><span class="mono">Background reading</span><div class="val"><a href="https://agentics.org.nz/blog/the-organisation-as-code/">The Organisation as Code</a></div></div>
+  </footer>
+</div></div>
+
+<script>
+(function () {
+  var SHIPPED = 'This process comes with Gantry. Every document is prepared from the same information, so nothing is typed twice.';
+  var P = {
+    hiring: { extra: SHIPPED, stages: [
+      { name: 'Requisition', gate: 'Approved to recruit', docs: ['Requisition Brief'] },
+      { name: 'Selection', gate: 'Candidate selected', docs: ['Selection Report'] },
+      { name: 'Appointment', gate: 'Approved to appoint', docs: ['Appointment Case'] },
+      { name: 'Offer, contract and payroll', gate: 'Onboarding approved', docs: ['Onboarding Case', 'Offer Pack', 'Appointment Confirmation'] },
+      { name: 'Provisioning', gate: 'Ready to start', docs: ['Starter Readiness', 'Manager Handover', 'Hire Record'] } ] },
+    design: { extra: SHIPPED, stages: [
+      { name: 'Solution on a page', gate: 'Business case approved', docs: ['Solution on a Page'] },
+      { name: 'High-level design', gate: 'Design approved', docs: ['High Level Design'] },
+      { name: 'Detailed design', gate: 'Ready to build', docs: ['Solution Architecture Document', 'Support Architecture Document'] },
+      { name: 'Handover', gate: 'Handed over to operations', docs: ['As-built'] } ] },
+    own: { extra: 'This one is yours to set up. In Gantry a process is something you edit on screen: its steps, its sign-offs and the documents each one asks for.', stages: [] }
+  };
+  var $ = function (id) { return document.getElementById(id); };
+  var spans = $('spans'), trolley = $('trolley'), input = $('own-steps');
+  var current = 'hiring', sel = 0;
+
+  function ownStages() {
+    var names = input.value.split(',').map(function (s) { return s.trim().slice(0, 30); }).filter(Boolean).slice(0, 6);
+    if (!names.length) names = ['Your first step'];
+    return names.map(function (n) { return { name: n, gate: n + ' signed off', docs: ['The document that sign-off asks for'] }; });
+  }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+  function draw() {
+    if (current === 'own') P.own.stages = ownStages();
+    var st = P[current].stages, n = st.length;
+    if (sel >= n) sel = n - 1;
+    spans.textContent = '';
+    st.forEach(function (s, i) {
+      var b = el('button', 'span'); b.type = 'button'; b.setAttribute('aria-pressed', i === sel ? 'true' : 'false');
+      b.appendChild(el('span', 'name', s.name));
+      var d = el('span', 'docs'); s.docs.forEach(function (x) { d.appendChild(el('span', 'doc', x)); }); b.appendChild(d);
+      b.appendChild(el('span', 'gate', s.gate));
+      b.addEventListener('click', function () { sel = i; update(); });
+      spans.appendChild(b);
+    });
+    var pts = [], k = n * 4;
+    for (var j = 0; j <= k; j++) pts.push(j + ',' + (j % 2 ? 0 : 10));
+    $('truss').setAttribute('viewBox', '0 0 ' + k + ' 10'); $('zig').setAttribute('points', pts.join(' '));
+    ['hiring', 'design', 'own'].forEach(function (p) { $('tab-' + p).setAttribute('aria-pressed', p === current ? 'true' : 'false'); });
+    $('own-row').hidden = current !== 'own';
+    update();
+  }
+  function update() {
+    var st = P[current].stages, s = st[sel], kids = spans.children;
+    for (var i = 0; i < kids.length; i++) kids[i].setAttribute('aria-pressed', i === sel ? 'true' : 'false');
+    var b = kids[sel];
+    trolley.style.left = (b.offsetLeft + b.offsetWidth / 2 + 9.6) + 'px';
+    $('d-count').textContent = 'Step ' + (sel + 1) + ' of ' + st.length;
+    $('d-name').textContent = s.name; $('d-gate').textContent = s.gate;
+    var ul = $('d-docs'); ul.textContent = ''; s.docs.forEach(function (x) { ul.appendChild(el('li', '', x)); });
+    $('d-extra').textContent = P[current].extra;
+    $('prev').disabled = sel === 0; $('next').disabled = sel === st.length - 1;
+  }
+  ['hiring', 'design', 'own'].forEach(function (p) { $('tab-' + p).addEventListener('click', function () { current = p; sel = 0; draw(); if (p === 'own') input.focus(); }); });
+  input.addEventListener('input', draw);
+  $('prev').addEventListener('click', function () { if (sel > 0) { sel--; update(); } });
+  $('next').addEventListener('click', function () { if (sel < P[current].stages.length - 1) { sel++; update(); } });
+  addEventListener('resize', update);
+  draw();
+
+  $('copy').addEventListener('click', function () {
+    var b = this, a = $('addr');
+    var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1800); };
+    var select = function () { var r = document.createRange(); r.selectNodeContents(a); var s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+    try { navigator.clipboard.writeText(a.textContent).then(done, select); } catch (e) { select(); }
+  });
+})();
+</script>
+</body>
+</html>
